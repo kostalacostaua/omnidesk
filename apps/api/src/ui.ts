@@ -717,7 +717,7 @@ function renderList(){
     var who = c.assignee_name || c.assignee_email;
     return '<div class="conv' + (current === c.id ? ' on' : '') + (unread ? ' unread' : '') +
       '" data-id="' + c.id + '">' +
-      '<div class="av" data-av="' + (c.has_avatar ? c.contact_id : '') + '" style="background:' +
+      '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
       '<div class="body">' +
         '<div class="r1"><span class="nm">' + esc(c.display_name || 'Без имени') + '</span>' +
@@ -788,7 +788,7 @@ function renderHead(){
   el('thead').innerHTML =
     '<button class="ghost mini back" id="aBack" title="К списку чатов">← Чаты</button>' +
     '<div class="who">' +
-      '<div class="av" data-av="' + (c.has_avatar ? c.contact_id : '') + '" style="background:' +
+      '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
       '<div style="min-width:0"><div class="nm">' + esc(c.display_name || 'Без имени') + '</div>' +
       '<div class="sub">' + esc(CH[c.channel_type] || c.channel_type) +
@@ -1295,8 +1295,8 @@ function renderCard(){
 
   el('card').innerHTML =
     '<div style="display:flex;gap:11px;align-items:center;margin-bottom:14px">' +
-      '<div class="av" data-av="' + (ct.avatar_url ? ct.id : '') + '" ' +
-        'style="width:44px;height:44px;font-size:15px;background:' +
+      '<div class="av" data-av="' + ct.id + '" ' +
+        'style="width:44px;height:44px;font-size:15px;background-color:' +
         avatarColor(ct.display_name || ct.id) + '">' + esc(initials(ct.display_name)) + '</div>' +
       '<div style="min-width:0"><div style="font-weight:700;font-size:14.5px">' +
         esc(ct.display_name || 'Без имени') + '</div>' +
@@ -1989,6 +1989,18 @@ function paintIcons(root){
  */
 var avatarCache = {};
 
+/**
+ * Аватары.
+ *
+ * Запрашиваем у сервера для каждого собеседника, не глядя на признак
+ * из списка. Признак берётся из поля контакта, а поле могло не
+ * заполниться, хотя картинка скачана и лежит в хранилище: файл кладёт
+ * одна служба, ссылку проставляет другая. Сервер в этом случае сам
+ * находит файл и чинит связь, а мы получаем лицо вместо инициалов.
+ *
+ * Плата — по одному запросу на контакт без фото, который вернёт 404.
+ * Ответ запоминается на время жизни страницы, поэтому повторов нет.
+ */
 function paintAvatars(){
   Array.prototype.forEach.call(document.querySelectorAll('[data-av]'), function(node){
     var id = node.dataset.av;
@@ -1996,7 +2008,11 @@ function paintAvatars(){
     node.dataset.done = '1';
 
     if (avatarCache[id] === false) return;
-    if (avatarCache[id]) { node.style.backgroundImage = 'url(' + avatarCache[id] + ')'; return }
+    if (avatarCache[id]) {
+      node.style.backgroundImage = 'url(' + avatarCache[id] + ')';
+      node.textContent = '';
+      return;
+    }
 
     fetch('/avatars/' + id, { headers:{ Authorization:'Bearer ' + TOKEN } })
       .then(function(r){ return r.ok ? r.blob() : Promise.reject(r.status) })

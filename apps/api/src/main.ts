@@ -10,6 +10,7 @@ import {
   canSendFreeform,
   createPool,
   createStorage,
+  avatarKey,
   mediaKey,
   defaultJobOptions,
   jobKey,
@@ -545,18 +546,65 @@ app.get<{ Params: { contactId: string } }>('/avatars/:contactId', async (req, re
   const auth = requireAuth(req as never);
   if (!auth) return reply.code(401).send({ error: 'unauthorized' });
 
-  const key = await withTenant(pool, auth.tenantId, async (db) => {
+  const contactId = req.params.contactId;
+
+  const stored = await withTenant(pool, auth.tenantId, async (db) => {
     const { rows } = await db.query<{ avatar_url: string | null }>(
       `SELECT avatar_url FROM contacts WHERE id = $1`,
-      [req.params.contactId],
+      [contactId],
     );
     return rows[0]?.avatar_url ?? null;
   });
 
-  if (!key) return reply.code(404).send({ error: 'no_avatar' });
+  let key = stored;
+  let file = key ? await storage.get(key) : null;
 
-  const file = await storage.get(key);
-  if (!file) return reply.code(404).send({ error: 'not_found' });
+  /**
+   * Починка потерянной связи.
+   *
+   * Картинка и запись о ней пишутся в разных местах: файл кладёт тот,
+   * кто его скачал (воркер или служба сессий), а ссылку в контакте
+   * проставляет обработчик сообщения. Между этими двумя шагами сервис
+   * может перезапуститься, задача — не дойти, сообщение — оказаться
+   * дубликатом. Тогда файл в хранилище есть, а контакт про него не знает,
+   * и в списке вместо лица остаются инициалы. Снаружи это выглядит как
+   * «аватарки не работают», хотя всё скачано и лежит.
+   *
+   * Поэтому при отсутствии ссылки пробуем известные способы, которыми
+   * ключ мог быть составлен, и, если файл нашёлся, связь восстанавливаем.
+   * Дальше он отдаётся из ссылки, без перебора.
+   */
+  if (!file) {
+    const candidates = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ channel_id: string; external_id: string }>(
+        `SELECT ch.id AS channel_id, ci.external_id
+           FROM contact_identities ci
+           JOIN channels ch ON ch.type = ci.channel_type
+          WHERE ci.contact_id = $1 AND ci.channel_type = 'telegram_user'`,
+        [contactId],
+      );
+      return rows;
+    });
+
+    const keys = [
+      avatarKey(auth.tenantId, contactId),
+      ...candidates.map((c) => `${auth.tenantId}/avatars/tgu-${c.channel_id}-${c.external_id}`),
+    ].filter((k) => k !== stored);
+
+    for (const candidate of keys) {
+      const found = await storage.get(candidate);
+      if (!found) continue;
+      key = candidate;
+      file = found;
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(`UPDATE contacts SET avatar_url = $2 WHERE id = $1`, [contactId, candidate]);
+      });
+      app.log.info({ contactId, key: candidate }, 'Аватар нашёлся в хранилище, связь восстановлена');
+      break;
+    }
+  }
+
+  if (!file) return reply.code(404).send({ error: 'no_avatar' });
 
   return reply
     .type(file.contentType || 'image/jpeg')
