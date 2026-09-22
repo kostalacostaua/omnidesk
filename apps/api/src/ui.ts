@@ -242,6 +242,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .fchip .x{cursor:pointer;color:var(--t3);font-weight:700}
   .fchip .x:hover{color:var(--crit)}
 
+  /* ─── Сценарии ─────────────────────────────────────────────────
+     Цепочка рисуется вертикально и соединяется линией: порядок шагов
+     здесь — главное, что должно читаться с первого взгляда. */
+  .sc.off{opacity:.62}
+  .sc-h{display:flex;gap:12px;align-items:flex-start;justify-content:space-between}
+  .sc-h .s{font-size:12px;color:var(--t3);margin-top:3px}
+  .sc-steps{display:flex;gap:5px;flex-wrap:wrap;margin:12px 0}
+  .sc-f{display:flex;gap:12px;align-items:center;justify-content:space-between;
+    padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;flex-wrap:wrap}
+
+  .chain{display:flex;flex-direction:column}
+  .st-link{width:2px;height:14px;background:var(--line2);margin-left:22px;flex:none}
+  .step{border:1px solid var(--line);border-radius:var(--r2);background:var(--bg);overflow:hidden}
+  .st-h{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--panel2);
+    border-bottom:1px solid var(--line);font-size:12.5px}
+  .st-h .n{width:20px;height:20px;border-radius:50%;background:var(--accent-soft);
+    color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;
+    justify-content:center;flex:none}
+  .st-h .ic{font-size:14px;line-height:1}
+  .st-h button{padding:2px 7px;font-size:12px;line-height:1.2}
+  .st-b{padding:10px}
+  .st-b .row2{display:flex;gap:8px}
+  .addrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:12px;
+    border-top:1px dashed var(--line2)}
+
   .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;
     max-height:180px;overflow-y:auto;background:var(--panel)}
   .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12.5px}
@@ -1497,101 +1522,335 @@ function renderCard(){
   });
 }
 
-/* ══════════════ Чат-боты ══════════════ */
+/* ══════════════ Сценарии ══════════════ */
 
-var TRIGGERS = {
-  welcome:'Приветствие',
-  contains:'Содержит слово',
-  equals:'Точное совпадение',
-  fallback:'Ничего не подошло'
+/**
+ * Сценарий — цепочка шагов, а не одно правило «слово → ответ».
+ *
+ * Редактор устроен как сама цепочка: шаги идут сверху вниз, каждый можно
+ * поднять, опустить и убрать. Формы у шагов разные, но карточка одна —
+ * так видно, что это один и тот же механизм, а не семь разных настроек.
+ *
+ * Состояние правки живёт в одной переменной SC. Пока она не пуста,
+ * на странице редактор; как только сохранили или отменили — список.
+ */
+
+var TRIG = {
+  welcome:{ t:'Приветствие', h:'Первое сообщение в диалоге, один раз' },
+  keyword:{ t:'Содержит слово', h:'В сообщении встретилось одно из слов' },
+  exact:{ t:'Точное совпадение', h:'Сообщение целиком равно слову' },
+  off_hours:{ t:'Вне графика', h:'Сообщение пришло в нерабочее время' },
+  fallback:{ t:'Ничего не подошло', h:'Проверяется последним' }
 };
 
+var KINDS = {
+  message:{ t:'Сообщение', i:'💬' },
+  ask:{ t:'Вопрос и ожидание ответа', i:'❓' },
+  delay:{ t:'Пауза', i:'⏱' },
+  condition:{ t:'Развилка', i:'🔀' },
+  tag:{ t:'Метка на диалог', i:'🏷' },
+  handoff:{ t:'Передать оператору', i:'🙋' },
+  close:{ t:'Закрыть диалог', i:'✅' }
+};
+
+var SC = null;
+var SCENARIOS = [];
+
+/** Короткая сводка цепочки для карточки в списке. */
+function stepsSummary(steps){
+  return (steps || []).map(function(st){
+    var k = KINDS[st.kind] || { i:'•', t:st.kind };
+    var extra = st.kind === 'delay'
+      ? ' ' + (st.seconds >= 3600 ? Math.round(st.seconds / 3600) + ' ч'
+          : st.seconds >= 60 ? Math.round(st.seconds / 60) + ' мин' : st.seconds + ' с')
+      : '';
+    return '<span class="chip">' + k.i + ' ' + esc(k.t.split(' ')[0]) + extra + '</span>';
+  }).join(' ');
+}
+
 function renderBots(){
-  api('/bot-rules').then(function(d){
-    var rules = d.rules || [];
-    var chOpts = '<option value="">Все каналы</option>' + CHANNELS.map(function(c){
-      return '<option value="' + c.id + '">' + esc(c.display_name) + '</option>';
-    }).join('');
-    var trOpts = Object.keys(TRIGGERS).map(function(k){
-      return '<option value="' + k + '"' + (k === 'contains' ? ' selected' : '') + '>' +
-        TRIGGERS[k] + '</option>';
-    }).join('');
-
+  if (SC) return renderScEditor();
+  api('/scenarios').then(function(d){
+    SCENARIOS = d.scenarios || [];
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Сценарии', 'Правило — это «условие на входящее сообщение → ответ». Оно отвечает клиенту ' +
-        'мгновенно, в любое время суток. Бот молчит, если у диалога есть ответственный или оператор ' +
-        'писал менее 30 минут назад, и его можно выключить кнопкой в самом диалоге.') +
+      pageHead('Сценарии',
+        'Цепочка шагов, которая ведёт разговор за оператора: поздороваться, спросить, ' +
+        'подождать, поставить метку и позвать человека, когда дело дошло до дела. ' +
+        'Сценарий молчит, если у диалога есть ответственный или оператор писал менее ' +
+        '30 минут назад, и выключается кнопкой в самом диалоге.',
+        '<button id="scNew">Новый сценарий</button>') +
 
-      '<div class="card"><h3>Новое правило</h3>' +
-      '<div class="row2"><input id="bName" placeholder="Название, например «Прайс»"></div>' +
-      '<div class="row2" style="margin-top:9px">' +
-        '<select id="bTr">' + trOpts + '</select>' +
-        '<select id="bCh">' + chOpts + '</select>' +
-      '</div>' +
-      '<div class="row2" style="margin-top:9px">' +
-        '<input id="bKw" placeholder="Ключевые слова через запятую: цена, прайс, стоимость">' +
-      '</div>' +
-      '<div class="row2" style="margin-top:9px">' +
-        '<textarea id="bTx" rows="3" placeholder="Что ответить клиенту"></textarea>' +
-      '</div>' +
-      '<div class="row2" style="margin-top:9px"><button id="bAdd">Создать</button></div>' +
-      '<div class="hint">«Приветствие» срабатывает на первое сообщение в диалоге и только один раз. ' +
-      '«Ничего не подошло» — последний рубеж, оно проверяется после всех остальных.</div>' +
-      '<div class="err" id="bErr"></div></div>' +
+      (SCENARIOS.length
+        ? '<div class="grid">' + SCENARIOS.map(function(sc){
+            var tr = TRIG[sc.trigger_type] || { t:sc.trigger_type };
+            var kw = (sc.keywords || []).join(', ');
+            return '<div class="card sc' + (sc.is_active ? '' : ' off') + '">' +
+              '<div class="sc-h">' +
+                '<div style="min-width:0">' +
+                  '<div class="h4">' + esc(sc.name) + '</div>' +
+                  '<div class="s">' + esc(tr.t) + (kw ? ': ' + esc(kw) : '') +
+                    ' · ' + esc(sc.channel_name || 'все каналы') + '</div>' +
+                '</div>' +
+                '<span class="pill ' + (sc.is_active ? 'good' : '') + '">' +
+                  (sc.is_active ? 'работает' : 'выключен') + '</span>' +
+              '</div>' +
+              '<div class="sc-steps">' + stepsSummary(sc.steps) + '</div>' +
+              '<div class="sc-f">' +
+                '<span class="dim">запусков ' + esc(sc.runs_started) +
+                  ' · дошли до конца ' + esc(sc.runs_finished) +
+                  (Number(sc.live) ? ' · сейчас идёт ' + esc(sc.live) : '') + '</span>' +
+                '<span class="row" style="gap:6px">' +
+                  '<button class="ghost mini" data-scedit="' + sc.id + '">Изменить</button>' +
+                  '<button class="ghost mini" data-sctog="' + sc.id + '" data-on="' +
+                    (sc.is_active ? 'false' : 'true') + '">' +
+                    (sc.is_active ? 'Выключить' : 'Включить') + '</button>' +
+                  '<button class="ghost mini" data-scdel="' + sc.id + '">Удалить</button>' +
+                '</span>' +
+              '</div></div>';
+          }).join('') + '</div>'
+        : '<div class="card"><div class="empty"><div class="ttl">Сценариев пока нет</div>' +
+          'Начните с приветствия: клиент пишет впервые — бот здоровается и обещает, ' +
+          'что оператор ответит. Это одна минута и сразу видимый эффект.</div></div>') +
+      '</div>';
 
-      '<div class="card"><h3>Правила (' + rules.length + ')</h3>' +
-      (rules.length ? rules.map(function(r){
-        var kw = (r.keywords || []).join(', ');
-        return '<div class="item"><div style="min-width:0">' +
-          '<div class="t">' + esc(r.name) +
-            (r.is_active ? '<span class="pill">включено</span>'
-                         : '<span class="pill warn">выключено</span>') + '</div>' +
-          '<div class="s">' + esc(TRIGGERS[r.trigger_type] || r.trigger_type) +
-            (kw ? ': ' + esc(kw) : '') +
-            ' · ' + esc(r.channel_name || 'все каналы') +
-            ' · приоритет ' + esc(r.priority) +
-            ' · сработало ' + esc(r.hits) + '</div>' +
-          '<div class="s" style="color:var(--t2);margin-top:5px">' + esc(r.reply_text) + '</div>' +
-        '</div><div class="row2" style="flex:none">' +
-          '<button class="ghost mini" data-rule="' + r.id + '" data-active="' +
-            (r.is_active ? 'false' : 'true') + '">' +
-            (r.is_active ? 'Выключить' : 'Включить') + '</button>' +
-          '<button class="ghost mini" data-rdel="' + r.id + '">Удалить</button>' +
-        '</div></div>';
-      }).join('') : '<div class="hint">Пока ни одного правила.</div>') + '</div></div>';
-
-    el('bAdd').onclick = function(){
-      el('bErr').textContent = '';
-      busy(el('bAdd'), true);
-      api('/bot-rules', { method:'POST', body:{
-        name: el('bName').value,
-        triggerType: el('bTr').value,
-        channelId: el('bCh').value || null,
-        keywords: el('bKw').value.split(',').map(function(s){ return s.trim() }).filter(Boolean),
-        replyText: el('bTx').value,
-        priority: el('bTr').value === 'fallback' ? 900 : 100
-      }}).then(renderBots)
-        .catch(function(e){
-          var p = e.payload || {};
-          el('bErr').textContent =
-            p.error === 'keywords_required' ? 'Для этого условия нужны ключевые слова'
-            : p.error === 'name_required' ? 'Укажите название'
-            : p.error === 'reply_required' ? 'Напишите текст ответа'
-            : 'Не удалось создать правило';
-          busy(el('bAdd'), false);
-        });
+    el('scNew').onclick = function(){
+      SC = { name:'', channel_id:null, trigger_type:'welcome', keywords:[],
+             schedule:{ from:'09:00', to:'19:00', days:[1,2,3,4,5], tzOffset:3 },
+             steps:[{ kind:'message', text:'' }], is_active:true, priority:100 };
+      renderScEditor();
     };
 
-    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-rule]'), function(b){
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-scedit]'), function(b){
       b.onclick = function(){
-        api('/bot-rules/' + b.dataset.rule, { method:'PATCH',
-          body:{ isActive: b.dataset.active === 'true' } }).then(renderBots).catch(showErr);
+        var found = SCENARIOS.filter(function(x){ return x.id === b.dataset.scedit })[0];
+        if (!found) return;
+        SC = JSON.parse(JSON.stringify(found));
+        SC.schedule = SC.schedule && SC.schedule.from ? SC.schedule
+          : { from:'09:00', to:'19:00', days:[1,2,3,4,5], tzOffset:3 };
+        renderScEditor();
       };
     });
-    armDelete(pageBox().querySelectorAll('[data-rdel]'), function(b){
-      return api('/bot-rules/' + b.dataset.rdel, { method:'DELETE' }).then(renderBots);
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-sctog]'), function(b){
+      b.onclick = function(){
+        api('/scenarios/' + b.dataset.sctog, { method:'PATCH',
+          body:{ isActive: b.dataset.on === 'true' } }).then(renderBots).catch(showErr);
+      };
+    });
+
+    armDelete(pageBox().querySelectorAll('[data-scdel]'), function(b){
+      return api('/scenarios/' + b.dataset.scdel, { method:'DELETE' }).then(renderBots);
     });
   }).catch(showErr);
+}
+
+/** Поле шага: одна строка разметки на все виды, отличается содержимым. */
+function stepFields(st, i){
+  if (st.kind === 'message') {
+    return '<textarea data-f="text" data-i="' + i + '" rows="2" ' +
+      'placeholder="Что отправить клиенту">' + esc(st.text || '') + '</textarea>';
+  }
+  if (st.kind === 'ask') {
+    return '<textarea data-f="text" data-i="' + i + '" rows="2" ' +
+      'placeholder="О чём спросить">' + esc(st.text || '') + '</textarea>' +
+      '<div class="row2" style="margin-top:8px">' +
+      '<input data-f="save" data-i="' + i + '" placeholder="Запомнить ответ как (необязательно)" value="' +
+        esc(st.save || '') + '">' +
+      '<input data-f="timeoutMinutes" data-i="' + i + '" type="number" min="0" ' +
+        'placeholder="Ждать, минут" value="' + esc(st.timeoutMinutes || '') + '">' +
+      '</div>';
+  }
+  if (st.kind === 'delay') {
+    return '<div class="row2"><input data-f="minutes" data-i="' + i + '" type="number" min="1" ' +
+      'placeholder="Пауза в минутах" value="' + esc(Math.max(1, Math.round((st.seconds || 60) / 60))) +
+      '"><div class="hint" style="margin:0;align-self:center">Дольше суток — уже рассылка, а не разговор</div></div>';
+  }
+  if (st.kind === 'condition') {
+    return '<div class="row2">' +
+      '<input data-f="contains" data-i="' + i + '" placeholder="Слова через запятую: да, хочу, беру" value="' +
+        esc((st.contains || []).join(', ')) + '">' +
+      '<input data-f="goto" data-i="' + i + '" type="number" min="1" ' +
+        'placeholder="Если да — на шаг" value="' + esc(st.goto !== undefined ? st.goto + 1 : '') + '">' +
+      '<input data-f="elseGoto" data-i="' + i + '" type="number" min="1" ' +
+        'placeholder="Если нет — на шаг" value="' +
+        esc(st.elseGoto !== undefined ? st.elseGoto + 1 : '') + '">' +
+      '</div><div class="hint">Смотрит на последний ответ клиента. Пусто в «если нет» — просто идём дальше.</div>';
+  }
+  if (st.kind === 'tag') {
+    return '<input data-f="tag" data-i="' + i + '" placeholder="Название метки, например «опт»" value="' +
+      esc(st.tag || '') + '">';
+  }
+  if (st.kind === 'handoff') {
+    return '<input data-f="note" data-i="' + i + '" placeholder="Заметка оператору (необязательно)" value="' +
+      esc(st.note || '') + '">' +
+      '<div class="hint">Бот замолкает в этом диалоге, дальше отвечает человек.</div>';
+  }
+  return '<div class="hint">Диалог уходит в «Закрытые». Вернётся сам, когда клиент напишет снова.</div>';
+}
+
+function renderScEditor(){
+  var chOpts = '<option value="">Все каналы</option>' + CHANNELS.map(function(c){
+    return '<option value="' + c.id + '"' + (SC.channel_id === c.id ? ' selected' : '') + '>' +
+      esc(c.display_name) + '</option>';
+  }).join('');
+  var trOpts = Object.keys(TRIG).map(function(k){
+    return '<option value="' + k + '"' + (SC.trigger_type === k ? ' selected' : '') + '>' +
+      TRIG[k].t + '</option>';
+  }).join('');
+  var needKw = SC.trigger_type === 'keyword' || SC.trigger_type === 'exact';
+  var needSchedule = SC.trigger_type === 'off_hours';
+  var sch = SC.schedule || {};
+
+  var steps = SC.steps.map(function(st, i){
+    var k = KINDS[st.kind] || { t:st.kind, i:'•' };
+    return '<div class="step"><div class="st-h">' +
+      '<span class="n">' + (i + 1) + '</span>' +
+      '<span class="ic">' + k.i + '</span>' +
+      '<b>' + esc(k.t) + '</b>' +
+      '<span class="grow"></span>' +
+      '<button class="quiet mini" data-up="' + i + '" title="Выше"' + (i ? '' : ' disabled') + '>↑</button>' +
+      '<button class="quiet mini" data-down="' + i + '" title="Ниже"' +
+        (i === SC.steps.length - 1 ? ' disabled' : '') + '>↓</button>' +
+      '<button class="quiet mini" data-drop="' + i + '" title="Убрать">×</button>' +
+      '</div><div class="st-b">' + stepFields(st, i) + '</div></div>';
+  }).join('<div class="st-link"></div>');
+
+  pageBox().innerHTML = '<div class="pg">' +
+    pageHead(SC.id ? 'Сценарий' : 'Новый сценарий',
+      'Шаги выполняются сверху вниз. Пауза и вопрос останавливают цепочку до срока ' +
+      'или до ответа клиента — всё это переживает перезапуск сервиса.',
+      '<button class="ghost" id="scBack">К списку</button>') +
+
+    '<div class="card">' +
+      '<div class="row2"><input id="scName" placeholder="Название, например «Приветствие»" value="' +
+        esc(SC.name) + '"></div>' +
+      '<div class="row2" style="margin-top:9px">' +
+        '<select id="scTr">' + trOpts + '</select>' +
+        '<select id="scCh">' + chOpts + '</select>' +
+      '</div>' +
+      '<div class="hint">' + esc((TRIG[SC.trigger_type] || {}).h || '') + '</div>' +
+      (needKw
+        ? '<div class="row2" style="margin-top:9px"><input id="scKw" ' +
+          'placeholder="Слова через запятую: цена, прайс, стоимость" value="' +
+          esc((SC.keywords || []).join(', ')) + '"></div>'
+        : '') +
+      (needSchedule
+        ? '<div class="row2" style="margin-top:9px">' +
+          '<input id="scFrom" placeholder="с 09:00" value="' + esc(sch.from || '09:00') + '">' +
+          '<input id="scTo" placeholder="до 19:00" value="' + esc(sch.to || '19:00') + '">' +
+          '<input id="scTz" type="number" placeholder="часовой пояс" value="' +
+            esc(sch.tzOffset === undefined ? 3 : sch.tzOffset) + '">' +
+          '</div><div class="hint">Часовой пояс сдвигом от UTC: для Киева — 3. ' +
+          'Рабочие дни — с понедельника по пятницу.</div>'
+        : '') +
+    '</div>' +
+
+    '<div class="card"><h3>Шаги</h3><div class="chain">' + steps + '</div>' +
+      '<div class="addrow">' + Object.keys(KINDS).map(function(k){
+        return '<button class="ghost mini" data-add="' + k + '">' + KINDS[k].i + ' ' +
+          esc(KINDS[k].t) + '</button>';
+      }).join('') + '</div>' +
+    '</div>' +
+
+    '<div class="card"><div class="row" style="gap:8px">' +
+      '<button id="scSave">Сохранить</button>' +
+      '<button class="ghost" id="scCancel">Отмена</button>' +
+      '<span class="grow"></span>' +
+      '<label class="row" style="gap:6px;font-size:12.5px;color:var(--t2)">' +
+      '<input type="checkbox" id="scOn" style="width:auto"' + (SC.is_active ? ' checked' : '') +
+      '> включён</label>' +
+      '</div><div class="err" id="scErr"></div></div>' +
+    '</div>';
+
+  // Собираем значения полей в SC при каждом изменении: иначе правка
+  // текста шага терялась бы при добавлении следующего.
+  function collect(){
+    SC.name = el('scName').value;
+    SC.trigger_type = el('scTr').value;
+    SC.channel_id = el('scCh').value || null;
+    if (el('scKw')) SC.keywords = el('scKw').value.split(',').map(function(x){ return x.trim() })
+      .filter(Boolean);
+    if (el('scFrom')) SC.schedule = { from: el('scFrom').value, to: el('scTo').value,
+      days:[1,2,3,4,5], tzOffset: Number(el('scTz').value) || 0 };
+    SC.is_active = el('scOn').checked;
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-f]'), function(f){
+      var st = SC.steps[Number(f.dataset.i)];
+      if (!st) return;
+      var v = f.value;
+      if (f.dataset.f === 'minutes') st.seconds = Math.max(1, Number(v) || 1) * 60;
+      else if (f.dataset.f === 'contains') st.contains = v.split(',').map(function(x){ return x.trim() })
+        .filter(Boolean);
+      else if (f.dataset.f === 'goto' || f.dataset.f === 'elseGoto') {
+        if (String(v).trim() === '') delete st[f.dataset.f];
+        else st[f.dataset.f] = Math.max(0, (Number(v) || 1) - 1);
+      }
+      else if (f.dataset.f === 'timeoutMinutes') st.timeoutMinutes = Number(v) || 0;
+      else st[f.dataset.f] = v;
+    });
+  }
+
+  el('scBack').onclick = function(){ SC = null; renderBots() };
+  el('scCancel').onclick = function(){ SC = null; renderBots() };
+  el('scTr').onchange = function(){ collect(); renderScEditor() };
+
+  Array.prototype.forEach.call(pageBox().querySelectorAll('[data-add]'), function(b){
+    b.onclick = function(){
+      collect();
+      var k = b.dataset.add;
+      var blank = { message:{ kind:'message', text:'' },
+        ask:{ kind:'ask', text:'' },
+        delay:{ kind:'delay', seconds:300 },
+        condition:{ kind:'condition', contains:[], goto:0 },
+        tag:{ kind:'tag', tag:'' },
+        handoff:{ kind:'handoff' },
+        close:{ kind:'close' } };
+      SC.steps.push(blank[k]);
+      renderScEditor();
+    };
+  });
+
+  Array.prototype.forEach.call(pageBox().querySelectorAll('[data-up]'), function(b){
+    b.onclick = function(){
+      collect();
+      var i = Number(b.dataset.up);
+      var t = SC.steps[i - 1]; SC.steps[i - 1] = SC.steps[i]; SC.steps[i] = t;
+      renderScEditor();
+    };
+  });
+  Array.prototype.forEach.call(pageBox().querySelectorAll('[data-down]'), function(b){
+    b.onclick = function(){
+      collect();
+      var i = Number(b.dataset.down);
+      var t = SC.steps[i + 1]; SC.steps[i + 1] = SC.steps[i]; SC.steps[i] = t;
+      renderScEditor();
+    };
+  });
+  Array.prototype.forEach.call(pageBox().querySelectorAll('[data-drop]'), function(b){
+    b.onclick = function(){
+      collect();
+      SC.steps.splice(Number(b.dataset.drop), 1);
+      if (!SC.steps.length) SC.steps.push({ kind:'message', text:'' });
+      renderScEditor();
+    };
+  });
+
+  el('scSave').onclick = function(){
+    collect();
+    el('scErr').textContent = '';
+    busy(el('scSave'), true);
+    var body = { name: SC.name, triggerType: SC.trigger_type, channelId: SC.channel_id,
+      keywords: SC.keywords || [], schedule: SC.schedule || {}, steps: SC.steps,
+      isActive: SC.is_active, priority: SC.trigger_type === 'fallback' ? 900 : 100 };
+    var req = SC.id
+      ? api('/scenarios/' + SC.id, { method:'PUT', body: body })
+      : api('/scenarios', { method:'POST', body: body });
+    req.then(function(){ SC = null; renderBots(); toast('Сценарий сохранён') })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('scErr').textContent = p.detail || 'Не удалось сохранить';
+        busy(el('scSave'), false);
+      });
+  };
 }
 
 /**

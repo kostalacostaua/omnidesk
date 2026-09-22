@@ -5,6 +5,7 @@ import {
   QUEUE_MEDIA,
   QUEUE_OUTBOUND,
   QUEUE_MTPROTO_OUT,
+  QUEUE_SCENARIO,
   computeResponseWindow,
   createPool,
   defaultJobOptions,
@@ -29,6 +30,11 @@ import {
   type MessagingEntry,
   withSystem,
   withTenant,
+  answerMatches,
+  pickScenario,
+  type ScenarioJob,
+  type ScenarioLike,
+  type ScenarioStep,
   type InboundJob,
   type MediaJob,
   type OutboundJob,
@@ -267,6 +273,9 @@ const mtprotoOutQueue = new Queue<OutboundJob>(QUEUE_MTPROTO_OUT, { connection, 
 
 /** Очередь исходящих: сюда бот кладёт свои автоответы. */
 const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, { connection, defaultJobOptions });
+
+/** Продолжение сценариев после паузы и по истечении ожидания ответа. */
+const scenarioQueue = new Queue<ScenarioJob>(QUEUE_SCENARIO, { connection, defaultJobOptions });
 
 /**
  * Постановка вложений в очередь скачивания.
@@ -959,10 +968,288 @@ function ruleMatches(rule: BotRule, text: string, isFirstMessage: boolean): bool
  *
  * Возвращает число отправленных ответов — для лога.
  */
+/**
+ * Автоматика: выбор сценария и его выполнение.
+ *
+ * Сценарий — цепочка шагов, а не одно правило. Поэтому здесь две части:
+ * решение «запускать ли и что», и сам ход по шагам, который умеет
+ * останавливаться на паузе или ожидании ответа и продолжаться через
+ * очередь — даже если сервис между этими моментами перезапустили.
+ */
+
+interface ConvState {
+  bot_enabled: boolean;
+  bot_replied_at: Date | null;
+  assignee_id: string | null;
+  human_recently: boolean;
+  incoming_count: string;
+}
+
+interface RunRow {
+  id: string;
+  scenario_id: string;
+  step_index: number;
+  waiting_for: string | null;
+  answers: Record<string, string>;
+  channel_id: string;
+}
+
+/** Строка сценария из базы в вид, понятный чистой части в core. */
+function toScenario(row: {
+  id: string;
+  channel_id: string | null;
+  trigger_type: string;
+  keywords: string[];
+  schedule: unknown;
+  steps: unknown;
+  priority: number;
+}): ScenarioLike {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    triggerType: row.trigger_type as ScenarioLike['triggerType'],
+    keywords: row.keywords ?? [],
+    schedule: (row.schedule ?? {}) as ScenarioLike['schedule'],
+    steps: (row.steps ?? []) as ScenarioStep[],
+    priority: row.priority,
+  };
+}
+
+/**
+ * Отправка сообщения от имени бота.
+ *
+ * Пишется в ту же ленту с пометкой «бот»: оператор должен видеть, что
+ * клиенту уже ответили, и что именно. Иначе он здоровается второй раз.
+ */
+async function botSay(
+  tenantId: string,
+  conversationId: string,
+  channelId: string,
+  text: string,
+  attachments?: Array<Record<string, unknown>>,
+): Promise<void> {
+  const messageId = await withTenant(pool, tenantId, async (db) => {
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, channel_id, direction, sender_type,
+          content, status, sent_at)
+       VALUES ($1, $2, $3, 'out', 'bot', $4, 'pending', now())
+       RETURNING id`,
+      [
+        tenantId,
+        conversationId,
+        channelId,
+        JSON.stringify(
+          Object.assign(text ? { text } : {}, attachments?.length ? { attachments } : {}),
+        ),
+      ],
+    );
+    await db.query(
+      `UPDATE conversations SET bot_replied_at = now(), last_message_at = now() WHERE id = $1`,
+      [conversationId],
+    );
+    return rows[0]!.id;
+  });
+
+  await outboundQueue.add(
+    'send',
+    { tenantId, channelId, conversationId, messageId, idempotencyKey: messageId },
+    { jobId: messageId },
+  );
+}
+
+/**
+ * Ход по шагам.
+ *
+ * Возвращает число отправленных сообщений — оно уходит в журнал, чтобы
+ * «бот молчит» и «бот отработал, но шагов не было» не выглядели одинаково.
+ *
+ * Ограничение в сорок шагов за один заход — защита от кольца: развилка,
+ * которая прыгает сама на себя, иначе крутилась бы вечно и выжирала
+ * соединение с базой.
+ */
+async function advanceRun(tenantId: string, runId: string): Promise<number> {
+  let sent = 0;
+
+  for (let guard = 0; guard < 40; guard++) {
+    const run = await withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<
+        RunRow & { steps: ScenarioStep[]; conversation_id: string; status: string }
+      >(
+        `SELECT r.id, r.scenario_id, r.step_index, r.waiting_for, r.answers, r.status,
+                r.conversation_id, s.steps, c.channel_id
+           FROM scenario_runs r
+           JOIN scenarios s ON s.id = r.scenario_id
+           JOIN conversations c ON c.id = r.conversation_id
+          WHERE r.id = $1`,
+        [runId],
+      );
+      return rows[0] ?? null;
+    });
+
+    if (!run || run.status === 'done' || run.status === 'stopped') return sent;
+
+    const steps = (run.steps ?? []) as ScenarioStep[];
+    const step = steps[run.step_index];
+
+    // Шаги кончились — сценарий отработал.
+    if (!step) {
+      await withTenant(pool, tenantId, async (db) => {
+        await db.query(
+          `UPDATE scenario_runs SET status = 'done', waiting_for = NULL, updated_at = now()
+            WHERE id = $1`,
+          [runId],
+        );
+        await db.query(
+          `UPDATE scenarios SET runs_finished = runs_finished + 1 WHERE id = $1`,
+          [run.scenario_id],
+        );
+      });
+      return sent;
+    }
+
+    const goNext = async (index: number): Promise<void> => {
+      await withTenant(pool, tenantId, async (db) => {
+        await db.query(
+          `UPDATE scenario_runs
+              SET step_index = $2, status = 'running', waiting_for = NULL,
+                  wait_until = NULL, updated_at = now()
+            WHERE id = $1`,
+          [runId, index],
+        );
+      });
+    };
+
+    switch (step.kind) {
+      case 'message':
+        await botSay(tenantId, run.conversation_id, run.channel_id, step.text, step.attachments);
+        sent++;
+        await goNext(run.step_index + 1);
+        break;
+
+      case 'delay': {
+        await withTenant(pool, tenantId, async (db) => {
+          await db.query(
+            `UPDATE scenario_runs
+                SET status = 'waiting', waiting_for = 'time',
+                    wait_until = now() + ($2 || ' seconds')::interval,
+                    step_index = $3, updated_at = now()
+              WHERE id = $1`,
+            [runId, String(step.seconds), run.step_index + 1],
+          );
+        });
+        await scenarioQueue.add(
+          'continue',
+          { tenantId, runId, reason: 'delay' },
+          { delay: step.seconds * 1000, jobId: jobKey('scn', runId, String(run.step_index)) },
+        );
+        return sent;
+      }
+
+      case 'ask': {
+        await botSay(tenantId, run.conversation_id, run.channel_id, step.text);
+        sent++;
+        await withTenant(pool, tenantId, async (db) => {
+          await db.query(
+            `UPDATE scenario_runs
+                SET status = 'waiting', waiting_for = 'reply', step_index = $2,
+                    wait_until = CASE WHEN $3::int > 0
+                                      THEN now() + ($3 || ' minutes')::interval END,
+                    updated_at = now()
+              WHERE id = $1`,
+            [runId, run.step_index + 1, String(step.timeoutMinutes ?? 0)],
+          );
+        });
+        if (step.timeoutMinutes) {
+          await scenarioQueue.add(
+            'continue',
+            { tenantId, runId, reason: 'timeout' },
+            {
+              delay: step.timeoutMinutes * 60_000,
+              jobId: jobKey('scn-to', runId, String(run.step_index)),
+            },
+          );
+        }
+        return sent;
+      }
+
+      case 'condition': {
+        const last = run.answers?.['__last'] ?? '';
+        const hit = answerMatches(step.contains, last);
+        const next = hit ? step.goto : (step.elseGoto ?? run.step_index + 1);
+        // Прыжок назад разрешён — им делают повтор вопроса, — но только
+        // в пределах сценария; всё остальное считаем концом.
+        await goNext(next >= 0 && next < steps.length ? next : steps.length);
+        break;
+      }
+
+      case 'tag':
+        await withTenant(pool, tenantId, async (db) => {
+          await db.query(
+            `UPDATE conversations
+                SET tags = ARRAY(SELECT DISTINCT unnest(tags || $2::text))
+              WHERE id = $1`,
+            [run.conversation_id, step.tag],
+          );
+        });
+        await goNext(run.step_index + 1);
+        break;
+
+      case 'handoff':
+        await withTenant(pool, tenantId, async (db) => {
+          // Бот замолкает в этом диалоге: дальше разговор ведёт человек.
+          await db.query(
+            `UPDATE conversations SET bot_enabled = false, status = 'open' WHERE id = $1`,
+            [run.conversation_id],
+          );
+          await db.query(
+            `UPDATE scenario_runs SET status = 'done', waiting_for = NULL, updated_at = now()
+              WHERE id = $1`,
+            [runId],
+          );
+        });
+        log('info', 'Сценарий передал диалог оператору', {
+          conversationId: run.conversation_id,
+          note: step.note,
+        });
+        return sent;
+
+      case 'close':
+        await withTenant(pool, tenantId, async (db) => {
+          await db.query(`UPDATE conversations SET status = 'resolved' WHERE id = $1`, [
+            run.conversation_id,
+          ]);
+          await db.query(
+            `UPDATE scenario_runs SET status = 'done', waiting_for = NULL, updated_at = now()
+              WHERE id = $1`,
+            [runId],
+          );
+        });
+        return sent;
+
+      default:
+        await goNext(run.step_index + 1);
+    }
+  }
+
+  log('warn', 'Сценарий остановлен: слишком много шагов подряд', { runId });
+  await withTenant(pool, tenantId, async (db) => {
+    await db.query(`UPDATE scenario_runs SET status = 'stopped' WHERE id = $1`, [runId]);
+  });
+  return sent;
+}
+
+/**
+ * Реакция на входящее сообщение.
+ *
+ * Сначала смотрим, не ждёт ли ответа уже запущенный сценарий: клиент
+ * пишет в ответ на вопрос бота, и начинать из-за этого второй сценарий
+ * было бы разговором двух ботов через голову человека.
+ */
 async function runBot(msg: UnifiedMessage, conversationId: string): Promise<number> {
   const text = typeof msg.content.text === 'string' ? msg.content.text : '';
 
-  const plan = await withTenant(pool, msg.tenantId, async (db) => {
+  const decision = await withTenant(pool, msg.tenantId, async (db) => {
     const { rows: convRows } = await db.query<ConvState>(
       `SELECT c.bot_enabled, c.bot_replied_at, c.assignee_id,
               (c.human_replied_at IS NOT NULL
@@ -988,80 +1275,113 @@ async function runBot(msg: UnifiedMessage, conversationId: string): Promise<numb
       return { silent: 'оператор отвечал менее 30 минут назад' as const };
     }
 
-    const { rows: rules } = await db.query<BotRule>(
-      `SELECT id, trigger_type, keywords, reply_text, stop_after
-         FROM bot_rules
-        WHERE is_active
-          AND (channel_id IS NULL OR channel_id = $1)
-        ORDER BY priority ASC, created_at ASC`,
-      [msg.channelId],
-    );
-    if (!rules.length) return { silent: 'нет включённых правил' as const };
-
-    const isFirstMessage = Number(conv.incoming_count) <= 1;
-    const chosen: BotRule[] = [];
-
-    for (const rule of rules) {
-      // Приветствие один раз за диалог — второй раз оно раздражает.
-      if (rule.trigger_type === 'welcome' && conv.bot_replied_at) continue;
-      if (!ruleMatches(rule, text, isFirstMessage)) continue;
-      chosen.push(rule);
-      if (rule.stop_after) break;
-    }
-
-    if (!chosen.length) return { silent: 'ни одно правило не подошло' as const };
-
-    // Сообщения бота пишутся в ту же ленту с sender_type = 'bot':
-    // оператор должен видеть, что клиенту уже ответили, и что именно.
-    const queued: { messageId: string }[] = [];
-    for (const rule of chosen) {
-      const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO messages
-           (tenant_id, conversation_id, channel_id, direction, sender_type,
-            content, status, sent_at)
-         VALUES ($1, $2, $3, 'out', 'bot', $4, 'pending', now())
-         RETURNING id`,
-        [msg.tenantId, conversationId, msg.channelId, JSON.stringify({ text: rule.reply_text })],
-      );
-      queued.push({ messageId: rows[0]!.id });
-
-      await db.query(`UPDATE bot_rules SET hits = hits + 1 WHERE id = $1`, [rule.id]);
-    }
-
-    await db.query(
-      `UPDATE conversations SET bot_replied_at = now(), last_message_at = now()
-        WHERE id = $1`,
+    // Ждёт ли уже запущенный сценарий ответа на свой вопрос.
+    const { rows: live } = await db.query<{ id: string; answers: Record<string, string> }>(
+      `SELECT id, answers FROM scenario_runs
+        WHERE conversation_id = $1 AND status = 'waiting' AND waiting_for = 'reply'
+        LIMIT 1`,
       [conversationId],
     );
+    if (live[0]) {
+      const answers = Object.assign({}, live[0].answers ?? {}, { __last: text.slice(0, 500) });
+      await db.query(
+        `UPDATE scenario_runs
+            SET answers = $2, status = 'running', waiting_for = NULL,
+                wait_until = NULL, updated_at = now()
+          WHERE id = $1`,
+        [live[0].id, JSON.stringify(answers)],
+      );
+      return { resume: live[0].id };
+    }
 
-    return { queued };
+    const { rows: list } = await db.query<Parameters<typeof toScenario>[0]>(
+      `SELECT id, channel_id, trigger_type, keywords, schedule, steps, priority
+         FROM scenarios
+        WHERE is_active AND (channel_id IS NULL OR channel_id = $1)`,
+      [msg.channelId],
+    );
+    if (!list.length) return { silent: 'нет включённых сценариев' as const };
+
+    const picked = pickScenario(list.map(toScenario), {
+      text,
+      channelId: msg.channelId,
+      isFirstMessage: Number(conv.incoming_count) <= 1,
+      alreadyGreeted: Boolean(conv.bot_replied_at),
+      now: new Date(),
+    });
+    if (!picked) return { silent: 'ни один сценарий не подошёл' as const };
+
+    // Запуск создаём здесь же: частичное условие в индексе не даст
+    // второму сценарию стартовать на том же диалоге.
+    const { rows: ins } = await db.query<{ id: string }>(
+      `INSERT INTO scenario_runs (tenant_id, scenario_id, conversation_id, answers)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [msg.tenantId, picked.id, conversationId, JSON.stringify({ __last: text.slice(0, 500) })],
+    );
+    if (!ins[0]) return { silent: 'на диалоге уже идёт другой сценарий' as const };
+
+    await db.query(`UPDATE scenarios SET runs_started = runs_started + 1 WHERE id = $1`, [
+      picked.id,
+    ]);
+    return { start: ins[0].id, scenarioId: picked.id };
   });
 
   // Молчание бота логируется с причиной. Без этого «бот не отвечает»
   // неотличимо от «бот сломан», и проверять приходится наугад.
-  if ('silent' in plan) {
-    log('info', 'Бот промолчал', { conversationId, reason: plan.silent });
+  if ('silent' in decision) {
+    log('info', 'Бот промолчал', { conversationId, reason: decision.silent });
     return 0;
   }
 
-  const queued = plan.queued;
-  if (!queued.length) return 0;
+  const runId = 'resume' in decision ? decision.resume : decision.start;
+  if (!runId) return 0;
+  return advanceRun(msg.tenantId, runId);
+}
 
-  for (const item of queued) {
-    await outboundQueue.add(
-      'send',
-      {
-        tenantId: msg.tenantId,
-        channelId: msg.channelId,
-        conversationId,
-        messageId: item.messageId,
-        idempotencyKey: item.messageId,
-      },
-      { jobId: item.messageId },
+/**
+ * Продолжение сценария из очереди.
+ *
+ * Два повода: истекла пауза и вышло время ожидания ответа. Во втором
+ * случае продолжаем только если ответа так и не было — иначе сценарий
+ * уже ушёл вперёд, и будить его нельзя.
+ */
+async function continueScenario(job: ScenarioJob): Promise<void> {
+  const ok = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<{ status: string; waiting_for: string | null }>(
+      `SELECT status, waiting_for FROM scenario_runs WHERE id = $1`,
+      [job.runId],
     );
-  }
+    const run = rows[0];
+    if (!run || run.status !== 'waiting') return false;
+    if (job.reason === 'timeout' && run.waiting_for !== 'reply') return false;
+    if (job.reason === 'delay' && run.waiting_for !== 'time') return false;
 
-  return queued.length;
+    // Диалог могли взять в работу или выключить бота, пока шла пауза.
+    const { rows: conv } = await db.query<{ ok: boolean }>(
+      `SELECT (c.bot_enabled AND c.assignee_id IS NULL) AS ok
+         FROM conversations c
+         JOIN scenario_runs r ON r.conversation_id = c.id
+        WHERE r.id = $1`,
+      [job.runId],
+    );
+    if (!conv[0]?.ok) {
+      await db.query(`UPDATE scenario_runs SET status = 'stopped' WHERE id = $1`, [job.runId]);
+      return false;
+    }
+
+    await db.query(
+      `UPDATE scenario_runs SET status = 'running', waiting_for = NULL, updated_at = now()
+        WHERE id = $1`,
+      [job.runId],
+    );
+    return true;
+  });
+
+  if (!ok) return;
+  const sent = await advanceRun(job.tenantId, job.runId);
+  if (sent) log('info', 'Сценарий продолжен', { runId: job.runId, sent, reason: job.reason });
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1578,6 +1898,28 @@ worker.on('failed', (job, err) => {
 
 worker.on('ready', () => log('info', 'Воркер входящих сообщений запущен'));
 
+/**
+ * Воркер сценариев.
+ *
+ * Один поток намеренно: задачи короткие, а параллельная обработка двух
+ * продолжений одного разговора означала бы два сообщения подряд не в том
+ * порядке.
+ */
+const scenarioWorker = new Worker<ScenarioJob>(
+  QUEUE_SCENARIO,
+  async (job) => continueScenario(job.data),
+  { connection, concurrency: 1 },
+);
+
+scenarioWorker.on('failed', (job, err) => {
+  log('error', 'Продолжение сценария не выполнено', {
+    jobId: job?.id,
+    error: err.message,
+  });
+});
+
+scenarioWorker.on('ready', () => log('info', 'Воркер сценариев запущен'));
+
 // ═══════════════════════════════════════════════════════════════════════
 // Удаление данных по запросу из Facebook
 // ═══════════════════════════════════════════════════════════════════════
@@ -1662,9 +2004,11 @@ async function shutdown(signal: string): Promise<void> {
   if (deletionTimer) clearTimeout(deletionTimer);
   // Даём текущим задачам доработать, новые не берём.
   await worker.close();
+  await scenarioWorker.close();
   await outboundWorker.close();
   await mediaWorker.close();
   await mediaQueue.close();
+  await scenarioQueue.close();
   await pool.end();
   connection.disconnect();
   process.exit(0);

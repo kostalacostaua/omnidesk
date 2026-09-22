@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { withTenant, type Pool } from '@omnidesk/core';
+import { validateSteps, withTenant, type Pool } from '@omnidesk/core';
 
 /**
  * Рабочее место оператора: список диалогов с фильтрами, карточка контакта,
@@ -303,6 +303,181 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
   });
 
   // ── Правила чат-бота ──────────────────────────────────────────────
+  // ── Сценарии ──────────────────────────────────────────────────────
+  //
+  // Правило отвечало одним сообщением. Сценарий — это цепочка шагов,
+  // которая умеет ждать паузу и ответ клиента. Старые правила перенесены
+  // миграцией, ручки bot-rules ниже остались только для совместимости.
+
+  app.get('/scenarios', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const rows = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query(
+        `SELECT s.id, s.channel_id, s.name, s.trigger_type, s.keywords, s.schedule,
+                s.steps, s.is_active, s.priority, s.runs_started, s.runs_finished,
+                s.updated_at, ch.display_name AS channel_name,
+                (SELECT count(*) FROM scenario_runs r
+                  WHERE r.scenario_id = s.id AND r.status IN ('running','waiting')) AS live
+           FROM scenarios s
+           LEFT JOIN channels ch ON ch.id = s.channel_id
+          ORDER BY s.trigger_type ASC, s.priority ASC, s.created_at ASC`,
+      );
+      return rows;
+    });
+
+    return { scenarios: rows };
+  });
+
+  const TRIGGERS = ['welcome', 'keyword', 'exact', 'off_hours', 'fallback'];
+
+  /** Разбор тела: одна проверка на создание и на правку. */
+  function readScenario(b: Record<string, unknown>): { error: string } | {
+    name: string;
+    triggerType: string;
+    keywords: string[];
+    schedule: Record<string, unknown>;
+    steps: unknown[];
+    channelId: string | null;
+    priority: number;
+    isActive: boolean;
+  } {
+    const name = String(b['name'] ?? '').trim();
+    if (!name) return { error: 'Название обязательно' };
+    if (name.length > 80) return { error: 'Название длиннее 80 символов' };
+
+    const triggerType = String(b['triggerType'] ?? 'keyword');
+    if (!TRIGGERS.includes(triggerType)) return { error: 'Неизвестное условие запуска' };
+
+    const keywords = (Array.isArray(b['keywords']) ? b['keywords'] : [])
+      .map((k) => String(k).trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 40);
+    if ((triggerType === 'keyword' || triggerType === 'exact') && !keywords.length) {
+      return { error: 'Для этого условия нужны слова' };
+    }
+
+    const parsed = validateSteps(b['steps'] ?? []);
+    if ('error' in parsed) return parsed;
+    if (!parsed.steps.length) return { error: 'В сценарии нет ни одного шага' };
+
+    const schedule = (b['schedule'] ?? {}) as Record<string, unknown>;
+
+    return {
+      name,
+      triggerType,
+      keywords,
+      schedule,
+      steps: parsed.steps,
+      channelId: (b['channelId'] as string) || null,
+      priority: Number(b['priority'] ?? 100) || 100,
+      isActive: b['isActive'] === undefined ? true : Boolean(b['isActive']),
+    };
+  }
+
+  app.post<{ Body: Record<string, unknown> }>('/scenarios', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const parsed = readScenario(req.body ?? {});
+    if ('error' in parsed) return reply.code(400).send({ error: 'bad_scenario', detail: parsed.error });
+
+    const id = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO scenarios (tenant_id, channel_id, name, trigger_type, keywords,
+                                schedule, steps, is_active, priority)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [
+          auth.tenantId,
+          parsed.channelId,
+          parsed.name,
+          parsed.triggerType,
+          parsed.keywords,
+          JSON.stringify(parsed.schedule),
+          JSON.stringify(parsed.steps),
+          parsed.isActive,
+          parsed.priority,
+        ],
+      );
+      return rows[0]!.id;
+    });
+
+    return reply.code(201).send({ id });
+  });
+
+  app.put<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/scenarios/:id',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const parsed = readScenario(req.body ?? {});
+      if ('error' in parsed) {
+        return reply.code(400).send({ error: 'bad_scenario', detail: parsed.error });
+      }
+
+      const ok = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rowCount } = await db.query(
+          `UPDATE scenarios
+              SET channel_id = $2, name = $3, trigger_type = $4, keywords = $5,
+                  schedule = $6, steps = $7, is_active = $8, priority = $9,
+                  updated_at = now()
+            WHERE id = $1`,
+          [
+            req.params.id,
+            parsed.channelId,
+            parsed.name,
+            parsed.triggerType,
+            parsed.keywords,
+            JSON.stringify(parsed.schedule),
+            JSON.stringify(parsed.steps),
+            parsed.isActive,
+            parsed.priority,
+          ],
+        );
+        return (rowCount ?? 0) > 0;
+      });
+
+      if (!ok) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true };
+    },
+  );
+
+  /** Включение и выключение отдельно: это одно нажатие, а не правка целиком. */
+  app.patch<{ Params: { id: string }; Body: { isActive?: boolean } }>(
+    '/scenarios/:id',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const ok = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rowCount } = await db.query(
+          `UPDATE scenarios SET is_active = COALESCE($2, is_active), updated_at = now()
+            WHERE id = $1`,
+          [req.params.id, req.body?.isActive ?? null],
+        );
+        return (rowCount ?? 0) > 0;
+      });
+
+      if (!ok) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true };
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>('/scenarios/:id', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const ok = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(`DELETE FROM scenarios WHERE id = $1`, [req.params.id]);
+      return (rowCount ?? 0) > 0;
+    });
+
+    if (!ok) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
   app.get('/bot-rules', async (req, reply) => {
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);

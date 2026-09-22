@@ -17,10 +17,28 @@ export const QUEUE_MTPROTO_OUT = 'mtproto-out';
 /** Вход в номерной Telegram по QR-коду. */
 export const QUEUE_MTPROTO_LOGIN = 'mtproto-login';
 
+/**
+ * Продолжение сценария после паузы.
+ *
+ * Отдельная очередь, а не таймер в памяти: пауза в пятнадцать минут
+ * означала бы, что воркер обязан дожить до конца сценария. Перезапуск
+ * сервиса — обычное дело, и разговор с клиентом не должен от него
+ * зависеть.
+ */
+export const QUEUE_SCENARIO = 'scenario';
+
 /** Ключ Redis с состоянием входа по QR. Читает api, пишет sessions. */
 export const mtprotoLoginKey = (loginId: string): string => `mtp:login:${loginId}`;
 /** Ключ Redis для пароля двухэтапной проверки. Живёт секунды и удаляется после чтения. */
 export const mtprotoPasswordKey = (loginId: string): string => `mtp:pw:${loginId}`;
+
+/** Задача продолжения сценария: всё состояние лежит в базе, здесь только ключ. */
+export interface ScenarioJob {
+  tenantId: string;
+  runId: string;
+  /** Зачем разбудили: истекла пауза или вышло время ожидания ответа. */
+  reason: 'delay' | 'timeout';
+}
 
 export interface MtprotoLoginJob {
   loginId: string;
