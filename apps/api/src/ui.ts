@@ -659,8 +659,17 @@ export const INBOX_HTML = `<!DOCTYPE html>
  * оборвётся на этом обновлении.
  */
 function tokenRead(){
-  try { return localStorage.getItem('omnidesk_token') || sessionStorage.getItem('omnidesk_token') || '' }
-  catch(e){ return '' }
+  try {
+    var v = localStorage.getItem('omnidesk_token');
+    if (v) return v;
+    // Перенос со старого хранения. Вкладка, открытая до этого
+    // обновления, держит токен в sessionStorage — она одна про него и
+    // знает. Переписываем в постоянное, чтобы соседние вкладки не
+    // встречали форму входа у уже вошедшего человека.
+    var old = sessionStorage.getItem('omnidesk_token');
+    if (old) { localStorage.setItem('omnidesk_token', old); return old }
+    return '';
+  } catch(e){ return '' }
 }
 function tokenWrite(v){
   try {
