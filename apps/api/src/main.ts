@@ -30,6 +30,7 @@ import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
+import { APP_ICON_SVG } from './brand.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -198,7 +199,10 @@ app.get('/app', sendUi);
 
 // Браузер всегда просит favicon. Без этой строки в консоли висит 404,
 // который потом маскирует настоящие ошибки при отладке.
-app.get('/favicon.ico', async (_req, reply) => reply.code(204).send());
+app.get('/favicon.ico', async (_req, reply) => reply.redirect('/favicon.svg'));
+app.get('/favicon.svg', async (_req, reply) =>
+  reply.type('image/svg+xml').header('cache-control', 'public, max-age=86400').send(APP_ICON_SVG),
+);
 
 /**
  * Выдача сессии виджету Zoho CRM.

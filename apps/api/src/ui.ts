@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-export const UI_BUILD = '2026-09-22-3';
+export const UI_BUILD = '2026-09-22-4';
 
 export const INBOX_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -37,6 +37,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   /* ═══ Оформление «Рабочий стол» ═══
      Плотно, без украшений, цвет только там, где несёт смысл: статус
@@ -164,9 +165,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* ─── Панель разделов ──────────────────────────────────────────── */
   #rail{background:var(--rail);border-right:1px solid var(--line);display:flex;
     flex-direction:column;align-items:center;padding:12px 0;gap:2px}
-  #rail .logo{width:30px;height:30px;border-radius:7px;background:var(--accent);
-    color:var(--on-accent);display:flex;align-items:center;justify-content:center;
-    font-weight:700;font-size:11.5px;letter-spacing:-.03em;margin-bottom:14px}
+  #rail .logo{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+    margin-bottom:14px}
+  #rail .logo svg{width:28px;height:28px;display:block}
   .rbtn{background:transparent;border:0;color:var(--railT);width:52px;padding:8px 0;
     border-radius:6px;font-size:10px;font-weight:600;display:flex;flex-direction:column;
     align-items:center;gap:5px;cursor:pointer;line-height:1.2;position:relative}
@@ -438,7 +439,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
 <div id="app" data-view="chats">
   <nav id="rail">
-    <div class="logo" id="logo" title="К чатам" style="cursor:pointer">R</div>
+    <div class="logo" id="logo" title="К чатам" style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
     <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
     <button class="rbtn" data-view="bots" data-icon="bot">Боты</button>
     <div class="grow"></div>
