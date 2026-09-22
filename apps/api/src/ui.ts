@@ -221,6 +221,27 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .icob:hover{background:var(--hover);border-color:var(--t3)}
   .icob:active{transform:translateY(1px)}
   .icob:hover svg{stroke:var(--t1)}
+  /* Панель смайлов. Ровно та же подложка, что у списка шаблонов:
+     это два соседних инструмента одной строки, и разное оформление
+     читалось бы как разные части интерфейса. */
+  .emobox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
+    max-height:212px;overflow-y:auto;padding:4px 8px 8px}
+  .emobox .gt{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+    font-weight:700;margin:8px 0 4px}
+  .emobox .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:2px}
+  .emobox button{background:transparent;border:0;box-shadow:none;font-size:19px;line-height:1;
+    padding:4px;border-radius:6px;color:inherit;transition:transform .08s ease,background-color .12s ease}
+  .emobox button:hover{background:var(--hover);transform:scale(1.15)}
+  .emobox button:active{transform:scale(.94)}
+
+  /* Файл, приложенный к шаблону. */
+  .fchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+  .fchip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 8px;
+    border-radius:var(--rf);background:var(--panel2);color:var(--t2);max-width:100%}
+  .fchip a{color:var(--link);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fchip .x{cursor:pointer;color:var(--t3);font-weight:700}
+  .fchip .x:hover{color:var(--crit)}
+
   .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;
     max-height:180px;overflow-y:auto;background:var(--panel)}
   .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12.5px}
@@ -1015,7 +1036,7 @@ function renderComposer(force){
   // В ключ входят цитата и выбранный файл: их появление обязано
   // перерисовать поле, иначе оператор не увидит, на что отвечает.
   var mode = (w.open ? 'open' : 'blocked') + ':' + current + ':' + QR.length +
-    ':' + (replyTo ? replyTo.id : '') + ':' + (pendingFile ? pendingFile.name : '');
+    ':' + (replyTo ? replyTo.id : '') + ':' + (pendingFile ? (pendingFile.name || '') : '');
   if (!force && box.dataset.mode === mode) return;
 
   // Набранный текст переживает перерисовку — его теряют только вместе
@@ -1044,9 +1065,11 @@ function renderComposer(force){
         Math.round(pendingFile.size / 1024) + ' КБ</div><div class="c" id="fCancel">×</div></div>'
       : '') +
     '<div class="tplbox" id="tplBox" style="display:none"></div>' +
+    '<div class="emobox" id="emoBox" style="display:none"></div>' +
     '<div class="row">' +
     '<input type="file" id="file" style="display:none">' +
     '<button class="icob" id="clip" title="Прикрепить файл">' + icon('clip') + '</button>' +
+    '<button class="icob" id="emo" title="Смайлы">' + icon('smile') + '</button>' +
     (QR.length ? '<button class="icob" id="tpl" title="Шаблон">' + icon('bolt') + '</button>' : '') +
     '<textarea id="txt" rows="1" placeholder="Ответ клиенту. Enter — отправить, Shift+Enter — перенос"></textarea>' +
     '<button id="send">Отправить</button></div><div class="err" id="sendErr"></div>';
@@ -1078,6 +1101,7 @@ function renderComposer(force){
     }
   };
   el('send').onclick = send;
+  el('emo').onclick = toggleEmoji;
   if (el('tpl')) el('tpl').onclick = toggleTemplates;
   ta.focus();
 }
@@ -1087,30 +1111,117 @@ function expand(ta){
   if (t.charAt(0) !== '/') return false;
   var hit = QR.filter(function(q){ return q.shortcut === t.slice(1) })[0];
   if (!hit) return false;
-  ta.value = hit.body;
-  ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,150)+'px';
+  useTemplate(hit);
   return true;
+}
+
+/**
+ * Подстановка шаблона в поле ответа.
+ *
+ * Файл шаблона не скачивается в браузер и не загружается заново: он уже
+ * лежит в хранилище, и при отправке уходит ссылка на него. Оператор
+ * видит прикреплённый файл ровно так же, как если бы выбрал его с диска,
+ * и может снять его крестиком.
+ */
+function useTemplate(q){
+  var ta = el('txt');
+  ta.value = q.body;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+  var f = (q.attachments || [])[0];
+  pendingFile = f
+    ? { qr: { id: q.id, index: 0 }, name: f.filename || 'файл', size: f.size || 0, type: f.mime }
+    : null;
+  renderComposer(true);
+  var t2 = el('txt');
+  if (t2) { t2.focus(); t2.setSelectionRange(t2.value.length, t2.value.length) }
 }
 
 function toggleTemplates(){
   var b = el('tplBox');
   if (b.style.display !== 'none'){ b.style.display='none'; return }
   b.innerHTML = QR.map(function(q, i){
+    var n = (q.attachments || []).length;
     return '<div class="qr" data-i="' + i + '"><b>/' + esc(q.shortcut) + '</b>' +
+      (n ? '<span class="chip">📎 ' + n + '</span> ' : '') +
       '<span class="x">' + esc(q.body) + '</span></div>';
   }).join('');
   b.style.display = 'block';
   Array.prototype.forEach.call(b.children, function(node){
     node.onclick = function(){
-      var ta = el('txt');
-      ta.value = QR[Number(node.dataset.i)].body;
-      ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,150)+'px';
+      useTemplate(QR[Number(node.dataset.i)]);
       b.style.display = 'none';
-      ta.focus();
     };
   });
 }
 
+
+/* ── Смайлы ──────────────────────────────────────────────────────── */
+
+/**
+ * Набор для поля ответа.
+ *
+ * Не весь Unicode, а то, чем реально пользуются в переписке с клиентом:
+ * лица, жесты, бытовые предметы, символы доставки и оплаты. Полный
+ * список эмодзи — это девять экранов, по которым никто не листает,
+ * и лишние двести килобайт на странице.
+ *
+ * Частые собираются сами: первые восемь, которыми оператор пользовался,
+ * стоят первым рядом. Хранятся на устройстве, как и тема.
+ */
+var EMO = {
+  'Лица':['🙂','😊','😉','😁','😄','😅','🤗','🤝','👋','🙏','👍','👌','💪','🔥','✨','❤️','💛','🎉','😍','🥰','😂','🤔','😐','😔','😢','😮','🙈','😎'],
+  'Работа':['✅','❌','⚠️','❗','❓','📌','📎','📄','📝','🗓','⏰','⏳','💬','📞','📧','🔗','🔒','⚙️','📦','🚚','🏷','💳','💰','🧾','📊','📈','🎁','🛒'],
+  'Товар':['👕','👗','👟','👜','🎒','⌚','💍','📱','💻','🎧','📷','🪑','🛏','🍽','☕','🌿','🌸','🎂','🧸','🖼','🧴','🧼','🧹','🔧','🔨','🧰','🪞','🕯']
+};
+
+function emoRecent(){
+  try { return JSON.parse(localStorage.getItem('rz.emo') || '[]') } catch(e){ return [] }
+}
+function emoUse(ch){
+  var list = emoRecent().filter(function(x){ return x !== ch });
+  list.unshift(ch);
+  try { localStorage.setItem('rz.emo', JSON.stringify(list.slice(0, 8))) } catch(e){}
+}
+
+function toggleEmoji(){
+  var b = el('emoBox');
+  if (!b) return;
+  if (b.style.display !== 'none'){ b.style.display = 'none'; return }
+
+  var recent = emoRecent();
+  var html = recent.length
+    ? '<div class="grp"><div class="gt">Часто</div><div class="gr">' +
+      recent.map(function(c){ return '<button type="button" data-e="' + c + '">' + c + '</button>' }).join('') +
+      '</div></div>'
+    : '';
+  html += Object.keys(EMO).map(function(name){
+    return '<div class="grp"><div class="gt">' + name + '</div><div class="gr">' +
+      EMO[name].map(function(c){ return '<button type="button" data-e="' + c + '">' + c + '</button>' }).join('') +
+      '</div></div>';
+  }).join('');
+
+  b.innerHTML = html;
+  b.style.display = 'block';
+
+  Array.prototype.forEach.call(b.querySelectorAll('[data-e]'), function(x){
+    x.onclick = function(){ insertEmoji(x.dataset.e) };
+  });
+}
+
+/** Вставка в позицию курсора, а не в конец: оператор ставит смайл по месту. */
+function insertEmoji(ch){
+  var ta = el('txt');
+  if (!ta) return;
+  var a = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+  var bnd = ta.selectionEnd == null ? a : ta.selectionEnd;
+  ta.value = ta.value.slice(0, a) + ch + ta.value.slice(bnd);
+  ta.focus();
+  ta.setSelectionRange(a + ch.length, a + ch.length);
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+  emoUse(ch);
+}
 
 /* ── Ответ на сообщение и реакции ────────────────────────────────── */
 
@@ -1242,7 +1353,11 @@ function send(){
   var payload = { text: text };
   if (replyTo && replyTo.ext) payload.replyToExternalId = replyTo.ext;
 
-  var prepared = pendingFile
+  if (pendingFile && pendingFile.qr) {
+    payload.attachment = { fromQuickReply: pendingFile.qr };
+  }
+
+  var prepared = pendingFile && !pendingFile.qr
     ? readAsBase64(pendingFile).then(function(b64){
         payload.attachment = {
           filename: pendingFile.name,
@@ -1757,6 +1872,99 @@ function pageIntegrations(){
     '<div class="acts"><button disabled>Подключить Zoho</button></div></div>' +
     '</div></div></div>';
 }
+
+/* ── Подключение Facebook: Messenger и Instagram ──────────────────
+   Возврат из Facebook приходит на адрес приложения с меткой в хвосте
+   ссылки: там либо идентификатор выбора страниц, либо причина отказа.
+   Разбирается один раз при запуске, метка из адресной строки убирается,
+   чтобы обновление страницы не пыталось подключить то же самое снова. */
+
+var META_ERRORS = {
+  cancelled:'Вход через Facebook отменён.',
+  state:'Ссылка устарела — нажмите «Войти через Facebook» ещё раз.',
+  exchange:'Facebook не подтвердил вход. Попробуйте ещё раз.',
+  unavailable:'Подключение Facebook ещё не включено на сервере.'
+};
+
+function readMetaHash(){
+  var h = location.hash || '';
+  var m = h.match(/meta-pick=([0-9a-f-]+)/);
+  var e = h.match(/meta-error=([a-z]+)/);
+  if (!m && !e) return false;
+  if (m) S.metaPick = m[1];
+  if (e) S.metaError = META_ERRORS[e[1]] || 'Не удалось подключить Facebook';
+  history.replaceState(null, '', location.pathname);
+  // Раньше здесь открывалась модалка настроек, теперь это раздел.
+  setView('channels');
+  return true;
+}
+
+function startMeta(){
+  busy(el('metaGo'), true);
+  api('/settings/channels/meta/start').then(function(r){ location.href = r.url })
+    .catch(function(e){
+      busy(el('metaGo'), false);
+      var p = (e && e.payload) || {};
+      el('metaErr').textContent = p.error === 'meta_unavailable'
+        ? META_ERRORS.unavailable : 'Не удалось начать вход';
+    });
+}
+
+function showMetaPick(id){
+  var box = el('metaBody');
+  box.innerHTML = '<div class="empty">Загружаю страницы...</div>';
+  api('/settings/channels/meta/pick/' + id).then(function(d){
+    var pages = d.pages || [];
+    if (!pages.length){
+      S.metaPick = null;
+      box.innerHTML = '<div class="err">У этого аккаунта Facebook нет страниц, или при входе ' +
+        'не отмечена ни одна. Нажмите «Войти через Facebook» и на шаге выбора отметьте нужные страницы.</div>' +
+        '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+      el('metaGo').onclick = startMeta;
+      return;
+    }
+    box.innerHTML = '<div class="hint">Отметьте, что подключить:</div>' +
+      pages.map(function(p){
+        return '<div class="item"><div><div class="t">' + esc(p.name) + '</div>' +
+          '<div class="s"><label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="messenger" checked> Messenger</label>' +
+          (p.instagram
+            ? ' &nbsp; <label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="instagram" checked> Instagram' +
+              (p.instagram.username ? ' @' + esc(p.instagram.username) : '') + '</label>'
+            : ' &nbsp; <span class="muted">Instagram к странице не привязан</span>') +
+          '</div></div></div>';
+      }).join('') +
+      '<div class="row2" style="margin-top:10px"><button id="metaSave">Подключить выбранное</button></div>' +
+      '<div class="err" id="metaErr"></div>';
+    if (S.metaError){ el('metaErr').textContent = S.metaError; S.metaError = null; }
+    el('metaSave').onclick = function(){
+      var sel = {};
+      Array.prototype.forEach.call(box.querySelectorAll('[data-mp]'), function(c){
+        sel[c.dataset.mp] = sel[c.dataset.mp] || { id: c.dataset.mp };
+        sel[c.dataset.mp][c.dataset.k] = c.checked;
+      });
+      busy(el('metaSave'), true);
+      api('/settings/channels/meta/pick/' + id, { method:'POST',
+        body:{ pages: Object.keys(sel).map(function(k){ return sel[k] }) } })
+        .then(function(r){
+          var bad = (r.results || []).filter(function(x){ return !x.ok });
+          S.metaPick = bad.length ? id : null;
+          var ok = (r.results || []).length - bad.length;
+          toast(ok ? 'Подключено каналов: ' + ok : 'Ничего не подключено');
+          if (bad.length){
+            S.metaError = bad.map(function(x){ return x.page + ': ' + x.error }).join('; ');
+          }
+          tabChannels();
+        })
+        .catch(function(){ busy(el('metaSave'), false); el('metaErr').textContent = 'Не удалось подключить' });
+    };
+  }).catch(function(){
+    S.metaPick = null;
+    box.innerHTML = '<div class="err">Выбор страниц устарел (15 минут). Войдите через Facebook ещё раз.</div>' +
+      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+    el('metaGo').onclick = startMeta;
+  });
+}
+
 function errLabel(e){
   var r = (e && e.reason) || '';
   if (r === 'session_revoked') return 'сеанс завершён в Telegram — подключите номер заново';
@@ -1904,7 +2112,7 @@ function tabReplies(){
     QR = d.quickReplies || [];
     pageBox().innerHTML = '<div class="pg">' +
       pageHead('Шаблоны ответов', 'Заготовки, которые оператор вставляет в переписку командой ' +
-        '<b>/имя</b>. Вложения к шаблонам появятся в следующем обновлении.') +
+        '<b>/имя</b>. К шаблону можно приложить до трёх файлов — прайс, схему проезда, инструкцию.') +
       '<div class="card"><h3>Новый шаблон</h3>' +
       '<div class="row2"><input id="qsc" placeholder="короткое имя, например цена"></div>' +
       '<div class="row2" style="margin-top:9px">' +
@@ -1912,14 +2120,28 @@ function tabReplies(){
       '</div><div class="row2" style="margin-top:9px"><button id="qadd">Сохранить</button></div>' +
       '<div class="hint">В диалоге наберите <b>/имя</b> и нажмите Enter — текст развернётся ' +
       'в поле ответа, останется нажать Enter второй раз.</div>' +
-      '<div class="err" id="qerr"></div></div>' +
+      '<div class="err" id="qerr"></div>' +
+      '<input type="file" id="qrFile" style="display:none"></div>' +
 
       '<div class="card"><h3>Шаблоны (' + QR.length + ')</h3>' +
       (QR.length ? QR.map(function(q){
-        return '<div class="item"><div>' +
+        var files = q.attachments || [];
+        var chips = files.map(function(a, i){
+          return '<span class="fchip" title="' + esc(a.filename || 'файл') + '">' +
+            '<span class="ic">' + (String(a.mime || '').indexOf('image/') === 0 ? '🖼' : '📄') + '</span>' +
+            '<a href="#" data-open="' + q.id + '" data-oi="' + i + '">' + esc(a.filename || 'файл') + '</a>' +
+            '<span class="dim">' + Math.round((a.size || 0) / 1024) + ' КБ</span>' +
+            '<span class="x" data-del="' + q.id + '" data-di="' + i + '" title="Убрать файл">×</span></span>';
+        }).join('');
+        return '<div class="item"><div style="min-width:0">' +
           '<div class="t"><code>/' + esc(q.shortcut) + '</code></div>' +
-          '<div class="s">' + esc(q.body) + '</div></div>' +
-          '<button class="ghost mini" data-qr="' + q.id + '">Удалить</button></div>';
+          '<div class="s">' + esc(q.body) + '</div>' +
+          (chips ? '<div class="fchips">' + chips + '</div>' : '') +
+          '</div>' +
+          '<div style="display:flex;gap:6px;flex:none">' +
+          (files.length < 3
+            ? '<button class="ghost mini" data-file="' + q.id + '">Файл</button>' : '') +
+          '<button class="ghost mini" data-qr="' + q.id + '">Удалить</button></div></div>';
       }).join('') : '<div class="hint">Пока пусто.</div>') + '</div></div>';
 
     el('qadd').onclick = function(){
@@ -1939,6 +2161,51 @@ function tabReplies(){
     armDelete(pageBox().querySelectorAll('[data-qr]'), function(b){
       return api('/quick-replies/' + b.dataset.qr, { method:'DELETE' })
         .then(function(){ tabReplies(); renderComposer(true) });
+    });
+
+    // Файл выбирается одним скрытым полем на всю страницу: по одному
+    // на каждый шаблон — это десяток невидимых полей в разметке.
+    var picker = el('qrFile');
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-file]'), function(b){
+      b.onclick = function(){ picker.dataset.qr = b.dataset.file; picker.value = ''; picker.click() };
+    });
+    picker.onchange = function(){
+      var f = this.files && this.files[0];
+      if (!f) return;
+      if (f.size > 20 * 1024 * 1024){ alertLine('Файл больше 20 МБ — Telegram не пропустит'); return }
+      var id = this.dataset.qr;
+      readAsBase64(f).then(function(b64){
+        return api('/quick-replies/' + id + '/attachment', { method:'POST', body:{
+          filename: f.name,
+          mime: f.type || 'application/octet-stream',
+          type: fileKind(f.type, f.name),
+          dataBase64: b64
+        }});
+      }).then(function(){ tabReplies(); renderComposer(true) })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('qerr').textContent = p.error === 'too_many_files'
+            ? 'К одному шаблону можно приложить не больше трёх файлов'
+            : p.error === 'file_too_large' ? 'Файл больше 20 МБ' : 'Не удалось загрузить файл';
+        });
+    };
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-open]'), function(a){
+      a.onclick = function(ev){
+        ev.preventDefault();
+        // Токен нельзя положить в ссылку, поэтому файл забираем запросом
+        // и открываем уже локальную копию.
+        fetch('/quick-replies/' + a.dataset.open + '/attachment/' + a.dataset.oi,
+          { headers:{ Authorization:'Bearer ' + TOKEN } })
+          .then(function(r){ return r.blob() })
+          .then(function(b){ window.open(URL.createObjectURL(b), '_blank') })
+          .catch(function(){ alertLine('Файл недоступен') });
+      };
+    });
+
+    armDelete(pageBox().querySelectorAll('[data-del]'), function(b){
+      return api('/quick-replies/' + b.dataset.del + '/attachment/' + b.dataset.di,
+        { method:'DELETE' }).then(function(){ tabReplies(); renderComposer(true) });
     });
   }).catch(sErr);
 }
@@ -1961,6 +2228,7 @@ var ICONS = {
   plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.4 3.4l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.6 20.6l1.7-1.7"/>',
   team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  smile:'<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>'

@@ -258,7 +258,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
 
     const rows = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query(
-        `SELECT id, shortcut, body, created_at
+        `SELECT id, shortcut, body, attachments, created_at
            FROM quick_replies ORDER BY shortcut ASC`,
       );
       return rows;

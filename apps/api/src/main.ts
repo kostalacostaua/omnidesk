@@ -612,6 +612,113 @@ app.get<{ Params: { contactId: string } }>('/avatars/:contactId', async (req, re
     .send(file.body);
 });
 
+/* ── Файлы шаблонов ──────────────────────────────────────────────────
+   Шаблон с прайсом полезнее шаблона с текстом «сейчас пришлю прайс».
+   Файл кладётся в то же хранилище, что и вложения переписки, а в
+   шаблоне остаётся только описание. */
+
+/** Загрузка файла в шаблон. */
+app.post<{
+  Params: { id: string };
+  Body: { filename?: string; mime?: string; type?: string; dataBase64?: string };
+}>(
+  '/quick-replies/:id/attachment',
+  { bodyLimit: 32 * 1024 * 1024 },
+  async (req, reply) => {
+    const auth = requireAuth(req as never);
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const b64 = req.body?.dataBase64 ?? '';
+    if (!b64) return reply.code(400).send({ error: 'empty_file' });
+    const bytes = Buffer.from(b64, 'base64');
+    if (bytes.length === 0) return reply.code(400).send({ error: 'empty_file' });
+    if (bytes.length > 20 * 1024 * 1024) {
+      return reply.code(413).send({ error: 'file_too_large', limit: 20 * 1024 * 1024 });
+    }
+
+    const key = `${auth.tenantId}/quick-replies/${req.params.id}-${randomUUID()}`;
+    try {
+      await storage.put(key, bytes, req.body?.mime || 'application/octet-stream');
+    } catch (err) {
+      app.log.error({ err, key }, 'Не удалось сохранить файл шаблона');
+      return reply.code(500).send({ error: 'storage_write_failed' });
+    }
+
+    const item = {
+      type: req.body?.type || 'document',
+      storageKey: key,
+      mime: req.body?.mime || 'application/octet-stream',
+      filename: req.body?.filename || 'file',
+      size: bytes.length,
+    };
+
+    // Больше трёх файлов в одном шаблоне — это уже не шаблон ответа,
+    // а папка. Ограничение рисуется в интерфейсе, но держится здесь.
+    const ok = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `UPDATE quick_replies
+            SET attachments = attachments || $2::jsonb
+          WHERE id = $1 AND jsonb_array_length(attachments) < 3`,
+        [req.params.id, JSON.stringify([item])],
+      );
+      return (rowCount ?? 0) > 0;
+    });
+    if (!ok) return reply.code(409).send({ error: 'too_many_files' });
+
+    return reply.code(201).send({ ok: true, attachment: item });
+  },
+);
+
+/** Просмотр файла шаблона: тем же путём, что и вложения переписки. */
+app.get<{ Params: { id: string; index: string } }>(
+  '/quick-replies/:id/attachment/:index',
+  async (req, reply) => {
+    const auth = requireAuth(req as never);
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const index = Number(req.params.index);
+    const picked = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ attachments: unknown[] }>(
+        `SELECT attachments FROM quick_replies WHERE id = $1`,
+        [req.params.id],
+      );
+      const list = (rows[0]?.attachments ?? []) as Array<Record<string, string>>;
+      return list[Number.isFinite(index) ? index : 0] ?? null;
+    });
+    if (!picked?.['storageKey']) return reply.code(404).send({ error: 'not_found' });
+
+    const file = await storage.get(String(picked['storageKey']));
+    if (!file) return reply.code(404).send({ error: 'not_found' });
+
+    return reply
+      .type(file.contentType || 'application/octet-stream')
+      .header('cache-control', 'private, max-age=86400')
+      .send(file.body);
+  },
+);
+
+/** Убрать файл из шаблона. Сам файл в хранилище остаётся: он мог уже уйти клиенту. */
+app.delete<{ Params: { id: string; index: string } }>(
+  '/quick-replies/:id/attachment/:index',
+  async (req, reply) => {
+    const auth = requireAuth(req as never);
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const index = Number(req.params.index);
+    if (!Number.isFinite(index) || index < 0) return reply.code(400).send({ error: 'bad_index' });
+
+    const ok = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `UPDATE quick_replies SET attachments = attachments - $2::int WHERE id = $1`,
+        [req.params.id, index],
+      );
+      return (rowCount ?? 0) > 0;
+    });
+    if (!ok) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  },
+);
+
 /**
  * Повторная загрузка вложения.
  *
@@ -798,7 +905,14 @@ app.post<{
   Body: {
     text?: string;
     replyToExternalId?: string;
-    attachment?: { filename?: string; mime?: string; type?: string; dataBase64?: string };
+    attachment?: {
+      filename?: string;
+      mime?: string;
+      type?: string;
+      dataBase64?: string;
+      /** Вложение из шаблона: файл уже лежит в хранилище, заново его не льём. */
+      fromQuickReply?: { id?: string; index?: number };
+    };
   };
 }>(
   '/conversations/:id/messages',
@@ -812,7 +926,10 @@ app.post<{
 
     const text = (req.body?.text ?? '').trim();
     const upload = req.body?.attachment;
-    if (!text && !upload?.dataBase64) return reply.code(400).send({ error: 'empty_text' });
+    const fromQr = upload?.fromQuickReply;
+    if (!text && !upload?.dataBase64 && !fromQr?.id) {
+      return reply.code(400).send({ error: 'empty_text' });
+    }
     if (text.length > 4096) {
       return reply.code(400).send({ error: 'text_too_long', limit: 4096 });
     }
@@ -820,6 +937,28 @@ app.post<{
     // Файл кладём в хранилище ДО записи сообщения. Обратный порядок дал бы
     // сообщение со ссылкой на файл, которого нет, — и вечное «отправляется».
     let attachment: Record<string, unknown> | null = null;
+
+    /**
+     * Вложение из шаблона.
+     *
+     * Файл уже лежит в хранилище с тех пор, как его загрузили в шаблон.
+     * Перекладывать его копией на каждую отправку — значит на сотне
+     * отправленных прайсов хранить сто одинаковых прайсов. Берём
+     * описание из шаблона и ссылаемся на тот же ключ.
+     */
+    if (fromQr?.id) {
+      const picked = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows } = await db.query<{ attachments: unknown[] }>(
+          `SELECT attachments FROM quick_replies WHERE id = $1`,
+          [fromQr.id],
+        );
+        const list = (rows[0]?.attachments ?? []) as Array<Record<string, unknown>>;
+        return list[Number(fromQr.index ?? 0)] ?? null;
+      });
+      if (!picked) return reply.code(404).send({ error: 'quick_reply_file_not_found' });
+      attachment = { ...picked, ready: true };
+    }
+
     if (upload?.dataBase64) {
       const bytes = Buffer.from(upload.dataBase64, 'base64');
       if (bytes.length === 0) return reply.code(400).send({ error: 'empty_file' });
