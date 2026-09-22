@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canSendFreeform, computeResponseWindow, isWindowOpen } from '../src/types.js';
+import { canSendFreeform, computeResponseWindow, isWindowOpen, needsHumanAgentTag } from '../src/types.js';
 
 const BASE = new Date('2026-08-07T12:00:00.000Z');
 const hours = (n: number): Date => new Date(BASE.getTime() + n * 3600_000);
@@ -72,13 +72,20 @@ describe('canSendFreeform — что показывать оператору', (
     }
   });
 
-  it('Messenger вне окна шаблон не требует — есть HUMAN_AGENT', () => {
+  it('Messenger после 24 часов: ответ разрешён — уйдёт с тегом HUMAN_AGENT', () => {
     const w = computeResponseWindow('messenger', BASE);
-    const r = canSendFreeform('messenger', w, hours(30));
+    expect(canSendFreeform('messenger', w, hours(30))).toEqual({ allowed: true });
+    expect(needsHumanAgentTag(w.expiresAt, hours(30))).toBe(true);
+    expect(needsHumanAgentTag(w.expiresAt, hours(10))).toBe(false);
+  });
+
+  it('Messenger после 7 дней: ответ запрещён, шаблон не поможет', () => {
+    const w = computeResponseWindow('instagram', BASE);
+    const r = canSendFreeform('instagram', w, hours(24 * 7 + 1));
     expect(r.allowed).toBe(false);
     if (!r.allowed) {
       expect(r.requiresTemplate).toBe(false);
-      expect(r.reason).toContain('HUMAN_AGENT');
+      expect(r.reason).toContain('7 дней');
     }
   });
 

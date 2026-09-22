@@ -1,9 +1,17 @@
 import type { FastifyInstance } from 'fastify';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import QRCode from 'qrcode';
 import {
+  GRAPH_VERSION,
+  META_LOGIN_SCOPES,
+  PAGE_SUBSCRIBED_FIELDS,
+  MetaApiError,
+  decryptJson,
+  graphGet,
+  graphPost,
+  safeEqual,
   mtprotoLoginKey,
   mtprotoPasswordKey,
   type MtprotoLoginJob,
@@ -36,6 +44,7 @@ export interface SettingsDeps {
   publicUrl: string;
   telegramWebhookSecret: string;
   mtproto?: { redis: Redis; loginQueue: Queue<MtprotoLoginJob> };
+  meta?: { appId: string; appSecret: string; appUrl: string; stateSecret: string; redis: Redis };
 }
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
@@ -486,5 +495,246 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return { ok: true };
     },
   );
+
+
+  // ── Messenger и Instagram: вход через Facebook ────────────────────
+  //
+  // Порядок:
+  //   1. /settings/channels/meta/start — ссылка на окно входа Facebook;
+  //   2. Facebook возвращает человека на /meta/callback с кодом;
+  //   3. код меняем на токен, берём список страниц, прячем его в Redis
+  //      на 15 минут и отправляем человека обратно в приложение;
+  //   4. человек выбирает страницы — /settings/channels/meta/pick/:id.
+  //
+  // На шаге 2 нашего токена в запросе нет: это переход браузера, а не
+  // вызов API. Тенант и пользователь едут в параметре state, подписанном
+  // HMAC, — подделать его, чтобы подключить страницу к чужой организации,
+  // нельзя.
+  const meta = deps.meta;
+  const pickKey = (id: string) => `meta:pick:${id}`;
+
+  function signState(payload: Record<string, unknown>): string {
+    if (!meta) throw new Error('meta not configured');
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = createHmac('sha256', meta.stateSecret).update(body).digest('base64url');
+    return `${body}.${sig}`;
+  }
+
+  function readState(state: string): { t: string; u: string; exp: number } | null {
+    if (!meta) return null;
+    const [body, sig] = state.split('.');
+    if (!body || !sig) return null;
+    const expect = createHmac('sha256', meta.stateSecret).update(body).digest('base64url');
+    if (!safeEqual(expect, sig)) return null;
+    try {
+      const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
+        t: string; u: string; exp: number;
+      };
+      return p.exp > Date.now() ? p : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const redirectUri = () => `${meta?.appUrl ?? ''}/meta/callback`;
+
+  interface PickPage {
+    id: string;
+    name: string;
+    token: string;
+    picture: string | null;
+    ig: { id: string; username: string | null } | null;
+  }
+
+  app.get('/settings/channels/meta/start', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+    if (!meta) return reply.code(503).send({ error: 'meta_unavailable' });
+    const state = signState({ t: auth.tenantId, u: auth.userId, exp: Date.now() + 15 * 60_000 });
+    const u = new URL(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`);
+    u.searchParams.set('client_id', meta.appId);
+    u.searchParams.set('redirect_uri', redirectUri());
+    u.searchParams.set('state', state);
+    u.searchParams.set('response_type', 'code');
+    u.searchParams.set('scope', META_LOGIN_SCOPES.join(','));
+    return { url: u.toString() };
+  });
+
+  app.get<{ Querystring: { code?: string; state?: string; error?: string; error_reason?: string } }>(
+    '/meta/callback',
+    async (req, reply) => {
+      const back = (hash: string) => reply.redirect(`/app#${hash}`);
+      if (!meta) return back('meta-error=unavailable');
+      const st = readState(req.query.state ?? '');
+      if (!st) return back('meta-error=state');
+      if (req.query.error || !req.query.code) return back('meta-error=cancelled');
+
+      try {
+        const short = await graphGet<{ access_token: string }>('oauth/access_token', {
+          client_id: meta.appId,
+          client_secret: meta.appSecret,
+          redirect_uri: redirectUri(),
+          code: req.query.code,
+        });
+        // Долгоживущий токен пользователя. Токены страниц, полученные
+        // через него, бессрочные — пока владелец не отзовёт доступ.
+        const long = await graphGet<{ access_token: string }>('oauth/access_token', {
+          grant_type: 'fb_exchange_token',
+          client_id: meta.appId,
+          client_secret: meta.appSecret,
+          fb_exchange_token: short.access_token,
+        });
+        const accounts = await graphGet<{
+          data: Array<{
+            id: string;
+            name: string;
+            access_token: string;
+            picture?: { data?: { url?: string } };
+            instagram_business_account?: { id: string; username?: string };
+          }>;
+        }>('me/accounts', {
+          fields: 'id,name,access_token,picture{url},instagram_business_account{id,username}',
+          limit: '100',
+          access_token: long.access_token,
+        });
+
+        const pages: PickPage[] = accounts.data.map((p) => ({
+          id: p.id,
+          name: p.name,
+          token: p.access_token,
+          picture: p.picture?.data?.url ?? null,
+          ig: p.instagram_business_account
+            ? { id: p.instagram_business_account.id, username: p.instagram_business_account.username ?? null }
+            : null,
+        }));
+
+        const pickId = randomUUID();
+        // Токены страниц в Redis — только зашифрованными и на 15 минут.
+        const blob = encryptJson(masterKey, st.t, { tenantId: st.t, pages }).toString('base64');
+        await meta.redis.set(pickKey(pickId), blob, 'EX', 900);
+        return back(`meta-pick=${pickId}`);
+      } catch (err) {
+        app.log.warn({ error: (err as Error).message }, 'Вход через Facebook не удался');
+        return back('meta-error=exchange');
+      }
+    },
+  );
+
+  async function loadPick(id: string, tenantId: string): Promise<PickPage[] | null> {
+    if (!meta) return null;
+    const blob = await meta.redis.get(pickKey(id));
+    if (!blob) return null;
+    try {
+      const data = decryptJson<{ tenantId: string; pages: PickPage[] }>(
+        masterKey,
+        tenantId,
+        Buffer.from(blob, 'base64'),
+      );
+      return data.tenantId === tenantId ? data.pages : null;
+    } catch {
+      // Расшифровка ключом другого тенанта не проходит — чужой выбор не виден.
+      return null;
+    }
+  }
+
+  app.get<{ Params: { id: string } }>('/settings/channels/meta/pick/:id', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+    const pages = await loadPick(req.params.id, auth.tenantId);
+    if (!pages) return reply.code(404).send({ error: 'expired' });
+    // Токены не отдаём в браузер: только то, по чему страницу узнают.
+    return {
+      pages: pages.map((p) => ({ id: p.id, name: p.name, picture: p.picture, instagram: p.ig })),
+    };
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { pages?: Array<{ id: string; messenger?: boolean; instagram?: boolean }> };
+  }>('/settings/channels/meta/pick/:id', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+    if (!meta) return reply.code(503).send({ error: 'meta_unavailable' });
+    const pages = await loadPick(req.params.id, auth.tenantId);
+    if (!pages) return reply.code(404).send({ error: 'expired' });
+
+    const results: Array<{ page: string; type: string; ok: boolean; error?: string }> = [];
+
+    for (const sel of req.body?.pages ?? []) {
+      const page = pages.find((p) => p.id === sel.id);
+      if (!page) continue;
+
+      const wanted: Array<{ type: 'messenger' | 'instagram'; externalId: string; name: string }> = [];
+      if (sel.messenger) wanted.push({ type: 'messenger', externalId: page.id, name: page.name });
+      if (sel.instagram && page.ig) {
+        wanted.push({
+          type: 'instagram',
+          externalId: page.ig.id,
+          name: page.ig.username ? `@${page.ig.username}` : page.name,
+        });
+      }
+      if (!wanted.length) continue;
+
+      // Подписка страницы на вебхуки нашего приложения. Без неё Meta
+      // не присылает ни Messenger, ни Instagram этой страницы.
+      try {
+        await graphPost('' + page.id + '/subscribed_apps', {
+          subscribed_fields: PAGE_SUBSCRIBED_FIELDS.join(','),
+          access_token: page.token,
+        }, undefined);
+      } catch (err) {
+        const msg = err instanceof MetaApiError ? err.body.message ?? err.message : String(err);
+        for (const w of wanted) results.push({ page: page.name, type: w.type, ok: false, error: msg });
+        continue;
+      }
+
+      for (const w of wanted) {
+        const owner = await withSystem(pool, 'владелец канала Meta', async (db) => {
+          const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+            `SELECT channel_id, tenant_id FROM channel_routes
+              WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
+            [w.type, w.externalId],
+          );
+          return rows[0] ?? null;
+        });
+        if (owner && owner.tenant_id !== auth.tenantId) {
+          results.push({ page: w.name, type: w.type, ok: false, error: 'Уже подключено в другой организации' });
+          continue;
+        }
+        const creds: Record<string, string> = { pageId: page.id, pageToken: page.token };
+        if (w.type === 'instagram' && page.ig) creds['igId'] = page.ig.id;
+        await withTenant(pool, auth.tenantId, async (db) => {
+          await db.query(
+            `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                   credentials_enc, meta, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+             ON CONFLICT (type, external_id) DO UPDATE
+               SET credentials_enc = EXCLUDED.credentials_enc,
+                   meta = EXCLUDED.meta, status = 'active', last_error = NULL`,
+            [
+              owner?.channel_id ?? randomUUID(),
+              auth.tenantId,
+              w.type,
+              w.name,
+              w.externalId,
+              encryptJson(masterKey, auth.tenantId, creds),
+              JSON.stringify(
+                w.type === 'instagram'
+                  ? { username: page.ig?.username ?? null, pageId: page.id, pageName: page.name }
+                  : { pageName: page.name, picture: page.picture },
+              ),
+            ],
+          );
+        });
+        results.push({ page: w.name, type: w.type, ok: true });
+      }
+    }
+
+    // При частичной неудаче выбор оставляем: можно исправить причину
+    // (например, выдать права на страницу) и нажать ещё раз без повторного входа.
+    if (results.every((r) => r.ok)) await meta.redis.del(pickKey(req.params.id));
+    app.log.info({ tenantId: auth.tenantId, connected: results.filter((r) => r.ok).length }, 'Страницы Meta подключены');
+    return { results };
+  });
 
 }

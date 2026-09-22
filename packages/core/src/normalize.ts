@@ -393,3 +393,138 @@ export function normalizeTelegramReaction(update: TelegramUpdate): ReactionEvent
     at: new Date(r.date * 1000),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Messenger и Instagram Direct
+// ─────────────────────────────────────────────────────────────────────────
+//
+// У обоих один и тот же формат Messenger Platform: entry[].messaging[].
+// Разница только в object ('page' или 'instagram') и в том, чей id лежит
+// в entry.id — страницы Facebook или бизнес-аккаунта Instagram.
+
+export interface MessagingEvent {
+  sender?: { id: string };
+  recipient?: { id: string };
+  timestamp?: number;
+  message?: {
+    mid: string;
+    text?: string;
+    is_echo?: boolean;
+    app_id?: number | string;
+    is_deleted?: boolean;
+    is_unsupported?: boolean;
+    reply_to?: { mid?: string };
+    attachments?: Array<{ type: string; payload?: { url?: string; title?: string } }>;
+  };
+  reaction?: { mid: string; action: 'react' | 'unreact'; emoji?: string; reaction?: string };
+}
+
+export interface MessagingEntry {
+  /** id страницы (Messenger) или бизнес-аккаунта Instagram. */
+  channelExternalId: string;
+  channelType: 'messenger' | 'instagram';
+  events: MessagingEvent[];
+}
+
+/** Раскладывает вебхук Meta на пачки событий по каналам. */
+export function splitMessagingPayload(payload: MetaWebhookPayload): MessagingEntry[] {
+  const type =
+    payload.object === 'page' ? 'messenger' : payload.object === 'instagram' ? 'instagram' : null;
+  if (!type) return [];
+  return (payload.entry ?? [])
+    .filter((e) => Array.isArray(e.messaging) && e.messaging.length > 0)
+    .map((e) => ({
+      channelExternalId: String(e.id),
+      channelType: type,
+      events: e.messaging as MessagingEvent[],
+    }));
+}
+
+const MSG_ATTACHMENT: Record<string, Attachment['type']> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  file: 'document',
+  // Instagram присылает голосовые как audio, а сторис-упоминания —
+  // отдельными типами, которые оператору показываем ссылкой.
+  story_mention: 'image',
+  ig_reel: 'video',
+  reel: 'video',
+};
+
+/**
+ * Сообщения из одной пачки событий.
+ *
+ * Эхо (is_echo) — это сообщение, отправленное СО страницы: из Meta
+ * Business Suite, с телефона или нами. Своё эхо отбрасываем по app_id,
+ * иначе ответ оператора появился бы в ленте дважды. Чужое эхо
+ * сохраняем как исходящее: оператор должен видеть, что коллега уже
+ * ответил из другого приложения.
+ */
+export function normalizeMessaging(
+  ctx: NormalizeContext,
+  entry: MessagingEntry,
+  ownAppId: string,
+): UnifiedMessage[] {
+  const out: UnifiedMessage[] = [];
+  for (const ev of entry.events) {
+    const m = ev.message;
+    if (!m || m.is_deleted) continue;
+    const echo = !!m.is_echo;
+    if (echo && ownAppId && String(m.app_id ?? '') === ownAppId) continue;
+
+    const peerId = echo ? ev.recipient?.id : ev.sender?.id;
+    if (!peerId) continue;
+
+    const content: MessageContent = {};
+    if (m.text) content.text = m.text;
+    const atts: Attachment[] = [];
+    for (const a of m.attachments ?? []) {
+      const type = MSG_ATTACHMENT[a.type];
+      const url = a.payload?.url;
+      if (!type || !url) continue;
+      const att: Attachment = { type, externalId: url };
+      if (a.payload?.title) att.filename = a.payload.title;
+      atts.push(att);
+    }
+    if (atts.length) content.attachments = atts;
+    if (m.reply_to?.mid) content.replyToExternalId = m.reply_to.mid;
+    if (!content.text && !atts.length) {
+      if (!m.is_unsupported) continue;
+      content.text = '[Сообщение этого типа не поддерживается — откройте его в приложении]';
+    }
+
+    out.push({
+      tenantId: ctx.tenantId,
+      channelId: ctx.channelId,
+      channelType: entry.channelType,
+      externalId: m.mid,
+      peerId,
+      peerProfile: {},
+      direction: echo ? 'out' : 'in',
+      senderType: echo ? 'agent' : 'customer',
+      content,
+      status: echo ? 'sent' : 'delivered',
+      sentAt: new Date(ev.timestamp ?? Date.now()),
+      raw: ev,
+    });
+  }
+  return out;
+}
+
+/** Реакции клиента в Messenger / Instagram. Одна реакция на сообщение, не набор. */
+export function normalizeMessagingReactions(entry: MessagingEntry): ReactionEvent[] {
+  const out: ReactionEvent[] = [];
+  for (const ev of entry.events) {
+    const r = ev.reaction;
+    if (!r?.mid || !ev.sender?.id) continue;
+    const emoji = r.emoji ?? (r.reaction === 'love' ? '❤️' : undefined);
+    out.push({
+      externalId: r.mid,
+      peerId: ev.sender.id,
+      emojis: r.action === 'react' && emoji ? [emoji] : [],
+      at: new Date(ev.timestamp ?? Date.now()),
+    });
+  }
+  return out;
+}

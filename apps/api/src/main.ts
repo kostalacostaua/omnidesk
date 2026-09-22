@@ -29,6 +29,7 @@ import { registerSettings } from './settings.js';
 import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
+import { registerLegal } from './legal.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -150,6 +151,24 @@ registerSettings(app, {
   publicUrl: PUBLIC_URL,
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
   mtproto: { redis, loginQueue: mtprotoLoginQueue },
+  ...(process.env['META_APP_ID'] && process.env['META_APP_SECRET']
+    ? {
+        meta: {
+          appId: process.env['META_APP_ID'],
+          appSecret: process.env['META_APP_SECRET'],
+          // Адрес, на который Facebook возвращает после входа. Он же
+          // прописан в настройках приложения Meta и должен совпадать побуквенно.
+          appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+          stateSecret: JWT_SECRET,
+          redis,
+        },
+      }
+    : {}),
+});
+
+registerLegal(app, {
+  contactEmail: process.env['CONTACT_EMAIL'] ?? 'support@rozmovio.com',
+  operator: process.env['LEGAL_OPERATOR'] ?? 'KL Systems',
 });
 
 app.get('/health', async () => ({ status: 'ok' }));

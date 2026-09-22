@@ -18,6 +18,15 @@ import {
   normalizeTelegramReaction,
   type ReactionEvent,
   normalizeWhatsApp,
+  normalizeMessaging,
+  normalizeMessagingReactions,
+  splitMessagingPayload,
+  graphGet,
+  graphPost,
+  needsHumanAgentTag,
+  MetaApiError,
+  type MetaChannelCredentials,
+  type MessagingEntry,
   withSystem,
   withTenant,
   type InboundJob,
@@ -52,6 +61,10 @@ const TELEGRAM_API_ROOT = process.env['TELEGRAM_API_ROOT'] ?? 'https://api.teleg
 const storage = createStorage();
 /** Боту Telegram отдаёт файлы не больше 20 МБ — ограничение платформы. */
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+/** id нашего приложения Meta: по нему узнаём эхо собственных отправок. */
+const META_APP_ID = process.env['META_APP_ID'] ?? '';
+/** Meta отдаёт вложения до 25 МБ. */
+const MAX_META_MEDIA_BYTES = 25 * 1024 * 1024;
 
 const log = (level: string, msg: string, extra: Record<string, unknown> = {}): void => {
   // Структурированный лог. Содержимое сообщений сюда не попадает никогда.
@@ -301,7 +314,10 @@ async function enqueueAvatar(
   msg: UnifiedMessage,
   contactId: string,
   provider: 'telegram' | 'meta',
+  pictureUrl?: string,
 ): Promise<void> {
+  // У Meta фото отдаётся ссылкой вместе с профилем: без ссылки качать нечего.
+  if (provider === 'meta' && !pictureUrl) return;
   await mediaQueue.add(
     'avatar',
     {
@@ -310,7 +326,7 @@ async function enqueueAvatar(
       messageId: '',
       attachmentIndex: 0,
       provider,
-      externalId: msg.peerId,
+      externalId: pictureUrl ?? msg.peerId,
       kind: 'avatar',
       contactId,
       peerId: msg.peerId,
@@ -339,7 +355,22 @@ async function channelToken(tenantId: string, channelId: string): Promise<string
  * и тогда в интерфейсе остаются инициалы.
  */
 async function handleAvatar(job: MediaJob): Promise<void> {
-  if (job.provider !== 'telegram' || !job.contactId || !job.peerId) return;
+  if (!job.contactId || !job.peerId) return;
+  if (job.provider === 'meta') {
+    // Ссылка на фото профиля Meta подписана и живёт несколько дней,
+    // поэтому храним копию у себя, а не саму ссылку.
+    if (!/^https:[/][/]/.test(job.externalId)) return;
+    const res = await fetch(job.externalId, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) return;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const key = avatarKey(job.tenantId, job.contactId);
+    await storage.put(key, bytes, res.headers.get('content-type') ?? 'image/jpeg');
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(`UPDATE contacts SET avatar_url = $2 WHERE id = $1`, [job.contactId, key]);
+    });
+    return;
+  }
+  if (job.provider !== 'telegram') return;
 
   const token = await channelToken(job.tenantId, job.channelId);
   if (!token) throw new UnrecoverableError('Канал удалён или недоступен');
@@ -395,6 +426,9 @@ async function handleAvatar(job: MediaJob): Promise<void> {
 async function handleMedia(job: MediaJob): Promise<void> {
   if (job.kind === 'avatar') return handleAvatar(job);
 
+  if (job.provider === 'meta' && /^https:[/][/]/.test(job.externalId)) {
+    return handleMetaMedia(job);
+  }
   if (job.provider !== 'telegram') {
     throw new UnrecoverableError(`Скачивание для ${job.provider} ещё не реализовано`);
   }
@@ -478,6 +512,47 @@ async function handleMedia(job: MediaJob): Promise<void> {
     size: body.length,
     storage: storage.kind,
   });
+}
+
+/**
+ * Вложение из Messenger / Instagram.
+ *
+ * Meta присылает прямую ссылку на CDN — токен не нужен, но ссылка живёт
+ * ограниченное время. Поэтому качаем сразу и храним копию.
+ */
+async function handleMetaMedia(job: MediaJob): Promise<void> {
+  const res = await fetch(job.externalId, { signal: AbortSignal.timeout(60_000) });
+  if (res.status === 403 || res.status === 404 || res.status === 410) {
+    await markAttachment(job, { error: 'link_expired', status: res.status });
+    throw new UnrecoverableError('Ссылка на вложение истекла');
+  }
+  if (!res.ok) throw new Error(`Скачивание вернуло ${res.status}`);
+  const body = Buffer.from(await res.arrayBuffer());
+  if (body.length > MAX_META_MEDIA_BYTES) {
+    await markAttachment(job, { error: 'too_large', size: body.length });
+    throw new UnrecoverableError('Файл больше допустимого размера');
+  }
+  const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+  const key = mediaKey(job.tenantId, job.messageId, job.attachmentIndex);
+  await storage.put(key, body, contentType);
+  await withTenant(pool, job.tenantId, async (db) => {
+    await db.query(
+      `UPDATE messages
+          SET content = jsonb_set(
+                content,
+                ARRAY['attachments', $2::text],
+                (COALESCE(content->'attachments'->$3::int, '{}'::jsonb) - 'externalId')
+                  || jsonb_build_object(
+                       'storageKey', $4::text,
+                       'mime',       $5::text,
+                       'size',       $6::int,
+                       'ready',      true)
+              )
+        WHERE id = $1`,
+      [job.messageId, String(job.attachmentIndex), job.attachmentIndex, key, contentType, body.length],
+    );
+  });
+  log('info', 'Вложение Meta сохранено', { messageId: job.messageId, size: body.length });
 }
 
 /** Отмечает вложение как недоступное, чтобы интерфейс не ждал его вечно. */
@@ -576,6 +651,10 @@ async function handleInbound(job: InboundJob): Promise<void> {
 
   if (job.provider === 'meta') {
     const payload = job.payload as MetaWebhookPayload;
+    if (payload.object === 'page' || payload.object === 'instagram') {
+      for (const entry of splitMessagingPayload(payload)) await handleMessagingEntry(entry);
+      return;
+    }
     const phoneNumberId = extractWhatsAppPhoneNumberId(payload);
 
     if (!phoneNumberId) {
@@ -610,6 +689,111 @@ async function handleInbound(job: InboundJob): Promise<void> {
   }
 }
 
+
+async function metaCredentials(tenantId: string, channelId: string): Promise<MetaChannelCredentials | null> {
+  const creds = await withTenant(pool, tenantId, async (db) => {
+    const { rows } = await db.query<{ credentials_enc: Buffer }>(
+      `SELECT credentials_enc FROM channels WHERE id = $1 LIMIT 1`,
+      [channelId],
+    );
+    return rows[0]?.credentials_enc ?? null;
+  });
+  return creds ? decryptJson<MetaChannelCredentials>(masterKey, tenantId, creds) : null;
+}
+
+/**
+ * Профиль собеседника в Messenger / Instagram.
+ *
+ * Имя в вебхуке не приходит — только числовой id. Запрашиваем профиль
+ * один раз, при первом сообщении нового человека. Ошибку не пробрасываем:
+ * без имени диалог всё равно должен появиться, просто с id вместо имени.
+ */
+async function metaProfile(
+  type: 'messenger' | 'instagram',
+  peerId: string,
+  token: string,
+): Promise<{ name?: string; username?: string; picture?: string }> {
+  try {
+    if (type === 'messenger') {
+      const p = await graphGet<{ first_name?: string; last_name?: string; profile_pic?: string }>(
+        peerId,
+        { fields: 'first_name,last_name,profile_pic', access_token: token },
+      );
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
+      return Object.assign({}, name ? { name } : {}, p.profile_pic ? { picture: p.profile_pic } : {});
+    }
+    const p = await graphGet<{ name?: string; username?: string; profile_pic?: string }>(peerId, {
+      fields: 'name,username,profile_pic',
+      access_token: token,
+    });
+    return Object.assign(
+      {},
+      p.name || p.username ? { name: p.name || p.username } : {},
+      p.username ? { username: p.username } : {},
+      p.profile_pic ? { picture: p.profile_pic } : {},
+    );
+  } catch (err) {
+    log('debug', 'Профиль собеседника не получен', { type, error: (err as Error).message });
+    return {};
+  }
+}
+
+async function identityExists(tenantId: string, type: string, peerId: string): Promise<boolean> {
+  return withTenant(pool, tenantId, async (db) => {
+    const { rows } = await db.query(
+      `SELECT 1 FROM contact_identities WHERE tenant_id = $1 AND channel_type = $2 AND external_id = $3 LIMIT 1`,
+      [tenantId, type, peerId],
+    );
+    return rows.length > 0;
+  });
+}
+
+async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
+  const channel = await findChannel(entry.channelType, entry.channelExternalId);
+  if (!channel) {
+    log('warn', 'Канал Meta не найден', { type: entry.channelType, id: entry.channelExternalId });
+    return;
+  }
+
+  const messages = normalizeMessaging(
+    { tenantId: channel.tenant_id, channelId: channel.id },
+    entry,
+    META_APP_ID,
+  );
+
+  const creds = await metaCredentials(channel.tenant_id, channel.id);
+  for (const m of messages) {
+    // Эхо собственной отправки должно успеть получить external_id,
+    // иначе уникальный индекс его не узнает и в ленте будет копия.
+    if (m.direction === 'out') await new Promise((r) => setTimeout(r, 3000));
+
+    let picture: string | undefined;
+    if (creds && !(await identityExists(channel.tenant_id, m.channelType, m.peerId))) {
+      const p = await metaProfile(entry.channelType, m.peerId, creds.pageToken);
+      if (p.name) m.peerProfile.name = p.name;
+      if (p.username) m.peerProfile.username = p.username;
+      picture = p.picture;
+    }
+
+    const { inserted, messageId, conversationId, avatarFor } = await persistMessage(m);
+    log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
+      channelId: channel.id,
+      externalId: m.externalId,
+    });
+    if (inserted && messageId) await enqueueMedia(m, messageId, 'meta');
+    if (avatarFor && picture) await enqueueAvatar(m, avatarFor, 'meta', picture);
+    if (inserted && conversationId && m.direction === 'in') {
+      const sent = await runBot(m, conversationId);
+      if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
+    }
+  }
+
+  // Реакции после сообщений: в одной пачке реакция может прийти
+  // на сообщение, которое записывается строкой выше.
+  for (const r of normalizeMessagingReactions(entry)) {
+    await applyReaction(channel.tenant_id, channel.id, r);
+  }
+}
 
 /**
  * Входящее из номерного Telegram.
@@ -871,6 +1055,7 @@ interface OutboundRow {
   peer_id: string | null;
   channel_type: string;
   credentials_enc: Buffer;
+  window_expires_at: Date | null;
 }
 
 interface OutAttachment {
@@ -1012,7 +1197,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
               m.content           AS content,
               ci.external_id      AS peer_id,
               ch.type             AS channel_type,
-              ch.credentials_enc
+              ch.credentials_enc,
+              c.window_expires_at
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
          JOIN channels ch     ON ch.id = m.channel_id
@@ -1049,6 +1235,10 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
     // передача не приведёт ко второй отправке.
     await mtprotoOutQueue.add('send', job, { jobId: jobKey('mtp', job.messageId) });
     return;
+  }
+
+  if (row.channel_type === 'messenger' || row.channel_type === 'instagram') {
+    return sendMeta(job, row, row.peer_id, worker);
   }
 
   if (row.channel_type !== 'telegram_bot') {
@@ -1174,6 +1364,126 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
 
   // Остальное считаем временным — очередь повторит с экспоненциальной паузой.
   throw new Error(`Telegram вернул ошибку: ${body.description ?? 'без описания'}`);
+}
+
+/** Тип вложения Send API Meta. */
+const META_ATTACHMENT: Record<string, string> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  voice: 'audio',
+  document: 'file',
+  sticker: 'image',
+};
+
+/**
+ * Отправка в Messenger и Instagram Direct.
+ *
+ * Окно: первые 24 часа после сообщения клиента — обычный ответ.
+ * Дальше ещё 6 дней можно ответить только с тегом HUMAN_AGENT, и только
+ * живому человеку: автоответы бота с этим тегом Meta считает нарушением.
+ *
+ * Вложения. Messenger принимает файл прямо в запросе. Instagram — только
+ * ссылкой на публичный файл, а у нас хранилище закрытое; поэтому
+ * вложения в Instagram пока честно отклоняем.
+ */
+async function sendMeta(
+  job: OutboundJob,
+  row: OutboundRow,
+  peerId: string,
+  worker: Worker,
+): Promise<void> {
+  const creds = decryptJson<MetaChannelCredentials>(masterKey, job.tenantId, row.credentials_enc);
+  const isIg = row.channel_type === 'instagram';
+  const base: Record<string, unknown> = { recipient: { id: peerId } };
+  if (needsHumanAgentTag(row.window_expires_at)) {
+    base['messaging_type'] = 'MESSAGE_TAG';
+    base['tag'] = 'HUMAN_AGENT';
+  } else {
+    base['messaging_type'] = 'RESPONSE';
+  }
+  const replyTo = row.content?.replyToExternalId;
+  if (isIg && replyTo) base['reply_to'] = { mid: replyTo };
+
+  const token = { access_token: creds.pageToken };
+  const attachment = (row.content?.attachments ?? []).find((a) => a.storageKey);
+
+  try {
+    let firstId: string | null = null;
+
+    if (attachment?.storageKey) {
+      if (isIg) {
+        await markFailed(job, { reason: 'instagram_attachments_not_supported' });
+        throw new UnrecoverableError('Файлы в Instagram пока не отправляются — только текст');
+      }
+      const file = await storage.get(attachment.storageKey);
+      if (!file) {
+        await markFailed(job, { reason: 'attachment_missing' });
+        throw new UnrecoverableError('Вложение не найдено в хранилище');
+      }
+      const form = new FormData();
+      for (const [k, v] of Object.entries(base)) {
+        form.append(k, typeof v === 'string' ? v : JSON.stringify(v));
+      }
+      form.append(
+        'message',
+        JSON.stringify({
+          attachment: {
+            type: META_ATTACHMENT[attachment.type] ?? 'file',
+            payload: { is_reusable: false },
+          },
+        }),
+      );
+      form.append(
+        'filedata',
+        new Blob([new Uint8Array(file.body)], { type: attachment.mime || 'application/octet-stream' }),
+        attachment.filename || 'file',
+      );
+      const r = await graphPost<{ message_id: string }>('me/messages', token, form);
+      firstId = r.message_id;
+    }
+
+    // Подписи к файлу у Messenger нет: текст уходит вторым сообщением.
+    if (row.text) {
+      const r = await graphPost<{ message_id: string }>('me/messages', token, {
+        ...base,
+        message: { text: row.text },
+      });
+      firstId = firstId ?? r.message_id;
+    }
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2 WHERE id = $1 AND status = 'pending'`,
+        [job.messageId, firstId],
+      );
+    });
+    log('info', 'Сообщение отправлено', { messageId: job.messageId, channel: row.channel_type });
+  } catch (err) {
+    if (!(err instanceof MetaApiError)) throw err;
+    if (err.tokenInvalid) {
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE channels SET status = 'degraded',
+                  last_error = '{"reason":"token_revoked"}'::jsonb
+            WHERE id = $1`,
+          [job.channelId],
+        );
+      });
+      await markFailed(job, { reason: 'token_revoked', code: err.body.code });
+      throw new UnrecoverableError('Доступ к странице отозван — подключите её заново');
+    }
+    if (err.rateLimited) {
+      log('warn', 'Лимит Meta, притормаживаю', { messageId: job.messageId });
+      await worker.rateLimit(60_000);
+      throw Worker.RateLimitError();
+    }
+    if (err.permanent) {
+      await markFailed(job, { code: err.body.code, subcode: err.body.error_subcode, description: err.body.message });
+      throw new UnrecoverableError(err.message);
+    }
+    throw err;
+  }
 }
 
 async function markFailed(job: OutboundJob, failure: Record<string, unknown>): Promise<void> {

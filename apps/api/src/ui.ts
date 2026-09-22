@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-export const UI_BUILD = '2026-09-22-2';
+export const UI_BUILD = '2026-09-22-3';
 
 export const INBOX_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -125,6 +125,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
   .qr{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;flex:none}
   .qr svg{width:100%;height:100%;display:block}
+  .muted{color:var(--t3)}
   .steps{margin:0;padding-left:18px;line-height:1.9;font-size:13px}
   .dim{color:var(--t3)}
   .empty{padding:26px 20px;color:var(--t3);font-size:12.5px;text-align:center;line-height:1.6}
@@ -1465,6 +1466,14 @@ function tabChannels(){
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div></div>';
 
     html +=
+      '<div class="card" id="metaCard"><h3>Facebook Messenger и Instagram</h3>' +
+      '<div id="metaBody"><div class="hint">Войдите через Facebook под аккаунтом, который управляет страницей. ' +
+      'Instagram подключается через страницу Facebook, к которой он привязан, и должен быть ' +
+      'профессиональным аккаунтом (бизнес или автор).</div>' +
+      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>' +
+      '<div class="err" id="metaErr"></div></div></div>';
+
+    html +=
       '<div class="card"><h3>Подключить Telegram по номеру</h3>' +
       '<div class="hint">Личный или рабочий аккаунт Telegram — клиенты пишут на ваш номер, ' +
       'как обычно, а переписка появляется здесь. Ответы уходят от вашего имени.</div>' +
@@ -1498,8 +1507,7 @@ function tabChannels(){
     // Честный список того, чего ещё нет. Пустой экран без объяснений хуже:
     // непонятно, это не сделано или сломалось.
     html += '<div class="card"><h3>Готовятся</h3>' +
-      ['whatsapp_cloud','whatsapp_user','instagram',
-       'messenger','viber_bot','viber_user'].map(function(t){
+      ['whatsapp_cloud','whatsapp_user','viber_bot','viber_user'].map(function(t){
         return '<div class="item"><div><div class="t">' + esc(CH[t]) +
           '<span class="pill soon">скоро</span></div></div></div>';
       }).join('') + '</div>';
@@ -1507,6 +1515,9 @@ function tabChannels(){
     el('sbody').innerHTML = html;
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
+    el('metaGo').onclick = startMeta;
+    if (S.metaError && !S.metaPick) { el('metaErr').textContent = S.metaError; S.metaError = null; }
+    if (S.metaPick) showMetaPick(S.metaPick);
 
     el('badd').onclick = function(){
       var token = el('btok').value.trim();
@@ -1542,6 +1553,94 @@ function tabChannels(){
       return api('/channels/' + b.dataset.del, { method:'DELETE' }).then(tabChannels);
     });
   }).catch(sErr);
+}
+
+/* Вход через Facebook уводит со страницы и возвращает на /app#meta-pick=...
+   Токен входа в Rozmovio живёт в sessionStorage вкладки и переход переживает. */
+var META_ERRORS = {
+  cancelled:'Вход через Facebook отменён.',
+  state:'Ссылка устарела — нажмите «Войти через Facebook» ещё раз.',
+  exchange:'Facebook не подтвердил вход. Попробуйте ещё раз.',
+  unavailable:'Подключение Facebook ещё не включено на сервере.'
+};
+
+function readMetaHash(){
+  var h = location.hash || '';
+  var m = h.match(/meta-pick=([0-9a-f-]+)/);
+  var e = h.match(/meta-error=([a-z]+)/);
+  if (!m && !e) return false;
+  if (m) S.metaPick = m[1];
+  if (e) S.metaError = META_ERRORS[e[1]] || 'Не удалось подключить Facebook';
+  history.replaceState(null, '', location.pathname);
+  S.tab = 'channels';
+  openSettings();
+  return true;
+}
+
+function startMeta(){
+  busy(el('metaGo'), true);
+  api('/settings/channels/meta/start').then(function(r){ location.href = r.url })
+    .catch(function(e){
+      busy(el('metaGo'), false);
+      var p = (e && e.payload) || {};
+      el('metaErr').textContent = p.error === 'meta_unavailable'
+        ? META_ERRORS.unavailable : 'Не удалось начать вход';
+    });
+}
+
+function showMetaPick(id){
+  var box = el('metaBody');
+  box.innerHTML = '<div class="empty">Загружаю страницы...</div>';
+  api('/settings/channels/meta/pick/' + id).then(function(d){
+    var pages = d.pages || [];
+    if (!pages.length){
+      S.metaPick = null;
+      box.innerHTML = '<div class="err">У этого аккаунта Facebook нет страниц, или при входе ' +
+        'не отмечена ни одна. Нажмите «Войти через Facebook» и на шаге выбора отметьте нужные страницы.</div>' +
+        '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+      el('metaGo').onclick = startMeta;
+      return;
+    }
+    box.innerHTML = '<div class="hint">Отметьте, что подключить:</div>' +
+      pages.map(function(p){
+        return '<div class="item"><div><div class="t">' + esc(p.name) + '</div>' +
+          '<div class="s"><label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="messenger" checked> Messenger</label>' +
+          (p.instagram
+            ? ' &nbsp; <label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="instagram" checked> Instagram' +
+              (p.instagram.username ? ' @' + esc(p.instagram.username) : '') + '</label>'
+            : ' &nbsp; <span class="muted">Instagram к странице не привязан</span>') +
+          '</div></div></div>';
+      }).join('') +
+      '<div class="row2" style="margin-top:10px"><button id="metaSave">Подключить выбранное</button></div>' +
+      '<div class="err" id="metaErr"></div>';
+    if (S.metaError){ el('metaErr').textContent = S.metaError; S.metaError = null; }
+    el('metaSave').onclick = function(){
+      var sel = {};
+      Array.prototype.forEach.call(box.querySelectorAll('[data-mp]'), function(c){
+        sel[c.dataset.mp] = sel[c.dataset.mp] || { id: c.dataset.mp };
+        sel[c.dataset.mp][c.dataset.k] = c.checked;
+      });
+      busy(el('metaSave'), true);
+      api('/settings/channels/meta/pick/' + id, { method:'POST',
+        body:{ pages: Object.keys(sel).map(function(k){ return sel[k] }) } })
+        .then(function(r){
+          var bad = (r.results || []).filter(function(x){ return !x.ok });
+          S.metaPick = bad.length ? id : null;
+          var ok = (r.results || []).length - bad.length;
+          toast(ok ? 'Подключено каналов: ' + ok : 'Ничего не подключено');
+          if (bad.length){
+            S.metaError = bad.map(function(x){ return x.page + ': ' + x.error }).join('; ');
+          }
+          tabChannels();
+        })
+        .catch(function(){ busy(el('metaSave'), false); el('metaErr').textContent = 'Не удалось подключить' });
+    };
+  }).catch(function(){
+    S.metaPick = null;
+    box.innerHTML = '<div class="err">Выбор страниц устарел (15 минут). Войдите через Facebook ещё раз.</div>' +
+      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+    el('metaGo').onclick = startMeta;
+  });
 }
 
 function errLabel(e){
@@ -1959,6 +2058,7 @@ function start(){
   api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
 
   refresh();
+  readMetaHash();
   // Три секунды — компромисс: живо ощущается и не создаёт заметной
   // нагрузки. Позже сюда встанут вебсокеты, и опрос уйдёт.
   timer = setInterval(refresh, 3000);

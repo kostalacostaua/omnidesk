@@ -160,9 +160,15 @@ export function canSendFreeform(
       };
     case 'messenger':
     case 'instagram':
+      // После 24 часов живой оператор может ответить ещё 6 дней с тегом
+      // HUMAN_AGENT: тег ставит воркер при отправке. Дальше — только
+      // когда клиент напишет сам.
+      if (window.expiresAt && now.getTime() < window.expiresAt.getTime() + 6 * 24 * HOUR) {
+        return { allowed: true };
+      }
       return {
         allowed: false,
-        reason: 'Окно 24 часа закрыто. Доступен ответ оператора по тегу HUMAN_AGENT (до 7 дней).',
+        reason: 'Клиент не писал больше 7 дней. Meta разрешит ответить, когда он напишет снова.',
         requiresTemplate: false,
       };
     case 'telegram_business':
@@ -174,4 +180,12 @@ export function canSendFreeform(
     default:
       return { allowed: true } as const;
   }
+}
+
+/**
+ * Нужен ли тег HUMAN_AGENT для ответа в Messenger / Instagram.
+ * Внутри 24 часов тег не нужен, после — обязателен, иначе Meta отказывает.
+ */
+export function needsHumanAgentTag(windowExpiresAt: Date | null, now: Date = new Date()): boolean {
+  return windowExpiresAt !== null && now.getTime() >= windowExpiresAt.getTime();
 }
