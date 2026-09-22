@@ -330,15 +330,21 @@ async function onMessage(l: Live, ev: NewMessageEvent): Promise<void> {
 
   let avatarKey: string | undefined;
   if (!l.avatarsChecked.has(peerId)) {
-    l.avatarsChecked.add(peerId);
     try {
       const photo = await l.client.downloadProfilePhoto(chat, { isBig: false });
       if (photo && typeof photo !== 'string' && photo.length > 0) {
         avatarKey = `${l.tenantId}/avatars/tgu-${l.channelId}-${peerId}`;
         await storage.put(avatarKey, photo, 'image/jpeg');
+        // Отмечаем собеседника только после успеха: иначе одна неудачная
+        // попытка оставила бы его без аватара до перезапуска сервиса.
+        l.avatarsChecked.add(peerId);
+        log('info', 'Аватар скачан', { peerId, size: photo.length });
+      } else {
+        l.avatarsChecked.add(peerId);
+        log('debug', 'У собеседника нет фото профиля', { peerId });
       }
-    } catch {
-      // Фото нет или скрыто настройками приватности — остаются инициалы.
+    } catch (err) {
+      log('warn', 'Не удалось скачать аватар', { peerId, error: errText(err) });
     }
   }
 

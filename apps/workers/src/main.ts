@@ -823,12 +823,19 @@ async function handleMtprotoInbound(job: InboundJob): Promise<void> {
     externalId: m.externalId,
   });
   if (avatarFor && payload.avatarKey) {
-    await withTenant(pool, channel.tenant_id, async (db) => {
-      await db.query(
+    const set = await withTenant(pool, channel.tenant_id, async (db) => {
+      const { rowCount } = await db.query(
         `UPDATE contacts SET avatar_url = $2 WHERE id = $1 AND avatar_url IS NULL`,
         [avatarFor, payload.avatarKey],
       );
+      return rowCount ?? 0;
     });
+    log(set ? 'info' : 'debug', set ? 'Аватар привязан к контакту' : 'Аватар не привязан', {
+      contactId: avatarFor,
+      key: payload.avatarKey,
+    });
+  } else if (avatarFor) {
+    log('debug', 'Аватар не приехал вместе с сообщением', { contactId: avatarFor });
   }
   if (inserted && conversationId && m.direction === 'in') {
     const sent = await runBot(m, conversationId);
