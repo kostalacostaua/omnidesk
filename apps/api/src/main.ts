@@ -139,7 +139,7 @@ registerEmailAuth(app, {
   // и не такая долгая, чтобы забытая вкладка жила месяцами.
   issueToken: (tenantId, userId) => signJwt({ sub: userId, tid: tenantId }, 7 * 24 * 3600),
   mailer: createMailer(process.env, (line) => app.log.info(line)),
-  appName: process.env['APP_NAME'] ?? 'OmniDesk',
+  appName: process.env['APP_NAME'] ?? 'Rozmovio',
 });
 
 registerSettings(app, {

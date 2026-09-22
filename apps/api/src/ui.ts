@@ -36,7 +36,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<title>OmniDesk</title>
+<title>Rozmovio</title>
 <style>
   /* ═══ Оформление «Рабочий стол» ═══
      Плотно, без украшений, цвет только там, где несёт смысл: статус
@@ -395,7 +395,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <div class="mark">OD</div>
 
     <div id="stepEmail">
-      <h1>Вход в OmniDesk</h1>
+      <h1>Вход в Rozmovio</h1>
       <p>Введите рабочую почту — пришлём код из шести цифр.</p>
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <div class="err" id="gateErr"></div>
@@ -437,7 +437,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
 <div id="app" data-view="chats">
   <nav id="rail">
-    <div class="logo" id="logo" title="К чатам" style="cursor:pointer">OD</div>
+    <div class="logo" id="logo" title="К чатам" style="cursor:pointer">R</div>
     <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
     <button class="rbtn" data-view="bots" data-icon="bot">Боты</button>
     <div class="grow"></div>

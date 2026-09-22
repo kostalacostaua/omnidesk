@@ -101,7 +101,7 @@ function newClient(session: string): Client {
   const client = new TelegramClient(new StringSession(session), API_ID, API_HASH, {
     connectionRetries: 5,
     autoReconnect: true,
-    deviceModel: 'OmniDesk',
+    deviceModel: 'Rozmovio',
     appVersion: '1.0',
     systemVersion: 'Server',
   });
@@ -154,7 +154,7 @@ async function startSession(channelId: string, tenantId: string): Promise<void> 
   await client.connect();
 
   if (!(await client.checkAuthorization())) {
-    // Самая частая причина — владелец завершил сеанс «OmniDesk»
+    // Самая частая причина — владелец завершил сеанс «Rozmovio»
     // в Telegram → Настройки → Устройства. Это не сбой, а его решение,
     // поэтому не переподключаемся, а показываем в настройках.
     await client.destroy().catch(() => undefined);
@@ -285,7 +285,7 @@ async function onMessage(l: Live, ev: NewMessageEvent): Promise<void> {
 
   const externalId = `${peerId}:${msg.id}`;
   if (msg.out) {
-    // Своё отправленное из OmniDesk может вернуться эхом. Даём отправке
+    // Своё отправленное из Rozmovio может вернуться эхом. Даём отправке
     // время записать идентификатор, иначе в ленте будет две копии.
     await new Promise((r) => setTimeout(r, 1500));
     if (l.recentSent.has(externalId)) return;

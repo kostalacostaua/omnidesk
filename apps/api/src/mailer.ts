@@ -49,7 +49,7 @@ export function createMailer(
   log: (line: string) => void,
   fetchImpl: typeof fetch = fetch,
 ): Mailer {
-  const from = env.MAIL_FROM || 'OmniDesk <no-reply@localhost>';
+  const from = env.MAIL_FROM || 'Rozmovio <no-reply@localhost>';
 
   if (env.RESEND_API_KEY) {
     const key = env.RESEND_API_KEY;
