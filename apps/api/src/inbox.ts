@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { validateSteps, withTenant, type Pool } from '@omnidesk/core';
+import { validateSteps, withTenant, zohoRecordUrl, type Pool } from '@omnidesk/core';
 
 /**
  * Рабочее место оператора: список диалогов с фильтрами, карточка контакта,
@@ -219,11 +219,20 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
         [req.params.id],
       );
 
+      // Ссылка на карточку в CRM: собирается здесь, а не в браузере,
+      // потому что адрес зависит от зоны Zoho, а её знает только сервер.
+      const { rows: inst } = await db.query<{ api_domain: string }>(
+        `SELECT api_domain FROM zoho_installations
+          WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`,
+      );
+      const c = contact[0] as { crm_module?: string; crm_record_id?: string } | undefined;
+
       return {
         contact: contact[0] ?? null,
         identities,
         notes,
         stats: stats[0] ?? null,
+        crmUrl: zohoRecordUrl(inst[0]?.api_domain, c?.crm_module, c?.crm_record_id),
       };
     });
 

@@ -32,6 +32,23 @@ export const mtprotoLoginKey = (loginId: string): string => `mtp:login:${loginId
 /** Ключ Redis для пароля двухэтапной проверки. Живёт секунды и удаляется после чтения. */
 export const mtprotoPasswordKey = (loginId: string): string => `mtp:pw:${loginId}`;
 
+/**
+ * Связка контакта с CRM.
+ *
+ * Отдельная задача, а не часть обработки сообщения: поход в чужой API
+ * может занять секунды и упасть, а сообщение клиента обязано быть
+ * записано и показано оператору немедленно.
+ */
+export interface CrmSyncJob {
+  tenantId: string;
+  contactId: string;
+  conversationId: string | null;
+  /** Из какого канала пришёл человек — это попадает в источник лида. */
+  channelType: string;
+  /** Первое сообщение: без него лид выглядит как пустая карточка. */
+  firstText?: string;
+}
+
 /** Задача продолжения сценария: всё состояние лежит в базе, здесь только ключ. */
 export interface ScenarioJob {
   tenantId: string;
@@ -94,12 +111,6 @@ export interface OutboundJob {
   /** Идемпотентность: повторная постановка той же задачи не должна
    *  привести ко второй отправке. */
   idempotencyKey: string;
-}
-
-export interface CrmSyncJob {
-  tenantId: string;
-  conversationId: string;
-  action: 'resolve_contact' | 'write_note' | 'raise_signal';
 }
 
 export interface MediaJob {

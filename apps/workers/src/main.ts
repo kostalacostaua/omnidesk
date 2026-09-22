@@ -1,10 +1,12 @@
 import { Queue, UnrecoverableError, Worker } from 'bullmq';
+import { createCrmSync } from './crm.js';
 import { Redis } from 'ioredis';
 import {
   QUEUE_INBOUND,
   QUEUE_MEDIA,
   QUEUE_OUTBOUND,
   QUEUE_MTPROTO_OUT,
+  QUEUE_CRM_SYNC,
   QUEUE_SCENARIO,
   computeResponseWindow,
   createPool,
@@ -32,6 +34,7 @@ import {
   withTenant,
   answerMatches,
   pickScenario,
+  type CrmSyncJob,
   type ScenarioJob,
   type ScenarioLike,
   type ScenarioStep,
@@ -138,6 +141,8 @@ async function persistMessage(
   inserted: boolean;
   messageId: string | null;
   conversationId: string | null;
+  /** Контакт, которому принадлежит сообщение. */
+  contactId: string | null;
   /** Заполнен, если у контакта ещё нет аватара — его нужно подтянуть. */
   avatarFor: string | null;
 }> {
@@ -257,6 +262,7 @@ async function persistMessage(
       inserted: (rowCount ?? 0) > 0,
       messageId: msgRows[0]?.id ?? null,
       conversationId,
+      contactId,
       avatarFor: av[0]?.avatar_url ? null : contactId,
     };
   });
@@ -276,6 +282,9 @@ const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, { connection, defau
 
 /** Продолжение сценариев после паузы и по истечении ожидания ответа. */
 const scenarioQueue = new Queue<ScenarioJob>(QUEUE_SCENARIO, { connection, defaultJobOptions });
+
+/** Связка контактов с CRM: поиск карточки и заведение лида. */
+const crmQueue = new Queue<CrmSyncJob>(QUEUE_CRM_SYNC, { connection, defaultJobOptions });
 
 /**
  * Постановка вложений в очередь скачивания.
@@ -641,13 +650,16 @@ async function handleInbound(job: InboundJob): Promise<void> {
     );
 
     for (const m of messages) {
-      const { inserted, messageId, conversationId, avatarFor } = await persistMessage(m);
+      const { inserted, messageId, conversationId, contactId, avatarFor } = await persistMessage(m);
       log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
         channelId: channel.id,
         externalId: m.externalId,
       });
       if (inserted && messageId) await enqueueMedia(m, messageId, 'telegram');
       if (inserted && avatarFor) await enqueueAvatar(m, avatarFor, 'telegram');
+      if (inserted && contactId && m.direction === 'in') {
+        await enqueueCrm(m, contactId, conversationId);
+      }
       // Бот запускается только на новых входящих: на дубликате он
       // ответил бы второй раз на то же самое сообщение.
       if (inserted && conversationId && m.direction === 'in') {
@@ -683,13 +695,16 @@ async function handleInbound(job: InboundJob): Promise<void> {
     );
 
     for (const m of messages) {
-      const { inserted, messageId, conversationId, avatarFor } = await persistMessage(m);
+      const { inserted, messageId, conversationId, contactId, avatarFor } = await persistMessage(m);
       log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
         channelId: channel.id,
         externalId: m.externalId,
       });
       if (inserted && messageId) await enqueueMedia(m, messageId, 'meta');
       if (inserted && avatarFor) await enqueueAvatar(m, avatarFor, 'meta');
+      if (inserted && contactId && m.direction === 'in') {
+        await enqueueCrm(m, contactId, conversationId);
+      }
       if (inserted && conversationId && m.direction === 'in') {
         const sent = await runBot(m, conversationId);
         if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
@@ -786,12 +801,15 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
       if (profile.username) m.peerProfile.username = profile.username;
     }
 
-    const { inserted, messageId, conversationId, avatarFor } = await persistMessage(m);
+    const { inserted, messageId, conversationId, contactId, avatarFor } = await persistMessage(m);
     log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
       channelId: channel.id,
       externalId: m.externalId,
     });
     if (inserted && messageId) await enqueueMedia(m, messageId, 'meta');
+    if (inserted && contactId && m.direction === 'in') {
+      await enqueueCrm(m, contactId, conversationId);
+    }
 
     // Контакт без аватара мог появиться раньше — тогда профиль спрашиваем
     // сейчас. Иначе у давних диалогов аватар не появился бы никогда.
@@ -839,11 +857,15 @@ async function handleMtprotoInbound(job: InboundJob): Promise<void> {
     channelType: 'telegram_user',
     sentAt: new Date(payload.message.sentAt),
   };
-  const { inserted, conversationId, avatarFor } = await persistMessage(m);
+  const { inserted, conversationId, contactId, avatarFor } = await persistMessage(m);
   log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
     channelId: channel.id,
     externalId: m.externalId,
   });
+  if (inserted && contactId && m.direction === 'in') {
+    await enqueueCrm(m, contactId, conversationId);
+  }
+
   if (avatarFor && payload.avatarKey) {
     const set = await withTenant(pool, channel.tenant_id, async (db) => {
       const { rowCount } = await db.query(
@@ -968,6 +990,33 @@ function ruleMatches(rule: BotRule, text: string, isFirstMessage: boolean): bool
  *
  * Возвращает число отправленных ответов — для лога.
  */
+/**
+ * Постановка задачи на связку с CRM.
+ *
+ * Ставится один раз на контакт: ключ задачи — идентификатор контакта,
+ * и повторная постановка за то же сообщение ничего не создаст. Внутри
+ * задача ещё раз убеждается, что связи нет, — иначе два входящих
+ * подряд от нового человека завели бы в CRM два лида.
+ */
+async function enqueueCrm(
+  msg: UnifiedMessage,
+  contactId: string,
+  conversationId: string | null,
+): Promise<void> {
+  const text = typeof msg.content.text === 'string' ? msg.content.text : '';
+  await crmQueue.add(
+    'sync',
+    {
+      tenantId: msg.tenantId,
+      contactId,
+      conversationId,
+      channelType: msg.channelType,
+      ...(text ? { firstText: text.slice(0, 500) } : {}),
+    },
+    { jobId: jobKey('crm', contactId) },
+  );
+}
+
 /**
  * Автоматика: выбор сценария и его выполнение.
  *
@@ -1920,6 +1969,34 @@ scenarioWorker.on('failed', (job, err) => {
 
 scenarioWorker.on('ready', () => log('info', 'Воркер сценариев запущен'));
 
+/**
+ * Воркер связки с CRM.
+ *
+ * Работает, только если у организации подключена Zoho; иначе задача
+ * молча завершается. Ключи приложения общие для всего сервиса и берутся
+ * из переменных — те же, что у api.
+ */
+const crmSync = createCrmSync({
+  pool,
+  redis: connection,
+  masterKey,
+  clientId: process.env['ZOHO_CLIENT_ID'] ?? '',
+  clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
+  log,
+});
+
+const crmWorker = new Worker<CrmSyncJob>(
+  QUEUE_CRM_SYNC,
+  async (job) => crmSync(job.data),
+  { connection, concurrency: 2 },
+);
+
+crmWorker.on('failed', (job, err) => {
+  log('error', 'Связка с CRM не выполнена', { jobId: job?.id, error: err.message });
+});
+
+crmWorker.on('ready', () => log('info', 'Воркер связки с CRM запущен'));
+
 // ═══════════════════════════════════════════════════════════════════════
 // Удаление данных по запросу из Facebook
 // ═══════════════════════════════════════════════════════════════════════
@@ -2005,10 +2082,12 @@ async function shutdown(signal: string): Promise<void> {
   // Даём текущим задачам доработать, новые не берём.
   await worker.close();
   await scenarioWorker.close();
+  await crmWorker.close();
   await outboundWorker.close();
   await mediaWorker.close();
   await mediaQueue.close();
   await scenarioQueue.close();
+  await crmQueue.close();
   await pool.end();
   connection.disconnect();
   process.exit(0);

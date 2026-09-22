@@ -1492,6 +1492,11 @@ function renderCard(){
       }).join('') : '<div class="dim" style="font-size:12.5px">Пока нет.</div>') +
     '</div>' +
 
+    (d.crmUrl
+      ? '<h4>CRM</h4><div class="kv2"><div class="k">Карточка</div>' +
+        '<div><a href="' + esc(d.crmUrl) + '" target="_blank" rel="noopener">открыть в Zoho</a></div></div>'
+      : '') +
+
     '<h4>Диалог</h4>' +
     '<div class="kv2">' +
       '<div class="k">Сообщений</div><div>' + esc((d.stats && d.stats.messages) || 0) + '</div>' +
