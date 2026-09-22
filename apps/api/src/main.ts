@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import {
   QUEUE_OUTBOUND,
   QUEUE_MEDIA,
+  QUEUE_CRM_SYNC,
   QUEUE_MTPROTO_LOGIN,
   assertRlsIntegrity,
   canSendFreeform,
@@ -23,6 +24,7 @@ import {
   type ChannelType,
   type OutboundJob,
   type MediaJob,
+  type CrmSyncJob,
   type MtprotoLoginJob,
 } from '@omnidesk/core';
 import { INBOX_HTML, UI_BUILD } from './ui.js';
@@ -33,6 +35,7 @@ import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
 import { registerLanding, LANDING_HTML } from './landing.js';
 import { registerZoho } from './zoho.js';
+import { registerWidget } from './widget.js';
 import { APP_ICON_SVG } from './brand.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -62,6 +65,11 @@ const mediaQueue = new Queue<MediaJob>(QUEUE_MEDIA, {
   defaultJobOptions,
 });
 /** Вход в номерной Telegram: задачу выполняет сервис sessions. */
+const crmQueue = new Queue<CrmSyncJob>(QUEUE_CRM_SYNC, {
+  connection: redis,
+  defaultJobOptions,
+});
+
 const mtprotoLoginQueue = new Queue<MtprotoLoginJob>(QUEUE_MTPROTO_LOGIN, {
   connection: redis,
   defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
@@ -194,6 +202,8 @@ registerSettings(app, {
       }
     : {}),
 });
+
+registerWidget(app, { pool, requireAuth: (req) => requireAuth(req as never) });
 
 registerZoho(app, {
   pool,
@@ -641,6 +651,68 @@ app.get<{ Params: { contactId: string } }>('/avatars/:contactId', async (req, re
     .type(file.contentType || 'image/jpeg')
     .header('cache-control', 'private, max-age=86400')
     .send(file.body);
+});
+
+/**
+ * Отправить контакт в CRM руками.
+ *
+ * Автоматика срабатывает на первое сообщение, но случаи бывают разные:
+ * CRM подключили позже, чем пришёл человек; лид удалили и нужен заново;
+ * оператор хочет завести карточку прямо сейчас, не дожидаясь следующего
+ * сообщения. Кнопка делает ровно то же, что и автоматика.
+ */
+app.post<{ Params: { id: string } }>('/contacts/:id/crm', async (req, reply) => {
+  const auth = requireAuth(req as never);
+  if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+  const info = await withTenant(pool, auth.tenantId, async (db) => {
+    const { rows } = await db.query<{
+      crm_record_id: string | null;
+      channel_type: string | null;
+      conversation_id: string | null;
+      first_text: string | null;
+    }>(
+      `SELECT c.crm_record_id,
+              ch.type AS channel_type,
+              cv.id   AS conversation_id,
+              (SELECT m.content->>'text' FROM messages m
+                WHERE m.conversation_id = cv.id AND m.direction = 'in'
+                ORDER BY m.sent_at ASC LIMIT 1) AS first_text
+         FROM contacts c
+         LEFT JOIN conversations cv ON cv.contact_id = c.id
+         LEFT JOIN channels ch ON ch.id = cv.channel_id
+        WHERE c.id = $1
+        ORDER BY cv.last_message_at DESC NULLS LAST
+        LIMIT 1`,
+      [req.params.id],
+    );
+    return rows[0] ?? null;
+  });
+
+  if (!info) return reply.code(404).send({ error: 'not_found' });
+  if (info.crm_record_id) return reply.code(409).send({ error: 'already_linked' });
+
+  const zoho = await withTenant(pool, auth.tenantId, async (db) => {
+    const { rows } = await db.query(`SELECT 1 FROM zoho_installations WHERE status = 'active' LIMIT 1`);
+    return rows.length > 0;
+  });
+  if (!zoho) return reply.code(409).send({ error: 'crm_not_connected' });
+
+  // Ключ с отметкой времени: ручной повтор должен выполняться, а не
+  // считаться дубликатом уже сделанной задачи.
+  await crmQueue.add(
+    'sync',
+    {
+      tenantId: auth.tenantId,
+      contactId: req.params.id,
+      conversationId: info.conversation_id,
+      channelType: info.channel_type ?? 'unknown',
+      ...(info.first_text ? { firstText: info.first_text.slice(0, 500) } : {}),
+    },
+    { jobId: jobKey('crm-manual', req.params.id, String(Date.now())) },
+  );
+
+  return { ok: true };
 });
 
 /* ── Файлы шаблонов ──────────────────────────────────────────────────

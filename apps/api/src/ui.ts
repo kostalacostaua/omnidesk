@@ -1492,10 +1492,14 @@ function renderCard(){
       }).join('') : '<div class="dim" style="font-size:12.5px">Пока нет.</div>') +
     '</div>' +
 
+    '<h4>CRM</h4>' +
     (d.crmUrl
-      ? '<h4>CRM</h4><div class="kv2"><div class="k">Карточка</div>' +
+      ? '<div class="kv2"><div class="k">Карточка</div>' +
         '<div><a href="' + esc(d.crmUrl) + '" target="_blank" rel="noopener">открыть в Zoho</a></div></div>'
-      : '') +
+      : '<div class="row2"><button class="ghost mini" id="cCrm">Отправить в Zoho</button></div>' +
+        '<div class="hint" style="margin-top:6px">Найдём по номеру и привяжем карточку, ' +
+        'а если такого клиента ещё нет — заведём лид.</div>' +
+        '<div class="err" id="cCrmErr"></div>') +
 
     '<h4>Диалог</h4>' +
     '<div class="kv2">' +
@@ -1517,6 +1521,26 @@ function renderCard(){
       setTimeout(function(){ if (el('cOk')) el('cOk').textContent = '' }, 2000);
       refresh();
     }).catch(showErr).then(function(){ busy(el('cSave'), false) });
+  };
+
+  if (el('cCrm')) el('cCrm').onclick = function(){
+    busy(el('cCrm'), true);
+    el('cCrmErr').textContent = '';
+    api('/contacts/' + ct.id + '/crm', { method:'POST' })
+      .then(function(){
+        toast('Отправляю в Zoho...');
+        // Связка идёт задачей: ответ приходит не мгновенно, и карточку
+        // имеет смысл перечитать через пару секунд, а не сразу.
+        setTimeout(loadCard, 2500);
+        setTimeout(loadCard, 6000);
+      })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('cCrmErr').textContent = p.error === 'crm_not_connected'
+          ? 'Zoho не подключена — сделайте это на странице «Интеграции»'
+          : p.error === 'already_linked' ? 'Карточка уже связана' : 'Не удалось отправить';
+        busy(el('cCrm'), false);
+      });
   };
 
   el('cTagAdd').onclick = function(){
@@ -2164,6 +2188,7 @@ function pageIntegrations(){
                   : '<span class="pill warn">нужно переподключить</span>') + '</div>' +
               '<div class="s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div>' +
               '</div><div class="row" style="gap:6px;flex:none">' +
+              '<button class="ghost mini" data-zwid="' + z.id + '">Установить виджет</button>' +
               '<button class="ghost mini" data-zcheck="' + z.id + '">Проверить</button>' +
               '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button>' +
               '</div></div>';
@@ -2190,8 +2215,7 @@ function pageIntegrations(){
       '<div class="card"><div class="s" style="color:var(--t2);line-height:1.7">' +
       'После подключения: входящее сообщение ищет контакт по номеру телефона и создаёт лид, ' +
       'если такого нет; переписка показывается прямо в карточке Zoho виджетом; ответ из виджета ' +
-      'уходит в тот канал, откуда написал клиент. Установка виджета — следующий шаг, ' +
-      'он делается из того же подключения.</div></div></div>' +
+      'уходит в тот канал, откуда написал клиент.</div></div></div>' +
       '</div>';
 
     if (S.zohoNote){ el('zOk').textContent = S.zohoNote; S.zohoNote = null }
@@ -2222,6 +2246,30 @@ function pageIntegrations(){
               : 'Не удалось проверить';
             busy(b, false);
           });
+      };
+    });
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zwid]'), function(b){
+      b.onclick = function(){
+        busy(b, true);
+        el('zErr').textContent = ''; el('zOk').textContent = '';
+        api('/settings/zoho/' + b.dataset.zwid + '/widget', { method:'POST' })
+          .then(function(){
+            el('zOk').innerHTML = 'Виджет зарегистрирован. Осталось поставить его в карточку: ' +
+              'в Zoho откройте <b>Настройки → Настройка → Модули и поля → Контакты → ' +
+              'Связанные списки</b>, нажмите <b>Добавить связанный список</b> и выберите ' +
+              '<b>Rozmovio</b>. То же самое для модуля <b>Лиды</b>.';
+          })
+          .catch(function(e){
+            var p = e.payload || {};
+            el('zErr').textContent = p.error === 'scope_missing'
+              ? 'Для установки виджета нужно новое разрешение. Нажмите «Подключить ещё организацию» ' +
+                'и войдите в ту же организацию — согласие обновится.'
+              : p.error === 'token_rejected'
+                ? 'Zoho больше не принимает доступ — подключите заново.'
+                : 'Не удалось установить виджет' + (p.detail ? ': ' + p.detail : '');
+          })
+          .then(function(){ busy(b, false) });
       };
     });
 
