@@ -84,5 +84,10 @@ or write to us at the same address.</p>
     reply.type('text/html; charset=utf-8').send(html);
 
   app.get('/privacy', send(privacy) as never);
-  app.get('/data-deletion', send(deletion) as never);
+  // Один и тот же текст под несколькими адресами: проверка ссылки
+  // у Meta капризна к написанию, и проще отвечать на все варианты,
+  // чем гадать, какой из них она примет.
+  for (const path of ['/data-deletion', '/datadeletion', '/data_deletion', '/deletion']) {
+    app.get(path, send(deletion) as never);
+  }
 }
