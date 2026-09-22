@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-import { BRAND_CSS, THEME_JS } from './theme.js';
+import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
 
 export const UI_BUILD = '2026-09-22-5';
 
@@ -40,7 +40,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script data-theme-boot>${THEME_JS}</script>
+<script data-theme-boot>${THEME_JS}${EMOJI_JS}</script>
 <style>
   /* ═══ Оформление ═══
      Токены, теги и готовые блоки живут в theme.ts — одном месте на весь
@@ -221,18 +221,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .icob:hover{background:var(--hover);border-color:var(--t3)}
   .icob:active{transform:translateY(1px)}
   .icob:hover svg{stroke:var(--t1)}
-  /* Панель смайлов. Ровно та же подложка, что у списка шаблонов:
-     это два соседних инструмента одной строки, и разное оформление
-     читалось бы как разные части интерфейса. */
-  .emobox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
-    max-height:212px;overflow-y:auto;padding:4px 8px 8px}
-  .emobox .gt{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
-    font-weight:700;margin:8px 0 4px}
-  .emobox .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:2px}
-  .emobox button{background:transparent;border:0;box-shadow:none;font-size:19px;line-height:1;
-    padding:4px;border-radius:6px;color:inherit;transition:transform .08s ease,background-color .12s ease}
-  .emobox button:hover{background:var(--hover);transform:scale(1.15)}
-  .emobox button:active{transform:scale(.94)}
+  /* Панель смайлов — общее оформление с виджетом. */
+  ${EMOJI_CSS}
 
   /* Файл, приложенный к шаблону. */
   .fchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
@@ -1108,7 +1098,7 @@ function renderComposer(force){
     '<input type="file" id="file" style="display:none">' +
     '<button class="icob" id="clip" title="Прикрепить файл">' + icon('clip') + '</button>' +
     '<button class="icob" id="emo" title="Смайлы">' + icon('smile') + '</button>' +
-    (QR.length ? '<button class="icob" id="tpl" title="Шаблон">' + icon('bolt') + '</button>' : '') +
+    '<button class="icob" id="tpl" title="Шаблоны ответов">' + icon('bolt') + '</button>' +
     '<textarea id="txt" rows="1" placeholder="Ответ клиенту. Enter — отправить, Shift+Enter — перенос"></textarea>' +
     '<button id="send">Отправить</button></div><div class="err" id="sendErr"></div>';
 
@@ -1140,7 +1130,7 @@ function renderComposer(force){
   };
   el('send').onclick = send;
   el('emo').onclick = toggleEmoji;
-  if (el('tpl')) el('tpl').onclick = toggleTemplates;
+  el('tpl').onclick = toggleTemplates;
   ta.focus();
 }
 
@@ -1178,6 +1168,13 @@ function useTemplate(q){
 function toggleTemplates(){
   var b = el('tplBox');
   if (b.style.display !== 'none'){ b.style.display='none'; return }
+  if (!QR.length){
+    b.innerHTML = '<div class="qr" style="cursor:default"><b>Шаблонов пока нет.</b> ' +
+      '<span class="x">Заведите их в разделе «Шаблоны» — потом вставляются командой /имя ' +
+      'или отсюда, вместе с файлом.</span></div>';
+    b.style.display = 'block';
+    return;
+  }
   b.innerHTML = QR.map(function(q, i){
     var n = (q.attachments || []).length;
     return '<div class="qr" data-i="' + i + '"><b>/' + esc(q.shortcut) + '</b>' +
@@ -1194,71 +1191,19 @@ function toggleTemplates(){
 }
 
 
-/* ── Смайлы ──────────────────────────────────────────────────────── */
-
-/**
- * Набор для поля ответа.
- *
- * Не весь Unicode, а то, чем реально пользуются в переписке с клиентом:
- * лица, жесты, бытовые предметы, символы доставки и оплаты. Полный
- * список эмодзи — это девять экранов, по которым никто не листает,
- * и лишние двести килобайт на странице.
- *
- * Частые собираются сами: первые восемь, которыми оператор пользовался,
- * стоят первым рядом. Хранятся на устройстве, как и тема.
- */
-var EMO = {
-  'Лица':['🙂','😊','😉','😁','😄','😅','🤗','🤝','👋','🙏','👍','👌','💪','🔥','✨','❤️','💛','🎉','😍','🥰','😂','🤔','😐','😔','😢','😮','🙈','😎'],
-  'Работа':['✅','❌','⚠️','❗','❓','📌','📎','📄','📝','🗓','⏰','⏳','💬','📞','📧','🔗','🔒','⚙️','📦','🚚','🏷','💳','💰','🧾','📊','📈','🎁','🛒'],
-  'Товар':['👕','👗','👟','👜','🎒','⌚','💍','📱','💻','🎧','📷','🪑','🛏','🍽','☕','🌿','🌸','🎂','🧸','🖼','🧴','🧼','🧹','🔧','🔨','🧰','🪞','🕯']
-};
-
-function emoRecent(){
-  try { return JSON.parse(localStorage.getItem('rz.emo') || '[]') } catch(e){ return [] }
-}
-function emoUse(ch){
-  var list = emoRecent().filter(function(x){ return x !== ch });
-  list.unshift(ch);
-  try { localStorage.setItem('rz.emo', JSON.stringify(list.slice(0, 8))) } catch(e){}
-}
+/* ── Смайлы ───────────────────────────────────────────────────────
+   Набор и вставка — общие с виджетом в карточке Zoho, они приходят
+   из theme.ts. Здесь остаётся только показ и скрытие панели. */
 
 function toggleEmoji(){
   var b = el('emoBox');
   if (!b) return;
   if (b.style.display !== 'none'){ b.style.display = 'none'; return }
-
-  var recent = emoRecent();
-  var html = recent.length
-    ? '<div class="grp"><div class="gt">Часто</div><div class="gr">' +
-      recent.map(function(c){ return '<button type="button" data-e="' + c + '">' + c + '</button>' }).join('') +
-      '</div></div>'
-    : '';
-  html += Object.keys(EMO).map(function(name){
-    return '<div class="grp"><div class="gt">' + name + '</div><div class="gr">' +
-      EMO[name].map(function(c){ return '<button type="button" data-e="' + c + '">' + c + '</button>' }).join('') +
-      '</div></div>';
-  }).join('');
-
-  b.innerHTML = html;
+  b.innerHTML = emoPanel();
   b.style.display = 'block';
-
   Array.prototype.forEach.call(b.querySelectorAll('[data-e]'), function(x){
-    x.onclick = function(){ insertEmoji(x.dataset.e) };
+    x.onclick = function(){ emoInsert(el('txt'), x.dataset.e) };
   });
-}
-
-/** Вставка в позицию курсора, а не в конец: оператор ставит смайл по месту. */
-function insertEmoji(ch){
-  var ta = el('txt');
-  if (!ta) return;
-  var a = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
-  var bnd = ta.selectionEnd == null ? a : ta.selectionEnd;
-  ta.value = ta.value.slice(0, a) + ch + ta.value.slice(bnd);
-  ta.focus();
-  ta.setSelectionRange(a + ch.length, a + ch.length);
-  ta.style.height = 'auto';
-  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
-  emoUse(ch);
 }
 
 /* ── Ответ на сообщение и реакции ────────────────────────────────── */

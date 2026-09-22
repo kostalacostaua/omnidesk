@@ -20,12 +20,13 @@ import { Script } from 'node:vm';
 
 const { INBOX_HTML } = await import('../apps/api/dist/ui.js');
 const { LANDING_HTML } = await import('../apps/api/dist/landing.js');
+const { WIDGET_HTML } = await import('../apps/api/dist/widget.js');
 
 // Скриптов на странице больше одного: тема применяется до отрисовки
 // отдельным блоком в head, иначе страница мигает светлой. Проверять
 // надо каждый — сломанный «маленький» блок останавливает разбор
 // страницы так же надёжно, как сломанный большой.
-const blocks = [...(INBOX_HTML + LANDING_HTML).matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+const blocks = [...(INBOX_HTML + LANDING_HTML + WIDGET_HTML).matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 if (!blocks.length) {
   console.error('ОШИБКА: в собранной странице нет блока <script>');
   process.exit(1);
@@ -68,5 +69,6 @@ const bytes = Buffer.byteLength(INBOX_HTML, 'utf8');
 const site = Buffer.byteLength(LANDING_HTML, 'utf8');
 console.log(
   'страница инбокса: скрипт разбирается, ' + Math.round(bytes / 1024) + ' КБ; ' +
-  'промо-страница: ' + Math.round(site / 1024) + ' КБ',
+  'промо-страница: ' + Math.round(site / 1024) + ' КБ; ' +
+  'виджет: ' + Math.round(Buffer.byteLength(WIDGET_HTML, 'utf8') / 1024) + ' КБ',
 );

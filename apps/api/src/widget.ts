@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { withTenant, type Pool } from '@omnidesk/core';
-import { BRAND_CSS, THEME_JS } from './theme.js';
+import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
 
 /**
  * Виджет для карточки Zoho CRM.
@@ -35,7 +35,7 @@ export const WIDGET_HTML = `<!DOCTYPE html>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script data-theme-boot>${THEME_JS}</script>
+<script data-theme-boot>${THEME_JS}${EMOJI_JS}</script>
 <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
 <style>
   ${BRAND_CSS}
@@ -55,9 +55,44 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   .m.out{align-self:flex-end;background:var(--accent);color:var(--on-accent);
     border-bottom-right-radius:3px}
   .m .meta{font-size:10px;opacity:.7;margin-top:3px}
-  .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none;
-    display:flex;gap:8px;align-items:flex-end}
-  .comp textarea{min-height:34px;max-height:120px;border-radius:7px}
+  .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none}
+  .comp .row{display:flex;gap:6px;align-items:flex-end}
+  .comp textarea{min-height:34px;max-height:120px;border-radius:7px;min-width:0}
+  #send{flex:none}
+  /* Значок самолётика — запасной вид кнопки для узкой рамки. Прячем
+     его здесь, а не встроенным стилем: встроенный побеждает правило
+     из медиазапроса, и на телефоне кнопка осталась бы пустой. */
+  #send .ic{display:none}
+  .icob{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;
+    justify-content:center;flex:none;background:var(--panel);border:1px solid var(--line2);
+    border-radius:var(--r1);box-shadow:none;font-size:15px;line-height:1;color:var(--t2)}
+  .icob:hover{background:var(--hover);border-color:var(--t3);color:var(--t1)}
+  ${EMOJI_CSS}
+  .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
+    max-height:170px;overflow-y:auto}
+  .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12px}
+  .tplbox .qr:last-child{border-bottom:0}
+  .tplbox .qr:hover{background:var(--hover)}
+  .tplbox .qr b{color:var(--link);font-family:var(--mono);font-size:11px}
+  .tplbox .qr .x{color:var(--t3)}
+  .fileprev{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--t2);
+    background:var(--panel2);border-radius:var(--r1);padding:6px 9px;margin-bottom:8px}
+  .fileprev .c{cursor:pointer;color:var(--t3);font-weight:700;margin-left:auto}
+
+  /* Узкая рамка и телефон. Виджет в карточке Zoho на мобильном
+     занимает всю ширину экрана, а кнопка «Отправить» со словом
+     съедает половину строки — оставляем значок. */
+  @media(max-width:420px){
+    #msgs{padding:10px 8px}
+    .m{max-width:88%;font-size:13px}
+    .comp{padding:8px}
+    .comp textarea{font-size:16px}
+    #send .lbl{display:none}
+    #send .ic{display:inline}
+    #send{width:40px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+      font-size:15px}
+    .wbar .sub{display:none}
+  }
   .mid{margin:auto;max-width:320px;padding:20px;text-align:center}
   .mid input{margin-top:9px}
   .mid .h3{margin-bottom:6px}
@@ -84,8 +119,20 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   </div>
   <div id="msgs"></div>
   <div class="comp" id="comp" style="display:none">
-    <textarea id="txt" rows="1" placeholder="Ответ клиенту"></textarea>
-    <button id="send">Отправить</button>
+    <div class="fileprev" id="fprev" style="display:none">
+      <span id="fname"></span><span class="c" id="fcancel">×</span>
+    </div>
+    <div class="tplbox" id="tplBox" style="display:none"></div>
+    <div class="emobox" id="emoBox" style="display:none"></div>
+    <div class="row">
+      <input type="file" id="file" style="display:none">
+      <button class="icob" id="clip" title="Прикрепить файл">📎</button>
+      <button class="icob" id="emo" title="Смайлы">🙂</button>
+      <button class="icob" id="tpl" title="Шаблоны ответов">⚡</button>
+      <textarea id="txt" rows="1" placeholder="Ответ клиенту"></textarea>
+      <button id="send"><span class="lbl">Отправить</span><span class="ic">➤</span></button>
+    </div>
+    <div class="err" id="sendErr"></div>
   </div>
 </div>
 
@@ -101,6 +148,7 @@ export const WIDGET_HTML = `<!DOCTYPE html>
 var TOKEN = '';
 try { TOKEN = sessionStorage.getItem('rz_widget_token') || localStorage.getItem('rz_widget_token') || '' } catch(e){}
 
+var NL = String.fromCharCode(10);
 var CONV = null;
 var timer = null;
 var record = null;
@@ -168,6 +216,7 @@ el('go').onclick = function(){
       TOKEN = r.token;
       try { localStorage.setItem('rz_widget_token', TOKEN) } catch(e){}
       el('gate').style.display = 'none';
+      loadTemplates();
       lookup();
     })
     .catch(function(){ el('gateErr').textContent = 'Неверный код' })
@@ -199,6 +248,7 @@ function lookup(){
     el('av').style.background = 'var(--accent)';
     el('comp').style.display = d.canReply ? 'flex' : 'none';
     load();
+    if (!QR.length) loadTemplates();
     clearInterval(timer);
     timer = setInterval(load, 5000);
   }).catch(function(){});
@@ -211,6 +261,9 @@ function load(){
     var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
     box.innerHTML = (d.messages || []).map(function(m){
       var text = (m.content && m.content.text) || '';
+      var att = (m.content && m.content.attachments) || [];
+      if (att.length && !text) text = '📎 ' + (att[0].filename || 'вложение');
+      else if (att.length) text = text + NL + '📎 ' + (att[0].filename || 'вложение');
       var when = new Date(m.sent_at);
       var hh = String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
       return '<div class="m ' + (m.direction === 'in' ? 'in' : 'out') + '">' + esc(text) +
@@ -220,14 +273,132 @@ function load(){
   }).catch(function(){});
 }
 
+/* ── Шаблоны ──────────────────────────────────────────────────────
+   Те же, что в рабочем месте: список приходит с сервера. Шаблон с
+   файлом подставляет и файл — уходит ссылка на уже загруженный,
+   а не новая копия. */
+var QR = [];
+var pending = null;
+
+function loadTemplates(){
+  api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
+}
+
+function showFile(){
+  if (!pending){ el('fprev').style.display = 'none'; return }
+  el('fprev').style.display = 'flex';
+  el('fname').textContent = pending.name +
+    (pending.size ? ' · ' + Math.round(pending.size / 1024) + ' КБ' : '');
+}
+
+el('fcancel').onclick = function(){ pending = null; showFile() };
+
+el('clip').onclick = function(){ el('file').click() };
+el('file').onchange = function(){
+  var f = this.files && this.files[0];
+  if (!f) return;
+  if (f.size > 20 * 1024 * 1024){ el('sendErr').textContent = 'Файл больше 20 МБ'; return }
+  pending = { file: f, name: f.name, size: f.size, type: f.type };
+  el('sendErr').textContent = '';
+  showFile();
+};
+
+el('emo').onclick = function(){
+  var b = el('emoBox');
+  if (b.style.display !== 'none'){ b.style.display = 'none'; return }
+  el('tplBox').style.display = 'none';
+  b.innerHTML = emoPanel();
+  b.style.display = 'block';
+  Array.prototype.forEach.call(b.querySelectorAll('[data-e]'), function(x){
+    x.onclick = function(){ emoInsert(el('txt'), x.dataset.e) };
+  });
+};
+
+el('tpl').onclick = function(){
+  var b = el('tplBox');
+  if (b.style.display !== 'none'){ b.style.display = 'none'; return }
+  el('emoBox').style.display = 'none';
+  if (!QR.length){
+    b.innerHTML = '<div class="qr" style="cursor:default"><b>Шаблонов нет.</b> ' +
+      '<span class="x">Заведите их в разделе «Шаблоны» в приложении.</span></div>';
+    b.style.display = 'block';
+    return;
+  }
+  b.innerHTML = QR.map(function(q, i){
+    var n = (q.attachments || []).length;
+    return '<div class="qr" data-i="' + i + '"><b>/' + esc(q.shortcut) + '</b> ' +
+      (n ? '<span class="x">📎 ' + n + '</span> ' : '') +
+      '<span class="x">' + esc(q.body) + '</span></div>';
+  }).join('');
+  b.style.display = 'block';
+  Array.prototype.forEach.call(b.children, function(node){
+    node.onclick = function(){
+      var q = QR[Number(node.dataset.i)];
+      if (!q) return;
+      var ta = el('txt');
+      ta.value = q.body;
+      var f = (q.attachments || [])[0];
+      pending = f ? { qr: { id: q.id, index: 0 }, name: f.filename || 'файл', size: f.size || 0 } : null;
+      showFile();
+      b.style.display = 'none';
+      ta.focus();
+    };
+  });
+};
+
+/** Чтение файла в base64: тем же способом, что и в рабочем месте. */
+function readAsBase64(file){
+  return new Promise(function(resolve, reject){
+    var r = new FileReader();
+    r.onload = function(){
+      var s = String(r.result || '');
+      var i = s.indexOf('base64,');
+      resolve(i >= 0 ? s.slice(i + 7) : '');
+    };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+function fileKind(mime, name){
+  var m = String(mime || '');
+  if (m.indexOf('image/') === 0) return 'image';
+  if (m.indexOf('video/') === 0) return 'video';
+  if (m.indexOf('audio/') === 0) return 'audio';
+  return 'document';
+}
+
 el('send').onclick = function(){
   var ta = el('txt');
   var text = ta.value.trim();
-  if (!text || !CONV) return;
+  if ((!text && !pending) || !CONV) return;
   el('send').disabled = true;
-  api('/conversations/' + CONV + '/messages', { method:'POST', body:{ text: text } })
-    .then(function(){ ta.value = ''; load() })
-    .catch(function(){})
+  el('sendErr').textContent = '';
+
+  var payload = { text: text };
+  var prepared = Promise.resolve();
+
+  if (pending && pending.qr) {
+    payload.attachment = { fromQuickReply: pending.qr };
+  } else if (pending) {
+    prepared = readAsBase64(pending.file).then(function(b64){
+      payload.attachment = {
+        filename: pending.name,
+        mime: pending.type || 'application/octet-stream',
+        type: fileKind(pending.type, pending.name),
+        dataBase64: b64
+      };
+    });
+  }
+
+  prepared
+    .then(function(){ return api('/conversations/' + CONV + '/messages', { method:'POST', body: payload }) })
+    .then(function(){ ta.value = ''; pending = null; showFile(); load() })
+    .catch(function(e){
+      var p = (e && e.payload) || {};
+      el('sendErr').textContent = p.error === 'file_too_large' ? 'Файл больше 20 МБ'
+        : p.reason || p.error || 'Не удалось отправить';
+    })
     .then(function(){ el('send').disabled = false });
 };
 el('txt').onkeydown = function(e){

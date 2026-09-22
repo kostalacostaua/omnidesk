@@ -335,3 +335,75 @@ function paintTheme(){
 }
 themeApply(themeGet());
 `;
+
+/**
+ * Смайлы для поля ответа.
+ *
+ * Один набор на рабочее место и на виджет в карточке Zoho: разные
+ * наборы в двух местах одного продукта — это не выбор, а недосмотр.
+ *
+ * Не весь Unicode, а то, чем реально пользуются в переписке с клиентом:
+ * лица и жесты, рабочие символы, товары. Полный список — девять экранов,
+ * по которым никто не листает, и лишние сотни килобайт на странице.
+ *
+ * Частые собираются сами и живут на устройстве, как и выбор темы.
+ */
+export const EMOJI_JS = `
+var EMO = {
+  'Лица':['🙂','😊','😉','😁','😄','😅','🤗','🤝','👋','🙏','👍','👌','💪','🔥','✨','❤️','💛','🎉','😍','🥰','😂','🤔','😐','😔','😢','😮','🙈','😎'],
+  'Работа':['✅','❌','⚠️','❗','❓','📌','📎','📄','📝','🗓','⏰','⏳','💬','📞','📧','🔗','🔒','⚙️','📦','🚚','🏷','💳','💰','🧾','📊','📈','🎁','🛒'],
+  'Товар':['👕','👗','👟','👜','🎒','⌚','💍','📱','💻','🎧','📷','🪑','🛏','🍽','☕','🌿','🌸','🎂','🧸','🖼','🧴','🧼','🧹','🔧','🔨','🧰','🪞','🕯']
+};
+
+function emoRecent(){
+  try { return JSON.parse(localStorage.getItem('rz.emo') || '[]') } catch(e){ return [] }
+}
+function emoUse(ch){
+  var list = emoRecent().filter(function(x){ return x !== ch });
+  list.unshift(ch);
+  try { localStorage.setItem('rz.emo', JSON.stringify(list.slice(0, 8))) } catch(e){}
+}
+
+/** Разметка панели: часто используемые первым рядом, дальше наборы. */
+function emoPanel(){
+  var recent = emoRecent();
+  var row = function(list){
+    return list.map(function(c){
+      return '<button type="button" data-e="' + c + '">' + c + '</button>';
+    }).join('');
+  };
+  var html = recent.length
+    ? '<div class="grp"><div class="gt">Часто</div><div class="gr">' + row(recent) + '</div></div>'
+    : '';
+  return html + Object.keys(EMO).map(function(name){
+    return '<div class="grp"><div class="gt">' + name + '</div><div class="gr">' + row(EMO[name]) + '</div></div>';
+  }).join('');
+}
+
+/** Вставка в позицию курсора, а не в конец: смайл ставят по месту. */
+function emoInsert(ta, ch){
+  if (!ta) return;
+  var a = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+  var b = ta.selectionEnd == null ? a : ta.selectionEnd;
+  ta.value = ta.value.slice(0, a) + ch + ta.value.slice(b);
+  ta.focus();
+  ta.setSelectionRange(a + ch.length, a + ch.length);
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+  emoUse(ch);
+}
+`;
+
+/** Оформление панели смайлов: тоже одно на оба места. */
+export const EMOJI_CSS = `
+  .emobox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
+    max-height:212px;overflow-y:auto;padding:4px 8px 8px}
+  .emobox .gt{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+    font-weight:700;margin:8px 0 4px}
+  .emobox .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:2px}
+  .emobox button{background:transparent;border:0;box-shadow:none;font-size:19px;line-height:1;
+    padding:4px;border-radius:6px;color:inherit;
+    transition:transform .08s ease,background-color .12s ease}
+  .emobox button:hover{background:var(--hover);transform:scale(1.15)}
+  .emobox button:active{transform:scale(.94)}
+`;
