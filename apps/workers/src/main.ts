@@ -733,7 +733,7 @@ async function metaProfile(
       p.profile_pic ? { picture: p.profile_pic } : {},
     );
   } catch (err) {
-    log('debug', 'Профиль собеседника не получен', { type, error: (err as Error).message });
+    log('warn', 'Профиль собеседника не получен', { type, peerId, error: (err as Error).message });
     return {};
   }
 }
@@ -767,12 +767,14 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
     // иначе уникальный индекс его не узнает и в ленте будет копия.
     if (m.direction === 'out') await new Promise((r) => setTimeout(r, 3000));
 
-    let picture: string | undefined;
-    if (creds && !(await identityExists(channel.tenant_id, m.channelType, m.peerId))) {
-      const p = await metaProfile(entry.channelType, m.peerId, creds.pageToken);
-      if (p.name) m.peerProfile.name = p.name;
-      if (p.username) m.peerProfile.username = p.username;
-      picture = p.picture;
+    // Профиль спрашиваем у Meta, если собеседник новый: в вебхуке
+    // приходит только числовой id, без имени и фото.
+    let profile: { name?: string; username?: string; picture?: string } = {};
+    const known = await identityExists(channel.tenant_id, m.channelType, m.peerId);
+    if (creds && !known) {
+      profile = await metaProfile(entry.channelType, m.peerId, creds.pageToken);
+      if (profile.name) m.peerProfile.name = profile.name;
+      if (profile.username) m.peerProfile.username = profile.username;
     }
 
     const { inserted, messageId, conversationId, avatarFor } = await persistMessage(m);
@@ -781,7 +783,18 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
       externalId: m.externalId,
     });
     if (inserted && messageId) await enqueueMedia(m, messageId, 'meta');
-    if (avatarFor && picture) await enqueueAvatar(m, avatarFor, 'meta', picture);
+
+    // Контакт без аватара мог появиться раньше — тогда профиль спрашиваем
+    // сейчас. Иначе у давних диалогов аватар не появился бы никогда.
+    if (avatarFor && creds) {
+      if (!profile.picture && known) profile = await metaProfile(entry.channelType, m.peerId, creds.pageToken);
+      if (profile.picture) {
+        await enqueueAvatar(m, avatarFor, 'meta', profile.picture);
+        log('info', 'Аватар Meta поставлен в очередь', { contactId: avatarFor });
+      } else {
+        log('warn', 'Meta не отдала фото профиля', { contactId: avatarFor, peerId: m.peerId });
+      }
+    }
     if (inserted && conversationId && m.direction === 'in') {
       const sent = await runBot(m, conversationId);
       if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
