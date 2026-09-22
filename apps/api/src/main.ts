@@ -181,6 +181,33 @@ registerLegal(app, {
   metaAppSecret: process.env['META_APP_SECRET'] ?? '',
 });
 
+/**
+ * Только https.
+ *
+ * Railway принимает и http, и https и сообщает протокол заголовком
+ * x-forwarded-proto. Без этой проверки страница открывается по http,
+ * и браузер пишет «Не защищено» — при живом и действительном
+ * сертификате. Для сервиса, где вводят почту и код входа, такая
+ * надпись дороже любой экономии на редиректе.
+ *
+ * Строгий транспорт (HSTS) на год говорит браузеру больше никогда
+ * не ходить сюда по http: второй и последующие заходы не будут
+ * тратить лишний запрос на перенаправление.
+ *
+ * Проверка здоровья приходит внутрь контейнера напрямую, без этого
+ * заголовка, — её редирект не затрагивает.
+ */
+app.addHook('onRequest', async (req, reply) => {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '');
+  if (proto === 'http') {
+    const host = String(req.headers['host'] ?? '');
+    if (host) return reply.code(301).redirect(`https://${host}${req.url}`);
+  }
+  if (proto === 'https') {
+    reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+  }
+});
+
 app.get('/health', async () => ({ status: 'ok' }));
 
 /**

@@ -312,12 +312,17 @@ export const BRAND_CSS = TOKENS_CSS + BASE_CSS + KIT_CSS;
  * устройства, а не человека — на рабочем мониторе светлая, на ноутбуке
  * вечером тёмная. Функция вызывается до отрисовки, иначе страница
  * мигнёт светлой темой перед тем, как станет тёмной.
+ *
+ * По умолчанию светлая, а не системная. Системная выглядит вежливо,
+ * но означает, что половина людей видит продукт впервые тёмным,
+ * а оформление разрабатывалось и проверялось на светлом. Тёмная и
+ * системная остаются в переключателе — третьим и вторым нажатием.
  */
 export const THEME_JS = `
-function themeGet(){try{return localStorage.getItem('rz.theme')||'auto'}catch(e){return 'auto'}}
+function themeGet(){try{return localStorage.getItem('rz.theme')||'light'}catch(e){return 'light'}}
 function themeSet(v){try{localStorage.setItem('rz.theme',v)}catch(e){}themeApply(v);paintTheme()}
 function themeApply(v){document.documentElement.setAttribute('data-theme',v||'auto')}
-function themeCycle(){var v=themeGet();themeSet(v==='auto'?'light':v==='light'?'dark':'auto')}
+function themeCycle(){var v=themeGet();themeSet(v==='light'?'dark':v==='dark'?'auto':'light')}
 function paintTheme(){
   var v=themeGet();
   var nodes=document.querySelectorAll('[data-theme-btn]');
