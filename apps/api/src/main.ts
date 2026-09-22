@@ -161,6 +161,7 @@ registerSettings(app, {
           appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
           stateSecret: JWT_SECRET,
           redis,
+          ...(process.env['META_LOGIN_CONFIG_ID'] ? { configId: process.env['META_LOGIN_CONFIG_ID'] } : {}),
         },
       }
     : {}),

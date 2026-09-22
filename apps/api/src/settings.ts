@@ -44,7 +44,7 @@ export interface SettingsDeps {
   publicUrl: string;
   telegramWebhookSecret: string;
   mtproto?: { redis: Redis; loginQueue: Queue<MtprotoLoginJob> };
-  meta?: { appId: string; appSecret: string; appUrl: string; stateSecret: string; redis: Redis };
+  meta?: { appId: string; appSecret: string; appUrl: string; stateSecret: string; redis: Redis; configId?: string };
 }
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
@@ -556,7 +556,11 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     u.searchParams.set('redirect_uri', redirectUri());
     u.searchParams.set('state', state);
     u.searchParams.set('response_type', 'code');
-    u.searchParams.set('scope', META_LOGIN_SCOPES.join(','));
+    // Приложения типа «Бизнес» входят через «Вход через Facebook для бизнеса»:
+    // набор разрешений задаётся конфигурацией в кабинете Meta, и в ссылку
+    // идёт её id. Без конфигурации — классический список разрешений.
+    if (meta.configId) u.searchParams.set('config_id', meta.configId);
+    else u.searchParams.set('scope', META_LOGIN_SCOPES.join(','));
     return { url: u.toString() };
   });
 
