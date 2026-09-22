@@ -32,6 +32,7 @@ import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
 import { registerLanding, LANDING_HTML } from './landing.js';
+import { registerZoho } from './zoho.js';
 import { APP_ICON_SVG } from './brand.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -192,6 +193,16 @@ registerSettings(app, {
         },
       }
     : {}),
+});
+
+registerZoho(app, {
+  pool,
+  masterKey,
+  requireAuth: (req) => requireAuth(req as never),
+  clientId: process.env['ZOHO_CLIENT_ID'] ?? '',
+  clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+  stateSecret: JWT_SECRET,
 });
 
 registerLegal(app, {

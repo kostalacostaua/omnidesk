@@ -2132,18 +2132,100 @@ function openChannel(id){
 }
 
 /* ── Интеграции ─────────────────────────────────────────────────── */
+/**
+ * Интеграции.
+ *
+ * Пока здесь одна Zoho, но страница сделана как список: вторая CRM
+ * встанет рядом без перекладывания разметки.
+ *
+ * Подключение идёт через вход в Zoho под аккаунтом клиента: приложение
+ * в консоли Zoho наше, организация у каждого своя. Дата-центр Zoho
+ * подставляет сама при возврате — поэтому клиент из любой страны
+ * подключается той же кнопкой.
+ */
 function pageIntegrations(){
-  pageBox().innerHTML = '<div class="pg">' +
-    pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке клиента, ' +
-      'а новые обращения превращаются в лиды.') +
-    '<div class="pg-sec"><h3>CRM</h3><div class="grid">' +
-    '<div class="tile"><div class="t1"><div class="chico messenger">Z</div>' +
-    '<div><div class="ttl">Zoho CRM</div><div class="sub">Виджет в карточке клиента</div></div></div>' +
-    '<div class="sub" style="white-space:normal">Подключение по кнопке появится здесь: вход в Zoho, ' +
-    'выбор организации и установка виджета. Сейчас идёт настройка приложения в консоли Zoho.</div>' +
-    '<div class="acts"><button disabled>Подключить Zoho</button></div></div>' +
-    '</div></div></div>';
+  api('/settings/zoho').then(function(d){
+    var list = d.installations || [];
+
+    var body = !d.configured
+      ? '<div class="sub" style="white-space:normal">Подключение ещё не настроено на сервере: ' +
+        'не заданы ключи приложения Zoho. Это делается один раз для всего сервиса.</div>'
+      : list.length
+        ? list.map(function(z){
+            return '<div class="item"><div style="min-width:0">' +
+              '<div class="t">' + esc(z.org_name || 'Организация Zoho') +
+                (z.status === 'active'
+                  ? '<span class="pill good">подключена</span>'
+                  : '<span class="pill warn">нужно переподключить</span>') + '</div>' +
+              '<div class="s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div>' +
+              '</div><div class="row" style="gap:6px;flex:none">' +
+              '<button class="ghost mini" data-zcheck="' + z.id + '">Проверить</button>' +
+              '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button>' +
+              '</div></div>';
+          }).join('')
+        : '<div class="sub" style="white-space:normal">Войдите под аккаунтом Zoho той организации, ' +
+          'с которой работаете. Мы попросим доступ к контактам и лидам — ровно столько, сколько нужно, ' +
+          'чтобы найти клиента по номеру и завести нового.</div>';
+
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке клиента, ' +
+        'а новые обращения превращаются в лиды.') +
+      '<div class="pg-sec"><h3>CRM</h3><div>' +
+      '<div class="tile" style="cursor:default"><div class="t1"><div class="chico messenger">Z</div>' +
+      '<div><div class="ttl">Zoho CRM</div><div class="sub">Переписка в карточке клиента</div></div></div>' +
+      body +
+      (d.configured
+        ? '<div class="acts"><button id="zGo">' +
+          (list.length ? 'Подключить ещё организацию' : 'Войти через Zoho') + '</button></div>'
+        : '') +
+      '<div class="err" id="zErr"></div><div class="ok" id="zOk"></div>' +
+      '</div></div></div>' +
+
+      '<div class="pg-sec"><h3>Что дальше</h3>' +
+      '<div class="card"><div class="s" style="color:var(--t2);line-height:1.7">' +
+      'После подключения: входящее сообщение ищет контакт по номеру телефона и создаёт лид, ' +
+      'если такого нет; переписка показывается прямо в карточке Zoho виджетом; ответ из виджета ' +
+      'уходит в тот канал, откуда написал клиент. Установка виджета — следующий шаг, ' +
+      'он делается из того же подключения.</div></div></div>' +
+      '</div>';
+
+    if (S.zohoNote){ el('zOk').textContent = S.zohoNote; S.zohoNote = null }
+    if (S.zohoError){ el('zErr').textContent = S.zohoError; S.zohoError = null }
+
+    if (el('zGo')) el('zGo').onclick = function(){
+      busy(el('zGo'), true);
+      api('/settings/zoho/start').then(function(r){ location.href = r.url })
+        .catch(function(){
+          busy(el('zGo'), false);
+          el('zErr').textContent = 'Не удалось начать подключение';
+        });
+    };
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zcheck]'), function(b){
+      b.onclick = function(){
+        busy(b, true);
+        el('zErr').textContent = ''; el('zOk').textContent = '';
+        api('/settings/zoho/' + b.dataset.zcheck + '/check', { method:'POST' })
+          .then(function(r){
+            el('zOk').textContent = 'Связь есть' + (r.user ? ', вошли как ' + r.user : '');
+            pageIntegrations();
+          })
+          .catch(function(e){
+            var p = e.payload || {};
+            el('zErr').textContent = p.error === 'token_rejected'
+              ? 'Zoho больше не принимает доступ: ' + (p.detail || '') + '. Подключите заново.'
+              : 'Не удалось проверить';
+            busy(b, false);
+          });
+      };
+    });
+
+    armDelete(pageBox().querySelectorAll('[data-zdel]'), function(b){
+      return api('/settings/zoho/' + b.dataset.zdel, { method:'DELETE' }).then(pageIntegrations);
+    });
+  }).catch(sErr);
 }
+
 
 /* ── Подключение Facebook: Messenger и Instagram ──────────────────
    Возврат из Facebook приходит на адрес приложения с меткой в хвосте
@@ -2158,8 +2240,29 @@ var META_ERRORS = {
   unavailable:'Подключение Facebook ещё не включено на сервере.'
 };
 
+var ZOHO_ERRORS = {
+  cancelled:'Подключение Zoho отменено.',
+  state:'Ссылка устарела — нажмите «Войти через Zoho» ещё раз.',
+  exchange:'Zoho не подтвердила доступ. Попробуйте ещё раз.',
+  server:'Zoho вернула неизвестный адрес сервера. Напишите нам.',
+  org:'Zoho не отдала сведения об организации. Проверьте права аккаунта.'
+};
+
 function readMetaHash(){
   var h = location.hash || '';
+
+  // Возврат из Zoho: отдельная ветка, но разбирается там же — всё,
+  // что приходит хвостом ссылки, должно сниматься в одном месте.
+  var zok = h.indexOf('zoho=ok') >= 0;
+  var zerr = h.match(/zoho-error=([a-z]+)/);
+  if (zok || zerr){
+    S.zohoNote = zok ? 'Организация Zoho подключена.' : null;
+    S.zohoError = zerr ? (ZOHO_ERRORS[zerr[1]] || 'Не удалось подключить Zoho') : null;
+    history.replaceState(null, '', location.pathname);
+    setView('integrations');
+    return true;
+  }
+
   var m = h.match(/meta-pick=([0-9a-f-]+)/);
   var e = h.match(/meta-error=([a-z]+)/);
   if (!m && !e) return false;
