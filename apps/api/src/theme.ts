@@ -113,6 +113,25 @@ export const BASE_CSS = `
     box-shadow:0 0 0 3px var(--ring)}
   input::placeholder,textarea::placeholder{color:var(--t3)}
 
+  /* Полосы прокрутки.
+
+     Windows рисует их со стрелками по краям, и в поле ответа это
+     выглядит как счётчик у числового поля: человек видит две
+     стрелочки и не понимает, что это вообще. Поэтому полоса везде
+     тонкая, без кнопок и без подложки.
+
+     Правила идут дважды: сначала старый набор для тех сборок, где
+     свойства scrollbar-* ещё не работают, потом сами свойства. Где
+     работают оба — берётся второй, он и убирает стрелки. */
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-button{display:none;width:0;height:0}
+  ::-webkit-scrollbar-corner{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:9px;
+    border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--t3);background-clip:content-box}
+  *{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+
   /* Кнопка должна отвечать на прикосновение. Без наведения, нажатия
      и признака ожидания интерфейс воспринимается как картинка: человек
      жмёт и не понимает, случилось что-то или нет.
@@ -396,8 +415,11 @@ function emoInsert(ta, ch){
 
 /** Оформление панели смайлов: тоже одно на оба места. */
 export const EMOJI_CSS = `
+  /* Высота панели считается и от окна тоже: внутри карточки Zoho
+     рамка бывает ниже самой панели, и та вылезала за верхний край
+     вместе с началом переписки. Теперь прокручивается внутри. */
   .emobox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
-    max-height:212px;overflow-y:auto;padding:4px 8px 8px}
+    max-height:min(212px,40vh);overflow-y:auto;overscroll-behavior:contain;padding:4px 8px 8px}
   .emobox .gt{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
     font-weight:700;margin:8px 0 4px}
   .emobox .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:2px}

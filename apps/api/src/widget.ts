@@ -82,7 +82,8 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   @media(hover:none){.mtools{opacity:1}}
   .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none}
   .comp .row{display:flex;gap:6px;align-items:flex-end}
-  .comp textarea{min-height:34px;max-height:120px;border-radius:7px;min-width:0}
+  .comp textarea{min-height:34px;max-height:min(120px,28vh);border-radius:7px;min-width:0;
+    overflow-y:auto}
   #send{flex:none}
   /* Значок самолётика — запасной вид кнопки для узкой рамки. Прячем
      его здесь, а не встроенным стилем: встроенный побеждает правило
@@ -94,7 +95,7 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   .icob:hover{background:var(--hover);border-color:var(--t3);color:var(--t1)}
   ${EMOJI_CSS}
   .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
-    max-height:170px;overflow-y:auto}
+    max-height:min(170px,34vh);overflow-y:auto;overscroll-behavior:contain}
   .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12px}
   .tplbox .qr:last-child{border-bottom:0}
   .tplbox .qr:hover{background:var(--hover)}
