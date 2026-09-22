@@ -553,7 +553,20 @@ export const INBOX_HTML = `<!DOCTYPE html>
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <div class="err" id="gateErr"></div>
       <div style="margin-top:14px"><button id="ask">Получить код</button></div>
-      <div class="alt"><a id="toToken">Войти по токену доступа</a></div>
+      <div class="alt"><a id="toSignup">Создать компанию</a> · <a id="toToken">Вход по токену</a></div>
+    </div>
+
+    <div id="stepSignup" class="step" style="display:none">
+      <h1>Новая компания</h1>
+      <p>Четырнадцать дней бесплатно. Пароль придумывать не нужно — вход по коду на почту.</p>
+      <input id="suCompany" placeholder="Название компании" autocomplete="organization">
+      <input id="suEmail" type="email" placeholder="you@company.com" autocomplete="email"
+             style="margin-top:9px">
+      <div class="err" id="suErr"></div>
+      <div class="row2" style="margin-top:14px">
+        <button id="suGo">Создать</button>
+        <button class="ghost" id="suBack">Назад</button>
+      </div>
     </div>
 
     <div id="stepCode" class="step" style="display:none">
@@ -2841,7 +2854,7 @@ el('bell').onclick = function(){
 var pendingEmail = '';
 
 function gateStep(name){
-  ['stepEmail','stepCode','stepWs','stepToken'].forEach(function(id){
+  ['stepEmail','stepSignup','stepCode','stepWs','stepToken'].forEach(function(id){
     el(id).style.display = id === name ? 'block' : 'none';
   });
 }
@@ -2877,6 +2890,43 @@ el('ask').onclick = function(){
     .then(function(){ busy(el('ask'), false) });
 };
 
+el('toSignup').onclick = function(){
+  el('suEmail').value = el('email').value.trim();
+  gateStep('stepSignup');
+  el('suCompany').focus();
+};
+el('suBack').onclick = function(){ gateStep('stepEmail') };
+
+/**
+ * Регистрация.
+ *
+ * Отправляет тот же код на почту, но с названием компании: тенант
+ * создаётся на сервере только после ввода кода. До этого момента в базе
+ * не появляется ничего — иначе перебором адресов её засорили бы пустыми
+ * организациями.
+ */
+el('suGo').onclick = function(){
+  var company = el('suCompany').value.trim();
+  var email = el('suEmail').value.trim();
+  el('suErr').textContent = '';
+  if (company.length < 2){ el('suErr').textContent = 'Напишите название компании'; return }
+  if (!email || email.indexOf('@') < 1){ el('suErr').textContent = 'Введите рабочую почту'; return }
+
+  busy(el('suGo'), true);
+  api('/auth/request', { method:'POST', body:{ email: email, company: company } })
+    .then(function(){
+      pendingEmail = email;
+      el('sentTo').textContent = email;
+      gateStep('stepCode');
+      el('code').focus();
+    })
+    .catch(function(e){
+      var p = e.payload || {};
+      el('suErr').textContent = p.detail || 'Не удалось отправить код';
+    })
+    .then(function(){ busy(el('suGo'), false) });
+};
+
 function submitCode(tenantId){
   var code = el('code').value.trim();
   el('codeErr').textContent = '';
@@ -2901,7 +2951,16 @@ function submitCode(tenantId){
         });
         return;
       }
-      if (r.token) enterWith(r.token);
+      if (r.token) {
+        enterWith(r.token);
+        // Первый вход в только что созданную компанию: сразу ведём туда,
+        // где всё начинается, иначе человек видит пустой список чатов
+        // и не понимает, что делать дальше.
+        if (r.created) {
+          setView('channels');
+          toast('Компания создана. Подключите первый канал — это десять минут.');
+        }
+      }
     })
     .catch(function(e){
       var p = e.payload || {};

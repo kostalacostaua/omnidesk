@@ -29,12 +29,45 @@ export interface EmailAuthDeps {
   issueToken: (tenantId: string, userId: string) => string;
   mailer: Mailer;
   appName: string;
+  /** Разрешена ли самостоятельная регистрация новых компаний. */
+  allowSignup: boolean;
+  /** Сообщить владельцу сервиса о новой компании. Не должно ронять вход. */
+  onSignup?: (info: { email: string; company: string; tenantId: string }) => void;
 }
 
 const CODE_TTL_MIN = 10;
 const MAX_ATTEMPTS = 5;
 /** Не более пяти писем в час на один адрес — защита от рассылки чужими руками. */
 const MAX_SENDS_PER_HOUR = 5;
+
+/**
+ * Slug тенанта из названия.
+ *
+ * Кириллица транслитерируется, а не выбрасывается: иначе «Тестова
+ * компанія» превращается в бессмысленный набор цифр, и потом никто
+ * не понимает, чей это тенант в журнале. Хвост из случайных символов
+ * добавляется всегда — два клиента с одинаковым названием бывают.
+ */
+const TRANSLIT: Record<string, string> = {
+  а:'a', б:'b', в:'v', г:'g', ґ:'g', д:'d', е:'e', є:'ye', ё:'e', ж:'zh',
+  з:'z', и:'i', і:'i', ї:'yi', й:'y', к:'k', л:'l', м:'m', н:'n', о:'o',
+  п:'p', р:'r', с:'s', т:'t', у:'u', ф:'f', х:'kh', ц:'ts', ч:'ch',
+  ш:'sh', щ:'shch', ъ:'', ы:'y', ь:'', э:'e', ю:'yu', я:'ya',
+};
+
+export function slugFor(name: string): string {
+  const base = name
+    .toLowerCase()
+    .split('')
+    .map((ch) => TRANSLIT[ch] ?? ch)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+  const tail = randomInt(0, 1_000_000).toString(36);
+  return (base.length >= 3 ? base : 'company') + '-' + tail;
+}
 
 const hashCode = (email: string, code: string): string =>
   createHash('sha256').update(`${email.toLowerCase()}:${code}`).digest('hex');
@@ -90,11 +123,16 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
   }
 
   // ── Запрос кода ───────────────────────────────────────────────────
-  app.post<{ Body: { email?: string } }>('/auth/request', async (req, reply) => {
+  //
+  // Одна ручка на вход и на регистрацию. Разделять их пришлось бы
+  // ценой вопроса «а вы у нас уже есть?», на который человек отвечать
+  // не обязан: он просто хочет попасть внутрь.
+  app.post<{ Body: { email?: string; company?: string } }>('/auth/request', async (req, reply) => {
     const email = (req.body?.email ?? '').trim().toLowerCase();
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return reply.code(400).send({ error: 'bad_email' });
     }
+    const company = (req.body?.company ?? '').trim().slice(0, 80);
 
     const routes = await withSystem(pool, 'маршрут входа', async (db) => {
       const { rows } = await db.query<RouteRow>(
@@ -107,9 +145,12 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
       return rows;
     });
 
-    // Ответ одинаков в любом случае — см. комментарий вверху файла.
-    // Внутри же работаем только с реально существующей почтой.
-    if (routes.length > 0) {
+    // Регистрация возможна только если человек назвал компанию: это
+    // отличает «хочу завести организацию» от «ошибся адресом при входе».
+    // Ответ при этом одинаков во всех случаях — см. комментарий вверху.
+    const signup = routes.length === 0 && company.length >= 2 && deps.allowSignup;
+
+    if (routes.length > 0 || signup) {
       const allowed = await withSystem(pool, 'лимит писем', async (db) => {
         const { rows } = await db.query<{ sent_count: number }>(
           `INSERT INTO auth_codes (email, code_hash, expires_at)
@@ -145,9 +186,11 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
           `UPDATE auth_codes
               SET code_hash = $2,
                   expires_at = now() + interval '${CODE_TTL_MIN} minutes',
-                  attempts = 0
+                  attempts = 0,
+                  is_signup = $3,
+                  signup_company = $4
             WHERE email = $1`,
-          [email, hashCode(email, code)],
+          [email, hashCode(email, code), signup, signup ? company : null],
         );
       });
 
@@ -180,8 +223,11 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
           code_hash: string;
           attempts: number;
           expired: boolean;
+          is_signup: boolean;
+          signup_company: string | null;
         }>(
-          `SELECT code_hash, attempts, expires_at < now() AS expired
+          `SELECT code_hash, attempts, expires_at < now() AS expired,
+                  is_signup, signup_company
              FROM auth_codes WHERE email = $1`,
           [email],
         );
@@ -215,7 +261,56 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
         return rows;
       });
 
-      if (!routes.length) return reply.code(401).send({ error: 'no_account' });
+      /**
+       * Регистрация новой компании.
+       *
+       * Тенант и владелец появляются здесь, а не при запросе кода:
+       * до подтверждения почты нет доказательства, что человек вообще
+       * имеет к ней отношение. Иначе перебором адресов база засорялась
+       * бы пустыми организациями.
+       *
+       * Маршрут входа заводить не нужно: его ставит триггер на users.
+       */
+      if (!routes.length) {
+        if (!row.is_signup || !deps.allowSignup) {
+          return reply.code(401).send({ error: 'no_account' });
+        }
+
+        const created = await withSystem(pool, 'регистрация компании', async (db) => {
+          const name = (row.signup_company ?? '').trim() || email.split('@')[0] || 'Компания';
+          const { rows: t } = await db.query<{ id: string; name: string }>(
+            `INSERT INTO tenants (slug, name, plan, source)
+             VALUES ($1, $2, 'trial', 'signup')
+             RETURNING id, name`,
+            [slugFor(name), name],
+          );
+          const tenant = t[0]!;
+          const { rows: u } = await db.query<{ id: string }>(
+            `INSERT INTO users (tenant_id, email, full_name, role, is_active)
+             VALUES ($1, $2, $3, 'owner', true)
+             RETURNING id`,
+            [tenant.id, email, name],
+          );
+          return { tenantId: tenant.id, userId: u[0]!.id, name: tenant.name };
+        });
+
+        await withSystem(pool, 'гашение кода', async (db) => {
+          await db.query(`DELETE FROM auth_codes WHERE email = $1`, [email]);
+        });
+
+        app.log.info(
+          { email, tenantId: created.tenantId },
+          'Зарегистрирована новая компания',
+        );
+
+        deps.onSignup?.({ email, company: created.name, tenantId: created.tenantId });
+
+        return {
+          token: issueToken(created.tenantId, created.userId),
+          tenant: created.name,
+          created: true,
+        };
+      }
 
       // Одна почта в двух организациях — нормальная ситуация у подрядчика,
       // который ведёт несколько клиентов. Молча выбрать первую было бы

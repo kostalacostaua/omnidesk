@@ -148,6 +148,26 @@ registerEmailAuth(app, {
   issueToken: (tenantId, userId) => signJwt({ sub: userId, tid: tenantId }, 7 * 24 * 3600),
   mailer: createMailer(process.env, (line) => app.log.info(line)),
   appName: process.env['APP_NAME'] ?? 'Rozmovio',
+  // Регистрация открыта: сервис продаётся пробным периодом, и требовать
+  // ради него письма владельцу — терять клиента на ровном месте.
+  // Выключается переменной, если понадобится закрытый доступ.
+  allowSignup: process.env['ALLOW_SIGNUP'] !== 'off',
+  onSignup: (info) => {
+    app.log.info(info, 'Новая компания зарегистрировалась');
+    const to = process.env['LEADS_TO'] ?? process.env['CONTACT_EMAIL'];
+    if (!to) return;
+    const lines = [
+      'Новая компания в Rozmovio',
+      '',
+      'Компания: ' + info.company,
+      'Почта: ' + info.email,
+      'Тенант: ' + info.tenantId,
+    ].join(String.fromCharCode(10));
+    createMailer(process.env, (line) => app.log.info(line))
+      .send({ to, subject: 'Rozmovio: регистрация ' + info.company, text: lines, html:
+        '<pre style="font:14px/1.6 ui-monospace,Menlo,monospace">' + lines + '</pre>' })
+      .catch((err: unknown) => app.log.warn({ err }, 'Письмо о регистрации не ушло'));
+  },
 });
 
 registerSettings(app, {
