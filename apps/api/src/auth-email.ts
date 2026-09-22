@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import type { Mailer } from './mailer.js';
-import { withSystem, type Pool } from '@omnidesk/core';
+import { withSystem, withTenant, type Pool } from '@omnidesk/core';
 
 /**
  * Вход по одноразовому коду на почту.
@@ -276,23 +276,45 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
           return reply.code(401).send({ error: 'no_account' });
         }
 
-        const created = await withSystem(pool, 'регистрация компании', async (db) => {
-          const name = (row.signup_company ?? '').trim() || email.split('@')[0] || 'Компания';
-          const { rows: t } = await db.query<{ id: string; name: string }>(
+        const name = (row.signup_company ?? '').trim() || email.split('@')[0] || 'Компания';
+
+        // Тенант заводится вне контекста: tenants — это сам справочник
+        // организаций, RLS к нему не применяется.
+        const tenant = await withSystem(pool, 'создание организации', async (db) => {
+          const { rows } = await db.query<{ id: string; name: string }>(
             `INSERT INTO tenants (slug, name, plan, source)
              VALUES ($1, $2, 'trial', 'signup')
              RETURNING id, name`,
             [slugFor(name), name],
           );
-          const tenant = t[0]!;
-          const { rows: u } = await db.query<{ id: string }>(
-            `INSERT INTO users (tenant_id, email, full_name, role, is_active)
-             VALUES ($1, $2, $3, 'owner', true)
-             RETURNING id`,
-            [tenant.id, email, name],
-          );
-          return { tenantId: tenant.id, userId: u[0]!.id, name: tenant.name };
+          return rows[0]!;
         });
+
+        // А владелец — уже внутри контекста тенанта. Под users включена
+        // построчная защита, и запись без контекста она отклоняет: политика
+        // WITH CHECK не может убедиться, что строка кладётся в свою
+        // организацию. Правило нужное, и обходить его нельзя.
+        let created;
+        try {
+          const userId = await withTenant(pool, tenant.id, async (db) => {
+            const { rows } = await db.query<{ id: string }>(
+              `INSERT INTO users (tenant_id, email, full_name, role, is_active)
+               VALUES ($1, $2, $3, 'owner', true)
+               RETURNING id`,
+              [tenant.id, email, name],
+            );
+            return rows[0]!.id;
+          });
+          created = { tenantId: tenant.id, userId, name: tenant.name };
+        } catch (err) {
+          // Организация без единого пользователя — мусор, войти в неё
+          // нельзя никем. Убираем сразу, иначе каждая неудачная попытка
+          // оставляла бы пустую строку в справочнике.
+          await withSystem(pool, 'откат пустой организации', async (db) => {
+            await db.query(`DELETE FROM tenants WHERE id = $1`, [tenant.id]);
+          }).catch(() => undefined);
+          throw err;
+        }
 
         await withSystem(pool, 'гашение кода', async (db) => {
           await db.query(`DELETE FROM auth_codes WHERE email = $1`, [email]);
