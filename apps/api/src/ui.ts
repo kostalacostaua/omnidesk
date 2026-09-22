@@ -2172,6 +2172,9 @@ function openChannel(id){
  * подставляет сама при возврате — поэтому клиент из любой страны
  * подключается той же кнопкой.
  */
+/** Адрес виджета: тот же сервер, на котором открыто приложение. */
+function WIDGET_URL(){ return location.origin + '/widget' }
+
 function pageIntegrations(){
   api('/settings/zoho').then(function(d){
     var list = d.installations || [];
@@ -2188,7 +2191,6 @@ function pageIntegrations(){
                   : '<span class="pill warn">нужно переподключить</span>') + '</div>' +
               '<div class="s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div>' +
               '</div><div class="row" style="gap:6px;flex:none">' +
-              '<button class="ghost mini" data-zwid="' + z.id + '">Установить виджет</button>' +
               '<button class="ghost mini" data-zcheck="' + z.id + '">Проверить</button>' +
               '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button>' +
               '</div></div>';
@@ -2211,6 +2213,23 @@ function pageIntegrations(){
       '<div class="err" id="zErr"></div><div class="ok" id="zOk"></div>' +
       '</div></div></div>' +
 
+      (list.length
+        ? '<div class="pg-sec"><h3>Виджет в карточке клиента</h3><div class="card">' +
+          '<div class="s" style="color:var(--t2);line-height:1.7">Zoho заводит виджеты только ' +
+          'из своих настроек — программно их создать нельзя. Это делается один раз и занимает минуту.</div>' +
+          '<ol class="steps" style="margin-top:10px">' +
+          '<li>В Zoho CRM: <b>Настройки</b> (шестерёнка) → <b>Developer Space</b> → <b>Widgets</b> → ' +
+          '<b>Create Widget</b>.</li>' +
+          '<li>Имя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>' +
+          '<li>Base URL — вот этот адрес: <code id="wurl">' + esc(WIDGET_URL()) + '</code> ' +
+          '<button class="ghost mini" id="wcopy">Скопировать</button></li>' +
+          '<li>Сохранить. Затем <b>Настройки → Модули и поля → Контакты → Связанные списки</b> ' +
+          'и добавить <b>Rozmovio</b>. То же для модуля <b>Лиды</b>.</li>' +
+          '</ol>' +
+          '<div class="hint">В карточке появится блок с перепиской. Первый раз он попросит вашу ' +
+          'почту и код — один раз на браузер.</div></div></div>'
+        : '') +
+
       '<div class="pg-sec"><h3>Что дальше</h3>' +
       '<div class="card"><div class="s" style="color:var(--t2);line-height:1.7">' +
       'После подключения: входящее сообщение ищет контакт по номеру телефона и создаёт лид, ' +
@@ -2230,6 +2249,19 @@ function pageIntegrations(){
         });
     };
 
+    if (el('wcopy')) el('wcopy').onclick = function(){
+      var text = el('wurl').textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function(){ toast('Адрес скопирован') });
+      else {
+        // Старый способ на случай, если буфер обмена недоступен
+        // (например, страница открыта не по https).
+        var t = document.createElement('textarea');
+        t.value = text; document.body.appendChild(t); t.select();
+        document.execCommand('copy'); document.body.removeChild(t);
+        toast('Адрес скопирован');
+      }
+    };
+
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zcheck]'), function(b){
       b.onclick = function(){
         busy(b, true);
@@ -2246,30 +2278,6 @@ function pageIntegrations(){
               : 'Не удалось проверить';
             busy(b, false);
           });
-      };
-    });
-
-    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zwid]'), function(b){
-      b.onclick = function(){
-        busy(b, true);
-        el('zErr').textContent = ''; el('zOk').textContent = '';
-        api('/settings/zoho/' + b.dataset.zwid + '/widget', { method:'POST' })
-          .then(function(){
-            el('zOk').innerHTML = 'Виджет зарегистрирован. Осталось поставить его в карточку: ' +
-              'в Zoho откройте <b>Настройки → Настройка → Модули и поля → Контакты → ' +
-              'Связанные списки</b>, нажмите <b>Добавить связанный список</b> и выберите ' +
-              '<b>Rozmovio</b>. То же самое для модуля <b>Лиды</b>.';
-          })
-          .catch(function(e){
-            var p = e.payload || {};
-            el('zErr').textContent = p.error === 'scope_missing'
-              ? 'Для установки виджета нужно новое разрешение. Нажмите «Подключить ещё организацию» ' +
-                'и войдите в ту же организацию — согласие обновится.'
-              : p.error === 'token_rejected'
-                ? 'Zoho больше не принимает доступ — подключите заново.'
-                : 'Не удалось установить виджет' + (p.detail ? ': ' + p.detail : '');
-          })
-          .then(function(){ busy(b, false) });
       };
     });
 

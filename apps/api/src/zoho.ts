@@ -33,11 +33,18 @@ const SCOPES = [
   'ZohoCRM.modules.leads.ALL',
   'ZohoCRM.users.READ',
   'ZohoCRM.org.READ',
-  // Нужен ровно для одного: зарегистрировать виджет в карточке клиента.
-  // Без него Zoho отвечает на создание виджета отказом по правам, и
-  // человеку остаётся заводить его руками в настройках.
-  'ZohoCRM.settings.widgets.ALL',
 ];
+
+/*
+ * Про виджет. Была попытка заводить его по API — POST на
+ * settings/widgets с внешним хостингом. Zoho отвечает на это
+ * INTERNAL_ERROR: в её документации создание виджета описано только
+ * через настройки организации и CLI, API для этого нет. Разрешение
+ * на настройки убрано обратно — просить права, которыми не пользуемся,
+ * нечестно по отношению к клиенту, который читает экран согласия.
+ * Вместо кнопки на странице интеграций лежит инструкция с готовым
+ * адресом виджета.
+ */
 
 /**
  * Дата-центры Zoho: сервер входа и соответствующий ему домен API.
@@ -351,99 +358,6 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
     });
 
     return { ok: true, user: body.users?.[0]?.full_name ?? body.users?.[0]?.email ?? null };
-  });
-
-  /**
-   * Установка виджета в карточку клиента.
-   *
-   * Виджет — это наша страница, которую Zoho показывает в рамке внутри
-   * карточки. Регистрируем её в организации клиента; дальше её остаётся
-   * добавить на страницу контактов и лидов — это делается в настройках
-   * Zoho парой нажатий, и API для этого шага нет.
-   */
-  app.post<{ Params: { id: string } }>('/settings/zoho/:id/widget', async (req, reply) => {
-    const auth = requireAuth(req);
-    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
-
-    const row = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query<{
-        accounts_server: string;
-        api_domain: string;
-        refresh_token_enc: Buffer;
-      }>(
-        `SELECT accounts_server, api_domain, refresh_token_enc
-           FROM zoho_installations WHERE id = $1`,
-        [req.params.id],
-      );
-      return rows[0] ?? null;
-    });
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-
-    const { refreshToken } = decryptJson<{ refreshToken: string }>(
-      masterKey,
-      auth.tenantId,
-      row.refresh_token_enc,
-    );
-
-    const tokenRes = await fetch(`${row.accounts_server}/oauth/v2/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: opts.clientId,
-        client_secret: opts.clientSecret,
-        refresh_token: refreshToken,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const token = (await tokenRes.json()) as TokenResponse;
-    if (!tokenRes.ok || !token.access_token) {
-      return reply.code(409).send({ error: 'token_rejected' });
-    }
-
-    const res = await fetch(`${row.api_domain}/crm/v6/settings/widgets`, {
-      method: 'POST',
-      headers: {
-        authorization: `Zoho-oauthtoken ${token.access_token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        widgets: [
-          {
-            name: 'Rozmovio',
-            api_name: 'rozmovio_chat',
-            description: 'Переписка с клиентом из Telegram, Instagram и Messenger',
-            type: 'related_list',
-            mobile_compatible: true,
-            hosting: { type: 'external', url: `${opts.appUrl}/widget` },
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const body = (await res.json()) as {
-      widgets?: Array<{ code?: string; message?: string }>;
-      code?: string;
-      message?: string;
-    };
-    const first = body.widgets?.[0];
-
-    if (!res.ok || (first?.code && first.code !== 'SUCCESS')) {
-      const code = first?.code ?? body.code ?? '';
-      app.log.warn({ status: res.status, code, message: first?.message ?? body.message },
-        'Виджет Zoho не установлен');
-      // Права на настройки появились позже первых подключений: у кого
-      // подключение старое, токен их не содержит, и помочь может только
-      // повторный вход.
-      if (code === 'OAUTH_SCOPE_MISMATCH' || res.status === 401) {
-        return reply.code(403).send({ error: 'scope_missing' });
-      }
-      if (code === 'DUPLICATE_DATA' || code === 'ALREADY_EXISTS') return { ok: true, existed: true };
-      return reply.code(502).send({ error: 'widget_failed', detail: first?.message ?? body.message });
-    }
-
-    app.log.info({ tenantId: auth.tenantId }, 'Виджет Zoho установлен');
-    return { ok: true };
   });
 
   // ── Отключение ────────────────────────────────────────────────────
