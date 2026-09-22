@@ -30,6 +30,7 @@ import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
+import { registerLanding, LANDING_HTML } from './landing.js';
 import { APP_ICON_SVG } from './brand.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -201,7 +202,43 @@ const sendUi = async (_req: unknown, reply: FastifyReply) =>
     .header('cache-control', 'no-store, must-revalidate')
     .send(INBOX_HTML);
 
-app.get('/', sendUi);
+registerLanding(app, {
+  pool,
+  mailer: createMailer(process.env, (line) => app.log.info(line)),
+  notifyTo: process.env['LEADS_TO'] ?? process.env['CONTACT_EMAIL'] ?? 'slastin.kv@gmail.com',
+  log: (level, msg, extra) => app.log[level](extra ?? {}, msg),
+});
+
+/**
+ * Что отдавать по корню — решает имя домена.
+ *
+ * rozmovio.com и www.rozmovio.com — промо-страница, app.rozmovio.com —
+ * рабочее место. Один процесс на оба адреса намеренно: второй сервис
+ * ради одной статической страницы означал бы второй деплой, второй
+ * набор переменных и второе место, где оформление живёт своей жизнью.
+ *
+ * Список доменов промо задаётся переменной, а не зашит в код: на
+ * проверочных стендах домены другие, и менять из-за этого код нельзя.
+ */
+const SITE_HOSTS = (process.env['SITE_HOSTS'] ?? 'rozmovio.com,www.rozmovio.com')
+  .split(',')
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+
+function isSiteHost(req: { headers: Record<string, unknown> }): boolean {
+  const host = String(req.headers['host'] ?? '').toLowerCase().split(':')[0] ?? '';
+  return SITE_HOSTS.includes(host);
+}
+
+app.get('/', async (req, reply) => {
+  if (isSiteHost(req as never)) {
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'public, max-age=300')
+      .send(LANDING_HTML);
+  }
+  return sendUi(req, reply);
+});
 app.get('/app', sendUi);
 
 // Браузер всегда просит favicon. Без этой строки в консоли висит 404,

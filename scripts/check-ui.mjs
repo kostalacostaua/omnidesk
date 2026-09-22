@@ -19,14 +19,19 @@
 import { Script } from 'node:vm';
 
 const { INBOX_HTML } = await import('../apps/api/dist/ui.js');
+const { LANDING_HTML } = await import('../apps/api/dist/landing.js');
 
-const match = INBOX_HTML.match(/<script>([\s\S]*?)<\/script>/);
-if (!match) {
+// Скриптов на странице больше одного: тема применяется до отрисовки
+// отдельным блоком в head, иначе страница мигает светлой. Проверять
+// надо каждый — сломанный «маленький» блок останавливает разбор
+// страницы так же надёжно, как сломанный большой.
+const blocks = [...(INBOX_HTML + LANDING_HTML).matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+if (!blocks.length) {
   console.error('ОШИБКА: в собранной странице нет блока <script>');
   process.exit(1);
 }
 
-const code = match[1];
+const code = blocks.join('\n;\n');
 
 try {
   new Script(code, { filename: 'inbox-ui.js' });
@@ -60,4 +65,8 @@ if (suspicious.length) {
 }
 
 const bytes = Buffer.byteLength(INBOX_HTML, 'utf8');
-console.log('страница инбокса: скрипт разбирается, ' + Math.round(bytes / 1024) + ' КБ');
+const site = Buffer.byteLength(LANDING_HTML, 'utf8');
+console.log(
+  'страница инбокса: скрипт разбирается, ' + Math.round(bytes / 1024) + ' КБ; ' +
+  'промо-страница: ' + Math.round(site / 1024) + ' КБ',
+);

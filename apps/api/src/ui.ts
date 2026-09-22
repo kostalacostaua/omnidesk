@@ -25,6 +25,8 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
+import { BRAND_CSS, THEME_JS } from './theme.js';
+
 export const UI_BUILD = '2026-09-22-5';
 
 export const INBOX_HTML = `<!DOCTYPE html>
@@ -38,107 +40,19 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script data-theme-boot>${THEME_JS}</script>
 <style>
-  /* ═══ Оформление «Рабочий стол» ═══
-     Плотно, без украшений, цвет только там, где несёт смысл: статус
-     диалога, непрочитанное, ошибка. Главная кнопка почти чёрная —
-     синяя на экране, заполненном данными, спорит с самими данными.
-
-     Гарнитура задана одной переменной --font: чтобы поменять её
-     во всём интерфейсе, достаточно этой строки. */
-  :root{color-scheme:light;
-    --font:"Onest",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --font-display:"Onest",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
-    --bg:#f5f6fb;--panel:rgba(255,255,255,.74);--solid:#fff;--panel2:#eceff8;
-    --line:rgba(11,16,34,.09);--line2:rgba(11,16,34,.16);--hover:rgba(11,16,34,.05);
-    --t1:#0b1022;--t2:#5a6178;--t3:#8a90a6;
-    --accent:#2657e0;--accent-h:#1c46c0;--on-accent:#fff;--link:#2657e0;
-    --accent-soft:rgba(38,87,224,.1);
-    --brand1:#2f6bff;--brand2:#7a3cf0;
-    --ring:rgba(38,87,224,.26);
-    --shadow:0 1px 2px rgba(11,16,34,.05);
-    --lift:0 10px 30px -12px rgba(11,16,34,.28),0 2px 8px -4px rgba(11,16,34,.14);
-    --good:#067647;--good-bg:#e9faf1;--warn:#b54708;--warn-bg:#fff6e6;
-    --crit:#d92d20;--crit-bg:#fdeeed;
-    --rail:rgba(255,255,255,.6);--railT:#8a90a6;--railOn:#0b1022;--railOnBg:rgba(38,87,224,.1);
-    --blur:saturate(1.4) blur(20px);}
-  @media(prefers-color-scheme:dark){:root{color-scheme:dark;
-    --bg:#080c1a;--panel:rgba(20,27,51,.72);--solid:#141b33;--panel2:#1b2342;
-    --line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);--hover:rgba(255,255,255,.06);
-    --t1:#eef0f8;--t2:#a3a9bf;--t3:#7e86a3;
-    --accent:#6d97ff;--accent-h:#8aadff;--on-accent:#0b1022;--link:#8aadff;
-    --accent-soft:rgba(109,151,255,.16);
-    --ring:rgba(109,151,255,.3);
-    --shadow:0 1px 2px rgba(0,0,0,.4);
-    --lift:0 18px 40px -18px rgba(0,0,0,.7),0 2px 10px -6px rgba(0,0,0,.6);
-    --good:#47cd89;--good-bg:rgba(71,205,137,.12);--warn:#fdb022;--warn-bg:rgba(253,176,34,.12);
-    --crit:#f97066;--crit-bg:rgba(249,112,102,.12);
-    --rail:rgba(20,27,51,.6);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(109,151,255,.16);}}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--t1);height:100vh;overflow:hidden;
-    font:13px/1.5 var(--font);-webkit-font-smoothing:antialiased;
-    text-rendering:optimizeLegibility}
-  .tnum{font-variant-numeric:tabular-nums}
-
-  textarea,input,select{width:100%;background:var(--panel);color:var(--t1);
-    border:1px solid var(--line2);border-radius:6px;padding:8px 10px;
-    font:inherit;font-size:13px;resize:none}
-  textarea,input,select{transition:border-color .13s ease,box-shadow .13s ease}
-  textarea:hover,input:hover,select:hover{border-color:var(--t3)}
-  /* Кольцо вместо жирной обводки: контур толщиной в два пикселя
-     визуально увеличивает поле и дёргает соседние элементы. */
-  textarea:focus,input:focus,select:focus{outline:none;border-color:var(--link);
-    box-shadow:0 0 0 3px var(--ring)}
-  /* Ни одна кнопка не переносится: подпись в две строки ломает высоту
-     строки и читается как поломка вёрстки. */
-  /* Кнопка должна отвечать на прикосновение. Без наведения, нажатия
-     и признака ожидания интерфейс воспринимается как картинка: человек
-     жмёт и не понимает, случилось что-то или нет.
-
-     Длительности маленькие намеренно. 130 мс на цвет читается как
-     отклик; всё, что дольше 200 мс, ощущается как задержка. Нажатие
-     ещё короче — 60 мс, оно должно совпадать с движением пальца. */
-  button{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);
-    border-radius:6px;padding:8px 13px;font:inherit;font-size:12.5px;font-weight:600;
-    cursor:pointer;white-space:nowrap;box-shadow:var(--shadow);position:relative;
-    transition:background-color .13s ease,border-color .13s ease,color .13s ease,
-      box-shadow .13s ease,transform .06s ease,opacity .13s ease}
-  button:hover{background:var(--accent-h);border-color:var(--accent-h)}
-  /* Смещение на пиксель вниз — самый дешёвый способ передать нажатие:
-     кнопка буквально уходит под палец. */
-  button:active{transform:translateY(1px);box-shadow:none}
-  button:focus-visible{outline:2px solid var(--link);outline-offset:2px}
-  button:disabled{opacity:.5;cursor:default;transform:none;box-shadow:none}
-  button:disabled:hover{background:var(--accent);border-color:var(--accent)}
-
-  button.ghost{background:var(--panel);color:var(--t2);border-color:var(--line2);font-weight:600}
-  button.ghost:hover{background:var(--hover);color:var(--t1);border-color:var(--t3)}
-  button.ghost:disabled:hover{background:var(--panel);border-color:var(--line2)}
-
-  /* Ожидание. Кнопка не просто гаснет — она показывает, что запрос идёт.
-     Подпись прячется, а не заменяется словом «Подождите»: так не прыгает
-     ширина и не дёргается вся строка кнопок. */
-  button.busy{color:transparent;pointer-events:none}
-  button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:14px;height:14px;
-    border:2px solid currentColor;border-top-color:transparent;border-radius:50%;
-    color:var(--on-accent);animation:spin .6s linear infinite}
-  button.ghost.busy::after{color:var(--t2)}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  @media(prefers-reduced-motion:reduce){
-    button,.conv,.tab,.rbtn,.icob{transition:none}
-    button.busy::after{animation-duration:1.8s}
-  }
-  .mini{padding:6px 10px;font-size:12px}
-  .err{color:var(--crit);font-size:12px;margin-top:6px}
-  .ok{color:var(--good);font-size:12px;margin-top:6px}
+  /* ═══ Оформление ═══
+     Токены, теги и готовые блоки живут в theme.ts — одном месте на весь
+     продукт: и рабочее место, и промо-страница берут их оттуда. Здесь
+     ниже — только то, что есть исключительно в рабочем месте: раскладка
+     из четырёх колонок, список диалогов, переписка, панель разделов. */
+  ${BRAND_CSS}
   .qrwrap{display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin:14px 0 4px;
     padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
   .qr{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;flex:none}
   .qr svg{width:100%;height:100%;display:block}
-  .muted{color:var(--t3)}
   .steps{margin:0;padding-left:18px;line-height:1.9;font-size:13px}
-  .dim{color:var(--t3)}
-  .empty{padding:26px 20px;color:var(--t3);font-size:12.5px;text-align:center;line-height:1.6}
 
   /* ─── Вход ─────────────────────────────────────────────────────── */
   #gate{display:flex;align-items:center;justify-content:center;height:100vh;padding:20px}
@@ -213,25 +127,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .filters select{padding:6px 8px;font-size:12px;border-radius:6px;background:var(--panel)}
   .search{margin-top:8px}
   .search input{padding:7px 10px;font-size:12.5px;border-radius:6px}
-  .tabs{display:flex;gap:16px;margin-top:11px}
-  .tab{background:transparent;border:0;color:var(--t3);font-weight:600;font-size:12.5px;
-    padding:0 0 9px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0;
-    box-shadow:none;transition:color .13s ease,border-color .13s ease}
-  .tab:hover{background:transparent;border-color:var(--line2)}
-  .tab:active{transform:none}
-  .tab:hover{color:var(--t2)}
-  .tab.on{color:var(--t1);border-color:var(--accent)}
-  .tab .n{color:var(--t3);font-weight:600;margin-left:5px;font-size:11px;
-    font-variant-numeric:tabular-nums}
+  .lhead .tabs{margin-top:11px}
   #convs{overflow-y:auto;flex:1;min-height:0}
   .conv{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;
     display:flex;gap:10px;transition:background-color .1s ease}
   .conv:active{background:var(--panel2)}
   .conv:hover{background:var(--hover)}
   .conv.on{background:var(--hover);box-shadow:inset 2px 0 0 var(--accent)}
-  .av{width:34px;height:34px;border-radius:6px;flex:none;display:flex;align-items:center;
-    justify-content:center;font-weight:600;font-size:12px;color:#fff;overflow:hidden;
-    background-size:cover;background-position:center}
   .conv .body{min-width:0;flex:1}
   .conv .r1{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
   .conv .nm{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;
@@ -241,11 +143,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .conv .pv{font-size:12px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;
     white-space:nowrap;margin-top:2px}
   .conv .r3{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:wrap}
-  .chip{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--panel2);
-    color:var(--t2);font-weight:600}
   .chip.who{background:var(--panel2);color:var(--t2)}
-  .badge{background:var(--crit);color:#fff;border-radius:9px;padding:1px 6px;
-    font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:auto}
+  .conv .badge{margin-left:auto}
   .dot{width:7px;height:7px;border-radius:50%;flex:none}
   .dot.open{background:var(--crit)}
   .dot.closed{background:var(--t3)}
@@ -655,6 +554,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="integrations" data-icon="link">Интеграции</button>
     <button class="rbtn" data-view="users" data-icon="team">Команда</button>
     <div class="grow"></div>
+    <button class="rbtn" id="themeTitle" data-icon="sun">Тема</button>
     <button class="rbtn" id="bell" data-icon="bell">Звук</button>
     <button class="rbtn" data-view="profile" data-icon="gear">Профиль</button>
     <button class="rbtn" id="out" data-icon="exit">Выйти</button>
@@ -2060,7 +1960,10 @@ var ICONS = {
   bolt:'<path d="M13 2L4.1 13.3a.7.7 0 0 0 .5 1.2H11l-1 8.5 8.9-11.3a.7.7 0 0 0-.5-1.2H12z"/>',
   plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.4 3.4l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.6 20.6l1.7-1.7"/>',
-  team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'
+  team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>'
 };
 
 function icon(name){
@@ -2169,6 +2072,25 @@ function paintBell(){
   b.title = (PREFS.sound ? 'Звук включён' : 'Звук выключен') + ' · ' +
     (PREFS.push ? 'уведомления включены' : 'уведомления выключены') +
     ' — нажмите, чтобы переключить';
+}
+
+/**
+ * Кнопка темы. Три положения по кругу: как в системе, светлая, тёмная.
+ * Отдельного меню нет намеренно — на три пункта оно не нужно, а место
+ * в панели разделов дорогое.
+ */
+function paintThemeBtn(){
+  var b = el('themeTitle');
+  if (!b) return;
+  var v = themeGet();
+  b.dataset.painted = '';
+  b.innerHTML = '';
+  b.insertAdjacentHTML('afterbegin', icon(v === 'light' ? 'sun' : v === 'dark' ? 'moon' : 'auto'));
+  b.insertAdjacentText('beforeend', v === 'light' ? 'Светлая' : v === 'dark' ? 'Тёмная' : 'Тема');
+  b.title = v === 'auto'
+    ? 'Тема как в системе — нажмите, чтобы выбрать светлую'
+    : v === 'light' ? 'Светлая тема — нажмите, чтобы выбрать тёмную'
+      : 'Тёмная тема — нажмите, чтобы вернуть системную';
 }
 
 /**
@@ -2285,6 +2207,7 @@ function start(){
   el('app').style.display = 'grid';
   paintIcons();
   paintBell();
+  paintThemeBtn();
 
   // Справочники грузим один раз при входе: без них список нельзя
   // отфильтровать по каналу, а кнопку «взять себе» — показать.
@@ -2340,6 +2263,7 @@ el('fQ').oninput = function(){
 
 el('cardBtn').onclick = function(){ el('app').classList.toggle('no-card') };
 el('out').onclick = logout;
+el('themeTitle').onclick = function(){ themeCycle(); paintThemeBtn() };
 
 /* ── Колокольчик: звук и уведомления ─────────────────────────────
    Одна кнопка на два переключателя. Первое нажатие включает звук,
