@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-export const UI_BUILD = '2026-09-22-4';
+export const UI_BUILD = '2026-09-22-5';
 
 export const INBOX_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -48,23 +48,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
      во всём интерфейсе, достаточно этой строки. */
   :root{color-scheme:light;
     --font:"Manrope",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --bg:#f7f7f8;--panel:#fff;--panel2:#f0f0f2;--line:#e5e5e8;--line2:#dcdce1;
-    --hover:#f2f2f4;
-    --t1:#16161a;--t2:#4a4a52;--t3:#8b8b95;
-    --accent:#16161a;--accent-h:#2f2f38;--on-accent:#fff;--link:#3538cd;
-    --ring:rgba(53,56,205,.35);--shadow:0 1px 2px rgba(16,16,20,.07);
-    --good:#067647;--good-bg:#ecfdf3;--warn:#b54708;--warn-bg:#fffaeb;
-    --crit:#d92d20;--crit-bg:#fef3f2;
-    --rail:#fbfbfc;--railT:#8b8b95;--railOn:#16161a;--railOnBg:#eeeef1;}
-  @media(prefers-color-scheme:dark){:root{
-    --bg:#0f0f12;--panel:#16161a;--panel2:#1e1e24;--line:#26262d;--line2:#31313a;
-    --hover:#1c1c22;
-    --t1:#f0f0f3;--t2:#a8a8b4;--t3:#74747f;
-    --accent:#f0f0f3;--accent-h:#d8d8df;--on-accent:#16161a;--link:#a5a7ff;
-    --ring:rgba(165,167,255,.4);--shadow:0 1px 2px rgba(0,0,0,.4);
-    --good:#3ccf7e;--good-bg:#0f2a1d;--warn:#f5b544;--warn-bg:#2a1f0b;
-    --crit:#f97066;--crit-bg:#2c1414;
-    --rail:#0b0b0e;--railT:#74747f;--railOn:#fff;--railOnBg:#1f1f27;}}
+    --bg:#f5f6fb;--panel:rgba(255,255,255,.74);--solid:#fff;--panel2:#eceff8;
+    --line:rgba(11,16,34,.09);--line2:rgba(11,16,34,.16);--hover:rgba(11,16,34,.05);
+    --t1:#0b1022;--t2:#5a6178;--t3:#8a90a6;
+    --accent:#2657e0;--accent-h:#1c46c0;--on-accent:#fff;--link:#2657e0;
+    --accent-soft:rgba(38,87,224,.1);
+    --brand1:#2f6bff;--brand2:#7a3cf0;
+    --ring:rgba(38,87,224,.26);
+    --shadow:0 1px 2px rgba(11,16,34,.05);
+    --lift:0 10px 30px -12px rgba(11,16,34,.28),0 2px 8px -4px rgba(11,16,34,.14);
+    --good:#067647;--good-bg:#e9faf1;--warn:#b54708;--warn-bg:#fff6e6;
+    --crit:#d92d20;--crit-bg:#fdeeed;
+    --rail:rgba(255,255,255,.6);--railT:#8a90a6;--railOn:#0b1022;--railOnBg:rgba(38,87,224,.1);
+    --blur:saturate(1.4) blur(20px);}
+  @media(prefers-color-scheme:dark){:root{color-scheme:dark;
+    --bg:#080c1a;--panel:rgba(20,27,51,.72);--solid:#141b33;--panel2:#1b2342;
+    --line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);--hover:rgba(255,255,255,.06);
+    --t1:#eef0f8;--t2:#a3a9bf;--t3:#7e86a3;
+    --accent:#6d97ff;--accent-h:#8aadff;--on-accent:#0b1022;--link:#8aadff;
+    --accent-soft:rgba(109,151,255,.16);
+    --ring:rgba(109,151,255,.3);
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+    --lift:0 18px 40px -18px rgba(0,0,0,.7),0 2px 10px -6px rgba(0,0,0,.6);
+    --good:#47cd89;--good-bg:rgba(71,205,137,.12);--warn:#fdb022;--warn-bg:rgba(253,176,34,.12);
+    --crit:#f97066;--crit-bg:rgba(249,112,102,.12);
+    --rail:rgba(20,27,51,.6);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(109,151,255,.16);}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--t1);height:100vh;overflow:hidden;
     font:13px/1.5 var(--font);-webkit-font-smoothing:antialiased;
@@ -388,52 +396,197 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .kv .k{color:var(--t3)}
   .kv code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
     background:var(--panel2);padding:1px 5px;border-radius:4px}
+
+  /* ═══ Оформление «Стекло» ═══════════════════════════════════════
+     Второй слой поверх базовых правил: те же классы, но другая
+     поверхность. Панели полупрозрачные и размывают фон, цвет живёт
+     в знаке и в одном акценте, движение короткое и без отскоков.
+
+     Почему слоем, а не правкой по месту: базовые правила описывают
+     раскладку и поведение, этот блок — только вид. Так видно,
+     что именно относится к оформлению, и его можно заменить целиком. */
+
+  body{background:var(--bg);
+    background-image:
+      radial-gradient(60vw 48vh at 8% -8%, rgba(47,107,255,.16), transparent 60%),
+      radial-gradient(52vw 44vh at 104% 8%, rgba(122,60,240,.14), transparent 62%),
+      radial-gradient(44vw 40vh at 50% 118%, rgba(47,107,255,.09), transparent 64%);
+    background-attachment:fixed;}
+
+  .glass{background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+
+  /* ─── Поля и кнопки ───────────────────────────────────────────── */
+  textarea,input,select{background:var(--panel);border-color:var(--line2);border-radius:11px;
+    padding:10px 12px;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    transition:border-color .16s ease,box-shadow .16s ease,background-color .16s ease}
+  textarea:hover,input:hover,select:hover{border-color:var(--line2);background:var(--solid)}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent);background:var(--solid);
+    box-shadow:0 0 0 4px var(--ring)}
+  input::placeholder,textarea::placeholder{color:var(--t3)}
+
+  button{border-radius:11px;padding:9px 15px;letter-spacing:-.01em;box-shadow:var(--shadow);
+    transition:background-color .16s ease,border-color .16s ease,color .16s ease,
+      box-shadow .2s ease,transform .08s cubic-bezier(.2,.8,.3,1),opacity .16s ease}
+  button:hover{box-shadow:var(--lift)}
+  button:active{transform:translateY(1px) scale(.99)}
+  button.ghost{background:var(--panel);border-color:var(--line2);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  button.ghost:hover{background:var(--solid);border-color:var(--line2);color:var(--t1)}
+  .mini{border-radius:9px;padding:6px 11px}
+
+  /* ─── Вход ─────────────────────────────────────────────────────── */
+  #gate{padding:24px}
+  #gate .box{width:100%;max-width:418px;padding:30px 30px 26px;border-radius:24px;
+    background:var(--panel);border:1px solid var(--line);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+    box-shadow:var(--lift);animation:gateIn .5s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes gateIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+  #gate .mark{width:46px;height:46px;border-radius:0;background:none;margin:0 0 18px;
+    display:block;box-shadow:none}
+  #gate .mark svg{width:46px;height:46px;display:block}
+  #gate h1{font-size:25px;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
+  #gate p{font-size:13.5px;color:var(--t2);margin:0 0 18px;line-height:1.55}
+  #gate input{height:46px;font-size:14px;border-radius:13px}
+  #gate button{width:100%;height:46px;font-size:14px;border-radius:13px}
+  #gate .row2{display:flex;gap:8px}
+  #gate .alt{margin-top:16px;font-size:12.5px}
+  #gate .foot{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:11.5px;color:var(--t3);line-height:1.6;text-align:center}
+  #gate .step{animation:stepIn .32s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes stepIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  #code{letter-spacing:.34em;font-size:22px;font-weight:700;height:56px;text-align:center}
+
+  /* ─── Каркас ───────────────────────────────────────────────────── */
+  #app{gap:0;padding:0}
+  #rail{background:var(--rail);border-right:1px solid var(--line);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);padding:14px 0 12px}
+  #rail .logo{width:34px;height:34px;margin-bottom:18px}
+  #rail .logo svg{width:32px;height:32px}
+  .rbtn{border-radius:12px;width:54px;padding:9px 0;font-size:9.5px;letter-spacing:.01em;
+    transition:background-color .16s ease,color .16s ease,transform .1s cubic-bezier(.2,.8,.3,1)}
+  .rbtn:hover{background:var(--hover)}
+  .rbtn.on{background:var(--railOnBg);color:var(--accent)}
+  .rbtn.on svg{stroke:var(--accent)}
+  .rbtn .cnt{background:var(--crit);box-shadow:0 0 0 2px var(--bg)}
+
+  #list{background:var(--panel);border-right:1px solid var(--line);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .lhead{padding:16px 16px 0;border-bottom:1px solid var(--line)}
+  .lhead b{font-size:17px;font-weight:800;letter-spacing:-.025em}
+  .filters select,.search input{border-radius:10px;font-size:12.5px}
+  .tabs{gap:6px;margin:12px 0 0}
+  .tab{border-radius:10px 10px 0 0;padding:8px 10px;border-bottom:2px solid transparent}
+  .tab.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  .tab .n{background:none}
+
+  .conv{padding:12px 14px;border-bottom:1px solid var(--line);
+    transition:background-color .16s ease,box-shadow .16s ease}
+  .conv:hover{background:var(--hover)}
+  .conv.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .av{width:38px;height:38px;border-radius:13px;font-weight:700;
+    background:linear-gradient(140deg,var(--brand1),var(--brand2));color:#fff;
+    border:0;font-size:13px;letter-spacing:-.02em}
+  .av img{border-radius:13px}
+  .conv .nm{font-size:13.5px}
+  .chip{border-radius:7px;padding:2px 7px;background:var(--panel2);color:var(--t2)}
+
+  /* ─── Переписка ────────────────────────────────────────────────── */
+  #thread{background:transparent}
+  .thead{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .thead .nm{font-size:15px;font-weight:800;letter-spacing:-.02em}
+  #msgs{padding:22px 18px;gap:9px}
+  .m{border-radius:18px;padding:10px 14px;font-size:13.5px;line-height:1.52;
+    box-shadow:var(--shadow)}
+  .m.in{background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:7px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .m.out{background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff;
+    border:0;border-bottom-right-radius:7px}
+  .m.bot{background:linear-gradient(135deg,#5b4bd6,#7a3cf0);color:#fff}
+  .m.failed{background:var(--crit);color:#fff}
+  .mwrap{animation:rise .24s cubic-bezier(.2,.8,.3,1)}
+  @keyframes rise{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  .rx .r{border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+  .mtools button{border-radius:9px}
+  .picker{border-radius:14px;box-shadow:var(--lift);background:var(--panel);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .att img,.att video{border-radius:14px}
+  .att .file{border-radius:12px}
+
+  .composer{background:var(--panel);border-top:1px solid var(--line);padding:12px 16px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .composer textarea{border-radius:14px;min-height:42px;padding:11px 13px}
+  .icob{width:38px;height:38px;border-radius:12px;background:var(--panel);border-color:var(--line2)}
+  .icob:hover{background:var(--solid)}
+  .blocked{border-radius:12px;background:var(--warn-bg);border-color:var(--line)}
+  .replybar,.fileprev,.tplbox{border-radius:12px}
+
+  /* ─── Карточка клиента и настройки ─────────────────────────────── */
+  #card{background:var(--panel);border-left:1px solid var(--line);padding:16px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    box-shadow:var(--shadow);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .modal{border-radius:22px;box-shadow:var(--lift);background:var(--panel);
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  .stab{border-radius:10px 10px 0 0;padding:10px 12px}
+  .stab.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  .item{border-radius:12px}
+  #toast{border-radius:14px;box-shadow:var(--lift);backdrop-filter:var(--blur);
+    -webkit-backdrop-filter:var(--blur)}
+  .qrwrap{border-radius:18px;background:var(--panel);border-color:var(--line)}
+  .pill,.badge{border-radius:999px}
+
+  @media(prefers-reduced-motion:reduce){
+    #gate .box,#gate .step,.mwrap{animation:none}
+  }
 </style>
 </head>
 <body>
 
 <div id="gate">
   <div class="box">
-    <div class="mark">OD</div>
+    <div class="mark"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="gmk" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gmk)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
 
-    <div id="stepEmail">
-      <h1>Вход в Rozmovio</h1>
-      <p>Введите рабочую почту — пришлём код из шести цифр.</p>
+    <div id="stepEmail" class="step">
+      <h1>Rozmovio</h1>
+      <p>Все переписки с клиентами — в одном окне. Введите рабочую почту, и мы пришлём код из шести цифр.</p>
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <div class="err" id="gateErr"></div>
-      <div style="margin-top:12px"><button id="ask">Получить код</button></div>
+      <div style="margin-top:14px"><button id="ask">Получить код</button></div>
       <div class="alt"><a id="toToken">Войти по токену доступа</a></div>
     </div>
 
-    <div id="stepCode" style="display:none">
+    <div id="stepCode" class="step" style="display:none">
       <h1>Код отправлен</h1>
       <p>Проверьте почту <b id="sentTo"></b>. Код действует 10 минут.</p>
       <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
       <div class="err" id="codeErr"></div>
-      <div style="margin-top:12px;display:flex;gap:8px">
+      <div class="row2" style="margin-top:14px">
         <button id="verify">Войти</button>
         <button class="ghost" id="again">Другая почта</button>
       </div>
     </div>
 
-    <div id="stepWs" style="display:none">
+    <div id="stepWs" class="step" style="display:none">
       <h1>Куда входим?</h1>
       <p>Эта почта заведена в нескольких организациях.</p>
       <div id="wsList"></div>
     </div>
 
-    <div id="stepToken" style="display:none">
+    <div id="stepToken" class="step" style="display:none">
       <h1>Вход по токену</h1>
       <p>Токен выдаёт команда на сервере:
         <code>docker compose exec api node apps/api/dist/seed.js --name "Компания" --email you@example.com</code>
       </p>
       <input id="tok" type="password" placeholder="eyJhbGciOi..." autocomplete="off">
       <div class="err" id="tokErr"></div>
-      <div style="margin-top:12px;display:flex;gap:8px">
+      <div class="row2" style="margin-top:14px">
         <button id="enter">Войти</button>
         <button class="ghost" id="toEmail">Назад к почте</button>
       </div>
     </div>
+
+    <div class="foot">Telegram, Instagram и Messenger в одном окне — и в карточке клиента в Zoho CRM.</div>
   </div>
 </div>
 
