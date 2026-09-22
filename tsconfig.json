@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./apps/ingress"
+    },
+    {
+      "path": "./apps/api"
+    },
+    {
+      "path": "./apps/workers"
+    },
+    {
+      "path": "./apps/poller"
+    }
+  ]
+}

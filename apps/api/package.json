@@ -1,0 +1,21 @@
+{
+  "name": "@omnidesk/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@omnidesk/core": "*",
+    "bullmq": "^5.34.4",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.2",
+    "nodemailer": "^9.0.5",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
+  }
+}

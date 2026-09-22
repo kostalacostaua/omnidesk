@@ -1,0 +1,11 @@
+# Скрипты уезжают в Linux-контейнеры. Если Windows превратит их в CRLF,
+# bash внутри контейнера упадёт с «\r: command not found» — ошибка,
+# которую тяжело опознать. Принудительно держим LF.
+* text=auto eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.zip binary

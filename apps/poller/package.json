@@ -1,0 +1,14 @@
+{
+  "name": "@omnidesk/poller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": { "start": "node dist/main.js" },
+  "dependencies": {
+    "@omnidesk/core": "*",
+    "bullmq": "^5.34.4",
+    "ioredis": "^5.4.2",
+    "pg": "^8.13.1"
+  }
+}

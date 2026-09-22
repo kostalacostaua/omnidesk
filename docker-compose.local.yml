@@ -1,0 +1,86 @@
+# Оверлей для запуска на своей машине.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# Отличие от docker-compose.free.yml: там сервер, где стеку принадлежит вся
+# память. Здесь ноутбук, на котором вы ещё и работаете, поэтому весь стек
+# ужат примерно до 1,5 ГБ — чтобы браузер и редактор не начали тормозить.
+#
+# Производительности хватает с запасом: даже 1000 клиентов это 30 сообщений
+# в секунду, а вам сейчас нужно обработать десяток тестовых.
+
+name: omnidesk
+
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB          # на ноутбуке этого достаточно
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=20
+      - -c
+      - fsync=off                     # ⚠️ ТОЛЬКО для локальной разработки:
+      - -c                            # быстрее, но при выключении питания
+      - full_page_writes=off          # база может не подняться. На сервере — никогда.
+      - -c
+      - synchronous_commit=off
+    deploy:
+      resources:
+        limits: { memory: 768M }
+
+  redis:
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD не задан}
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "no"                          # локально AOF не нужен
+    deploy:
+      resources:
+        limits: { memory: 192M }
+
+  ingress:
+    # Публикуем на хост ТОЛЬКО через 127.0.0.1.
+    #
+    # Записать "3001:3001" было бы ошибкой: Docker в этом случае вешает порт
+    # на 0.0.0.0 и пишет правило в iptables ДО брандмауэра — сервис станет
+    # виден всей локальной сети (кафе, коворкинг, общая квартира),
+    # а брандмауэр покажет порт закрытым. Явный 127.0.0.1 это исключает.
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      NODE_OPTIONS: --max-old-space-size=192
+      LOG_LEVEL: debug                # локально хочется видеть подробности
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
+  api:
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+      LOG_LEVEL: debug
+    deploy:
+      resources:
+        limits: { memory: 384M }
+
+  workers:
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+      LOG_LEVEL: debug
+      WORKER_CONCURRENCY: 2
+    deploy:
+      resources:
+        limits: { memory: 384M }

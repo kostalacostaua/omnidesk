@@ -1,0 +1,33 @@
+{
+  "name": "omnidesk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build && node scripts/check-ui.mjs && node scripts/check-sql.mjs && node scripts/check-rls.mjs",
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:ingress": "tsx watch apps/ingress/src/main.ts",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "dev:workers": "tsx watch apps/workers/src/main.ts",
+    "clean": "rm -rf packages/*/dist apps/*/dist tsconfig.tsbuildinfo",
+    "seed": "tsx apps/api/src/seed.ts",
+    "check:ui": "node scripts/check-ui.mjs",
+    "check:sql": "node scripts/check-sql.mjs",
+    "migrate": "node apps/api/dist/migrate.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
