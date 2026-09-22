@@ -1,3 +1,5 @@
+import type { UnifiedMessage } from './types.js';
+
 /**
  * Контракт очередей между ingress и воркерами.
  *
@@ -10,11 +12,50 @@ export const QUEUE_INBOUND = 'inbound';
 export const QUEUE_OUTBOUND = 'outbound';
 export const QUEUE_MEDIA = 'media';
 export const QUEUE_CRM_SYNC = 'crm-sync';
+/** Исходящие в номерной Telegram: отправляет сервис sessions, у которого живые MTProto-сессии. */
+export const QUEUE_MTPROTO_OUT = 'mtproto-out';
+/** Вход в номерной Telegram по QR-коду. */
+export const QUEUE_MTPROTO_LOGIN = 'mtproto-login';
+
+/** Ключ Redis с состоянием входа по QR. Читает api, пишет sessions. */
+export const mtprotoLoginKey = (loginId: string): string => `mtp:login:${loginId}`;
+/** Ключ Redis для пароля двухэтапной проверки. Живёт секунды и удаляется после чтения. */
+export const mtprotoPasswordKey = (loginId: string): string => `mtp:pw:${loginId}`;
+
+export interface MtprotoLoginJob {
+  loginId: string;
+  tenantId: string;
+  displayName?: string;
+}
+
+export interface MtprotoLoginState {
+  tenantId: string;
+  state: 'starting' | 'qr' | 'password' | 'done' | 'error';
+  qrUrl?: string;
+  qrExpires?: number;
+  passwordHint?: string;
+  passwordError?: boolean;
+  channelId?: string;
+  error?: string;
+}
+
+/**
+ * Входящее из номерного Telegram.
+ *
+ * В отличие от вебхуков здесь сообщение уже нормализовано: разобрать
+ * объект MTProto может только тот, у кого есть сессия, — это sessions.
+ * Вложения тоже уже в хранилище: скачать их можно только через ту же сессию.
+ */
+export interface MtprotoInboundPayload {
+  message: Omit<UnifiedMessage, 'sentAt'> & { sentAt: string };
+  /** Ключ аватара в хранилище, если удалось скачать. */
+  avatarKey?: string;
+}
 
 export interface InboundJob {
   channelId: string;
   tenantId: string;
-  provider: 'telegram' | 'meta';
+  provider: 'telegram' | 'meta' | 'mtproto';
   /** Сырое тело вебхука как есть. */
   payload: unknown;
   receivedAt: string;

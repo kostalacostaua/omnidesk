@@ -4,6 +4,7 @@ import {
   QUEUE_INBOUND,
   QUEUE_MEDIA,
   QUEUE_OUTBOUND,
+  QUEUE_MTPROTO_OUT,
   computeResponseWindow,
   createPool,
   defaultJobOptions,
@@ -23,6 +24,7 @@ import {
   type MediaJob,
   type OutboundJob,
   type MetaWebhookPayload,
+  type MtprotoInboundPayload,
   type TelegramUpdate,
   type UnifiedMessage,
 } from '@omnidesk/core';
@@ -131,6 +133,18 @@ async function persistMessage(
 
     let contactId = identityRows[0]?.contact_id;
 
+    // access_hash у пользователя Telegram может смениться, а без
+    // актуального значения ответить ему нельзя. Обновляем при каждом
+    // сообщении, где он есть.
+    if (contactId && msg.peerProfile.accessHash) {
+      await db.query(
+        `UPDATE contact_identities
+            SET raw_profile = raw_profile || $4::jsonb
+          WHERE tenant_id = $1 AND channel_type = $2 AND external_id = $3`,
+        [msg.tenantId, msg.channelType, msg.peerId, JSON.stringify(msg.peerProfile)],
+      );
+    }
+
     if (!contactId) {
       const { rows } = await db.query<{ id: string }>(
         `INSERT INTO contacts (tenant_id, display_name, phone_e164)
@@ -159,13 +173,14 @@ async function persistMessage(
       `INSERT INTO conversations
          (tenant_id, channel_id, contact_id, status,
           window_expires_at, window_type, last_message_at, unread_count)
-       VALUES ($1, $2, $3, 'open', $4, $5, $6, 1)
+       VALUES ($1, $2, $3, 'open', $4, $5, $6, $7::int)
        ON CONFLICT (tenant_id, channel_id, contact_id) DO UPDATE
-         SET window_expires_at = EXCLUDED.window_expires_at,
+         SET window_expires_at = CASE WHEN $7::int = 1 THEN EXCLUDED.window_expires_at
+                                      ELSE conversations.window_expires_at END,
              window_type       = EXCLUDED.window_type,
              last_message_at   = EXCLUDED.last_message_at,
-             unread_count      = conversations.unread_count + 1,
-             status            = CASE WHEN conversations.status = 'resolved'
+             unread_count      = conversations.unread_count + $7::int,
+             status            = CASE WHEN $7::int = 1 AND conversations.status = 'resolved'
                                       THEN 'open' ELSE conversations.status END
        RETURNING id`,
       [
@@ -175,6 +190,10 @@ async function persistMessage(
         window.expiresAt,
         window.type,
         msg.sentAt,
+        // Исходящее, написанное владельцем прямо с телефона (номерной
+        // Telegram), не должно помечать диалог непрочитанным и открывать
+        // закрытый: это ответ, а не обращение клиента.
+        msg.direction === 'in' ? 1 : 0,
       ],
     );
     const conversationId = convRows[0]!.id;
@@ -229,6 +248,9 @@ async function persistMessage(
 // ═══════════════════════════════════════════════════════════════════════
 
 const mediaQueue = new Queue<MediaJob>(QUEUE_MEDIA, { connection, defaultJobOptions });
+
+/** Исходящие номерного Telegram — их отправляет сервис sessions. */
+const mtprotoOutQueue = new Queue<OutboundJob>(QUEUE_MTPROTO_OUT, { connection, defaultJobOptions });
 
 /** Очередь исходящих: сюда бот кладёт свои автоответы. */
 const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, { connection, defaultJobOptions });
@@ -513,6 +535,7 @@ function extractWhatsAppPhoneNumberId(payload: MetaWebhookPayload): string | nul
 }
 
 async function handleInbound(job: InboundJob): Promise<void> {
+  if (job.provider === 'mtproto') return handleMtprotoInbound(job);
   if (job.provider === 'telegram') {
     const channel = await findChannelById(job.channelId);
     if (!channel) {
@@ -587,6 +610,47 @@ async function handleInbound(job: InboundJob): Promise<void> {
   }
 }
 
+
+/**
+ * Входящее из номерного Telegram.
+ *
+ * Сообщение уже нормализовано сервисом sessions, вложения уже лежат
+ * в хранилище. Здесь то же, что для остальных каналов: запись,
+ * аватар, бот. Канал перепроверяется по маршрутам: пока задача
+ * стояла в очереди, его могли отключить.
+ */
+async function handleMtprotoInbound(job: InboundJob): Promise<void> {
+  const channel = await findChannelById(job.channelId);
+  if (!channel || channel.tenant_id !== job.tenantId) {
+    log('warn', 'Канал не найден или отключён', { channelId: job.channelId });
+    return;
+  }
+  const payload = job.payload as MtprotoInboundPayload;
+  const m: UnifiedMessage = {
+    ...payload.message,
+    tenantId: channel.tenant_id,
+    channelId: channel.id,
+    channelType: 'telegram_user',
+    sentAt: new Date(payload.message.sentAt),
+  };
+  const { inserted, conversationId, avatarFor } = await persistMessage(m);
+  log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
+    channelId: channel.id,
+    externalId: m.externalId,
+  });
+  if (avatarFor && payload.avatarKey) {
+    await withTenant(pool, channel.tenant_id, async (db) => {
+      await db.query(
+        `UPDATE contacts SET avatar_url = $2 WHERE id = $1 AND avatar_url IS NULL`,
+        [avatarFor, payload.avatarKey],
+      );
+    });
+  }
+  if (inserted && conversationId && m.direction === 'in') {
+    const sent = await runBot(m, conversationId);
+    if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
+  }
+}
 
 /**
  * Запись реакции клиента на сообщение.
@@ -855,6 +919,10 @@ async function handleReaction(job: OutboundJob): Promise<void> {
   });
 
   if (!row) throw new UnrecoverableError('Канал не найден');
+  if (row.channel_type === 'telegram_user') {
+    await mtprotoOutQueue.add('react', job);
+    return;
+  }
   if (row.channel_type !== 'telegram_bot') {
     throw new UnrecoverableError(`Реакции для канала ${row.channel_type} не поддерживаются`);
   }
@@ -973,6 +1041,14 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
   if (!row.peer_id) {
     await markFailed(job, { reason: 'no_peer_identity' });
     throw new UnrecoverableError('Неизвестен получатель: нет идентификатора контакта в канале');
+  }
+
+  if (row.channel_type === 'telegram_user') {
+    // Отправить может только процесс, у которого открыта MTProto-сессия
+    // этого аккаунта. Передаём задачу ему; jobId тот же, повторная
+    // передача не приведёт ко второй отправке.
+    await mtprotoOutQueue.add('send', job, { jobId: jobKey('mtp', job.messageId) });
+    return;
   }
 
   if (row.channel_type !== 'telegram_bot') {

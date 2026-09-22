@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import {
   QUEUE_OUTBOUND,
   QUEUE_MEDIA,
+  QUEUE_MTPROTO_LOGIN,
   assertRlsIntegrity,
   canSendFreeform,
   createPool,
@@ -21,6 +22,7 @@ import {
   type ChannelType,
   type OutboundJob,
   type MediaJob,
+  type MtprotoLoginJob,
 } from '@omnidesk/core';
 import { INBOX_HTML, UI_BUILD } from './ui.js';
 import { registerSettings } from './settings.js';
@@ -53,6 +55,11 @@ const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, {
 const mediaQueue = new Queue<MediaJob>(QUEUE_MEDIA, {
   connection: redis,
   defaultJobOptions,
+});
+/** Вход в номерной Telegram: задачу выполняет сервис sessions. */
+const mtprotoLoginQueue = new Queue<MtprotoLoginJob>(QUEUE_MTPROTO_LOGIN, {
+  connection: redis,
+  defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
 });
 const storage = createStorage();
 
@@ -142,6 +149,7 @@ registerSettings(app, {
   telegramApiRoot: TELEGRAM_API_ROOT,
   publicUrl: PUBLIC_URL,
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
+  mtproto: { redis, loginQueue: mtprotoLoginQueue },
 });
 
 app.get('/health', async () => ({ status: 'ok' }));

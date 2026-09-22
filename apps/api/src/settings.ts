@@ -1,6 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
+import QRCode from 'qrcode';
 import {
+  mtprotoLoginKey,
+  mtprotoPasswordKey,
+  type MtprotoLoginJob,
+  type MtprotoLoginState,
   encryptJson,
   maskSecret,
   withSystem,
@@ -28,6 +35,7 @@ export interface SettingsDeps {
   telegramApiRoot: string;
   publicUrl: string;
   telegramWebhookSecret: string;
+  mtproto?: { redis: Redis; loginQueue: Queue<MtprotoLoginJob> };
 }
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
@@ -398,4 +406,85 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return { channelId, username: bot.username, mode };
     },
   );
+
+  // ── Номерной Telegram: вход по QR ─────────────────────────────────
+  //
+  // Сам вход выполняет сервис sessions: там живут MTProto-соединения.
+  // api только ставит задачу и отдаёт интерфейсу её состояние из Redis.
+  // Состояние привязано к тенанту: чужой loginId ничего не покажет.
+  const mtp = deps.mtproto;
+
+  async function readLogin(loginId: string): Promise<MtprotoLoginState | null> {
+    if (!mtp) return null;
+    const raw = await mtp.redis.get(mtprotoLoginKey(loginId));
+    return raw ? (JSON.parse(raw) as MtprotoLoginState) : null;
+  }
+
+  app.post<{ Body: { displayName?: string } }>(
+    '/settings/channels/telegram-user/start',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+      if (!mtp) return reply.code(503).send({ error: 'mtproto_unavailable' });
+
+      const loginId = randomUUID();
+      const state: MtprotoLoginState = { tenantId: auth.tenantId, state: 'starting' };
+      await mtp.redis.set(mtprotoLoginKey(loginId), JSON.stringify(state), 'EX', 600);
+      const job: MtprotoLoginJob = { loginId, tenantId: auth.tenantId };
+      const name = req.body?.displayName?.trim();
+      if (name) job.displayName = name.slice(0, 80);
+      await mtp.loginQueue.add('login', job, { jobId: loginId });
+      return { loginId };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/settings/channels/telegram-user/login/:id',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+      const st = await readLogin(req.params.id);
+      if (!st || st.tenantId !== auth.tenantId) return reply.code(404).send({ error: 'not_found' });
+
+      // QR рисуем здесь, а не в браузере: так не нужна клиентская
+      // библиотека, а страница остаётся одним файлом без зависимостей.
+      const qrSvg =
+        st.state === 'qr' && st.qrUrl
+          ? await QRCode.toString(st.qrUrl, { type: 'svg', margin: 1, width: 240 })
+          : null;
+      return {
+        state: st.state,
+        qrSvg,
+        passwordHint: st.passwordHint ?? null,
+        passwordError: !!st.passwordError,
+        channelId: st.channelId ?? null,
+        error: st.error ?? null,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { password?: string } }>(
+    '/settings/channels/telegram-user/login/:id/password',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+      const st = await readLogin(req.params.id);
+      if (!mtp || !st || st.tenantId !== auth.tenantId) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      const password = req.body?.password ?? '';
+      if (!password || password.length > 256) return reply.code(400).send({ error: 'bad_password' });
+      // Пароль лежит в Redis 60 секунд максимум и удаляется сразу
+      // после чтения сервисом sessions. В базу и в логи не попадает.
+      await mtp.redis.set(mtprotoPasswordKey(req.params.id), password, 'EX', 60);
+      await mtp.redis.set(
+        mtprotoLoginKey(req.params.id),
+        JSON.stringify({ ...st, state: 'starting' }),
+        'EX',
+        600,
+      );
+      return { ok: true };
+    },
+  );
+
 }

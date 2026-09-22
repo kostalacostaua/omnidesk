@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-export const UI_BUILD = '2026-09-22-1';
+export const UI_BUILD = '2026-09-22-2';
 
 export const INBOX_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -121,6 +121,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .mini{padding:6px 10px;font-size:12px}
   .err{color:var(--crit);font-size:12px;margin-top:6px}
   .ok{color:var(--good);font-size:12px;margin-top:6px}
+  .qrwrap{display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin:14px 0 4px;
+    padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+  .qr{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;flex:none}
+  .qr svg{width:100%;height:100%;display:block}
+  .steps{margin:0;padding-left:18px;line-height:1.9;font-size:13px}
   .dim{color:var(--t3)}
   .empty{padding:26px 20px;color:var(--t3);font-size:12.5px;text-align:center;line-height:1.6}
 
@@ -1459,6 +1464,16 @@ function tabChannels(){
       'сохраните копию у себя.</div>' +
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div></div>';
 
+    html +=
+      '<div class="card"><h3>Подключить Telegram по номеру</h3>' +
+      '<div class="hint">Личный или рабочий аккаунт Telegram — клиенты пишут на ваш номер, ' +
+      'как обычно, а переписка появляется здесь. Ответы уходят от вашего имени.</div>' +
+      '<div class="row2" style="margin-top:10px"><input id="uname" placeholder="Название, например: Продажи" autocomplete="off">' +
+      '<button id="uqr">Показать QR-код</button></div>' +
+      '<div id="uqrbox"></div>' +
+      '<div class="hint">Telegram не любит массовые рассылки с личных аккаунтов: ' +
+      'отвечайте клиентам, но не пишите сотням незнакомых людей — за это блокируют номер.</div></div>';
+
     html += '<div class="card"><h3>Подключено (' + CHANNELS.length + ')</h3>' +
       (CHANNELS.length ? CHANNELS.map(function(c){
         var pill = c.status === 'active' ? '<span class="pill">работает</span>'
@@ -1467,7 +1482,8 @@ function tabChannels(){
         var bits = [];
         if (c.meta && c.meta.username) bits.push('@' + c.meta.username);
         bits.push('диалогов: ' + c.conversations);
-        if (c.last_error) bits.push('ошибка: ' + c.last_error);
+        if (c.meta && c.meta.phone) bits.push(c.meta.phone);
+        if (c.last_error) bits.push(errLabel(c.last_error));
         return '<div class="item"><div>' +
           '<div class="t">' + esc(c.display_name) + pill + '</div>' +
           '<div class="s">' + esc(CH[c.type] || c.type) + ' · ' + esc(bits.join(' · ')) + '</div>' +
@@ -1482,13 +1498,15 @@ function tabChannels(){
     // Честный список того, чего ещё нет. Пустой экран без объяснений хуже:
     // непонятно, это не сделано или сломалось.
     html += '<div class="card"><h3>Готовятся</h3>' +
-      ['telegram_user','whatsapp_cloud','whatsapp_user','instagram',
+      ['whatsapp_cloud','whatsapp_user','instagram',
        'messenger','viber_bot','viber_user'].map(function(t){
         return '<div class="item"><div><div class="t">' + esc(CH[t]) +
           '<span class="pill soon">скоро</span></div></div></div>';
       }).join('') + '</div>';
 
     el('sbody').innerHTML = html;
+
+    el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
 
     el('badd').onclick = function(){
       var token = el('btok').value.trim();
@@ -1524,6 +1542,89 @@ function tabChannels(){
       return api('/channels/' + b.dataset.del, { method:'DELETE' }).then(tabChannels);
     });
   }).catch(sErr);
+}
+
+function errLabel(e){
+  var r = (e && e.reason) || '';
+  if (r === 'session_revoked') return 'сеанс завершён в Telegram — подключите номер заново';
+  if (r === 'token_revoked') return 'токен бота отозван — подключите заново';
+  return 'ошибка: ' + (typeof e === 'string' ? e : JSON.stringify(e));
+}
+
+/* Вход в номерной Telegram. Сервер отдаёт готовую картинку QR,
+   страница только опрашивает состояние раз в полторы секунды. */
+var TGU = { id:null, timer:null };
+
+function startTgUser(name){
+  var box = el('uqrbox');
+  if (TGU.timer) clearTimeout(TGU.timer);
+  box.innerHTML = '<div class="qrwrap"><div class="empty">Готовлю QR-код...</div></div>';
+  busy(el('uqr'), true);
+  api('/settings/channels/telegram-user/start', { method:'POST', body:{ displayName: name } })
+    .then(function(r){ TGU.id = r.loginId; pollTgUser() })
+    .catch(function(e){
+      busy(el('uqr'), false);
+      var p = (e && e.payload) || {};
+      box.innerHTML = '<div class="err">' + (p.error === 'mtproto_unavailable'
+        ? 'Номерной Telegram ещё не включён на сервере.' : 'Не удалось начать вход.') + '</div>';
+    });
+}
+
+function pollTgUser(){
+  var box = el('uqrbox');
+  if (!box || !TGU.id) return;
+  var id = TGU.id;
+  api('/settings/channels/telegram-user/login/' + id).then(function(st){
+    if (TGU.id !== id || !el('uqrbox')) return;
+    if (st.state === 'qr' && st.qrSvg) {
+      box.innerHTML = '<div class="qrwrap"><div class="qr">' + st.qrSvg + '</div><ol class="steps">' +
+        '<li>Откройте Telegram на телефоне</li>' +
+        '<li><b>Настройки → Устройства → Подключить устройство</b></li>' +
+        '<li>Наведите камеру на этот код</li></ol></div>' +
+        '<div class="hint">Код обновляется каждые полминуты — это нормально.</div>';
+    } else if (st.state === 'password') {
+      if (!el('upw')) {
+        box.innerHTML = '<div class="qrwrap"><div>' +
+          '<div class="t">На аккаунте включён облачный пароль</div>' +
+          '<div class="hint" id="uphint"></div>' +
+          '<div class="row2"><input id="upw" type="password" placeholder="Облачный пароль Telegram" autocomplete="off">' +
+          '<button id="upwgo">Войти</button></div>' +
+          '<div class="err" id="upwerr"></div>' +
+          '<div class="hint">Пароль передаётся в Telegram и нигде у нас не сохраняется.</div></div></div>';
+        el('upwgo').onclick = function(){
+          var pw = el('upw').value;
+          if (!pw) return;
+          busy(el('upwgo'), true);
+          api('/settings/channels/telegram-user/login/' + id + '/password',
+              { method:'POST', body:{ password: pw } })
+            .catch(function(){ el('upwerr').textContent = 'Не удалось отправить пароль' })
+            .then(function(){ el('upw').value = '' });
+        };
+        el('upw').onkeydown = function(ev){ if (ev.key === 'Enter') el('upwgo').click() };
+        el('upw').focus();
+      } else {
+        busy(el('upwgo'), false);
+      }
+      el('uphint').textContent = st.passwordHint ? 'Подсказка: ' + st.passwordHint : '';
+      el('upwerr').textContent = st.passwordError ? 'Пароль не подошёл, попробуйте ещё раз' : '';
+    } else if (st.state === 'done') {
+      TGU.id = null;
+      box.innerHTML = '<div class="ok">Номер подключён. Сообщения начнут приходить в течение минуты.</div>';
+      toast('Telegram по номеру подключён');
+      setTimeout(tabChannels, 1500);
+      return;
+    } else if (st.state === 'error') {
+      TGU.id = null;
+      busy(el('uqr'), false);
+      box.innerHTML = '<div class="err">' + esc(st.error || 'Вход не удался') + '</div>';
+      return;
+    } else if (el('upwgo')) {
+      busy(el('upwgo'), true);
+    }
+    TGU.timer = setTimeout(pollTgUser, 1500);
+  }).catch(function(){
+    if (TGU.id === id) TGU.timer = setTimeout(pollTgUser, 3000);
+  });
 }
 
 function tabUsers(){

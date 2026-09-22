@@ -10,7 +10,9 @@ export type ChannelType =
   | 'instagram'
   | 'messenger'
   | 'telegram_bot'
-  | 'telegram_business';
+  | 'telegram_business'
+  /** Личный аккаунт Telegram по номеру телефона (MTProto, вход по QR). */
+  | 'telegram_user';
 
 export type Direction = 'in' | 'out';
 export type SenderType = 'customer' | 'agent' | 'bot' | 'system';
@@ -55,7 +57,14 @@ export interface UnifiedMessage {
   externalId: string;
   /** Идентификатор собеседника у провайдера: wa_id / igsid / psid / telegram user id. */
   peerId: string;
-  peerProfile: { name?: string; username?: string; phone?: string; avatarUrl?: string };
+  peerProfile: {
+    name?: string;
+    username?: string;
+    phone?: string;
+    avatarUrl?: string;
+    /** MTProto: без access_hash написать пользователю нельзя. */
+    accessHash?: string;
+  };
   direction: Direction;
   senderType: SenderType;
   content: MessageContent;
@@ -120,6 +129,7 @@ export function computeResponseWindow(
       return { type: 'standard', expiresAt: new Date(t + 24 * HOUR) };
 
     case 'telegram_bot':
+    case 'telegram_user':
       return { type: 'none', expiresAt: null };
   }
 }
