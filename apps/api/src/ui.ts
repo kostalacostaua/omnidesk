@@ -35,7 +35,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
@@ -47,7 +47,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
      Гарнитура задана одной переменной --font: чтобы поменять её
      во всём интерфейсе, достаточно этой строки. */
   :root{color-scheme:light;
-    --font:"Manrope",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --font:"Onest",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --font-display:"Onest",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
     --bg:#f5f6fb;--panel:rgba(255,255,255,.74);--solid:#fff;--panel2:#eceff8;
     --line:rgba(11,16,34,.09);--line2:rgba(11,16,34,.16);--hover:rgba(11,16,34,.05);
     --t1:#0b1022;--t2:#5a6178;--t3:#8a90a6;
@@ -539,6 +540,60 @@ export const INBOX_HTML = `<!DOCTYPE html>
   @media(prefers-reduced-motion:reduce){
     #gate .box,#gate .step,.mwrap{animation:none}
   }
+
+  /* ─── Разделы ──────────────────────────────────────────────────── */
+  /* Каналы, сценарии, шаблоны и команда — полноценные страницы,
+     а не вкладки в окне поверх чатов: в них живёт настройка продукта,
+     и работать в модальном окне с этим неудобно. */
+  #page{display:none;overflow-y:auto;min-width:0}
+  #app:not([data-view="chats"]) #list,
+  #app:not([data-view="chats"]) #thread,
+  #app:not([data-view="chats"]) #card{display:none}
+  #app:not([data-view="chats"]){grid-template-columns:66px minmax(0,1fr)}
+  #app:not([data-view="chats"]) #page{display:block}
+  .pg{max-width:1080px;margin:0 auto;padding:30px 28px 60px}
+  .pg-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
+    margin-bottom:22px;flex-wrap:wrap}
+  .pg-head h2{margin:0;font-size:26px;font-weight:800;letter-spacing:-.03em;
+    font-family:var(--font-display,var(--font))}
+  .pg-head p{margin:6px 0 0;color:var(--t2);font-size:13px;max-width:62ch;line-height:1.55}
+  .pg-sec{margin-top:26px}
+  .pg-sec h3{margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--t3);font-weight:700}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;
+    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);
+    display:flex;flex-direction:column;gap:10px;
+    transition:box-shadow .2s ease,transform .12s cubic-bezier(.2,.8,.3,1),border-color .2s ease}
+  .tile.click{cursor:pointer}
+  .tile.click:hover{box-shadow:var(--lift);transform:translateY(-2px);border-color:var(--line2)}
+  .tile .t1{display:flex;gap:11px;align-items:center;min-width:0}
+  .tile .ttl{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .tile .sub{color:var(--t3);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tile .acts{display:flex;gap:7px;margin-top:auto;padding-top:4px;flex-wrap:wrap}
+  .tile .stat{display:flex;gap:18px;font-size:12px;color:var(--t2)}
+  .tile .stat b{display:block;font-size:19px;font-weight:700;color:var(--t1);
+    font-variant-numeric:tabular-nums;font-family:var(--font-display,var(--font))}
+  .chico{width:38px;height:38px;border-radius:12px;flex:none;display:flex;align-items:center;
+    justify-content:center;color:#fff;font-weight:700;font-size:12px}
+  .chico.telegram_bot,.chico.telegram_user{background:linear-gradient(140deg,#37aee2,#1e96c8)}
+  .chico.instagram{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
+  .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
+  .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
+  .chico.soon{background:var(--panel2);color:var(--t3)}
+  .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;
+    background:var(--panel2);color:var(--t2);white-space:nowrap}
+  .pill.ok{background:var(--good-bg);color:var(--good)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)}
+  .pill.crit{background:var(--crit-bg);color:var(--crit)}
+  .back-link{background:transparent;border:0;color:var(--t3);font-weight:600;font-size:12.5px;
+    padding:0;box-shadow:none;margin-bottom:10px}
+  .back-link:hover{background:transparent;color:var(--t1);box-shadow:none}
+  @media(max-width:760px){
+    #app:not([data-view="chats"]){grid-template-columns:66px minmax(0,1fr)}
+    .pg{padding:20px 16px 50px}
+  }
 </style>
 </head>
 <body>
@@ -594,10 +649,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
   <nav id="rail">
     <div class="logo" id="logo" title="К чатам" style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
     <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
-    <button class="rbtn" data-view="bots" data-icon="bot">Боты</button>
+    <button class="rbtn" data-view="channels" data-icon="plug">Каналы</button>
+    <button class="rbtn" data-view="bots" data-icon="bot">Сценарии</button>
+    <button class="rbtn" data-view="replies" data-icon="bolt">Шаблоны</button>
+    <button class="rbtn" data-view="integrations" data-icon="link">Интеграции</button>
+    <button class="rbtn" data-view="users" data-icon="team">Команда</button>
     <div class="grow"></div>
     <button class="rbtn" id="bell" data-icon="bell">Звук</button>
-    <button class="rbtn" id="cog" data-icon="gear">Настройки</button>
+    <button class="rbtn" data-view="profile" data-icon="gear">Профиль</button>
     <button class="rbtn" id="out" data-icon="exit">Выйти</button>
   </nav>
 
@@ -630,23 +689,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   <aside id="card"><div class="empty">Карточка клиента появится, когда откроете диалог</div></aside>
 
-  <div id="bots"></div>
+  <main id="page"></main>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<div id="settings">
-  <div class="sheet">
-    <div class="shead"><b>Настройки</b><button class="ghost mini" id="sclose">Закрыть</button></div>
-    <div class="stabs">
-      <button class="stab on" data-tab="profile">Профиль</button>
-      <button class="stab" data-tab="channels">Каналы</button>
-      <button class="stab" data-tab="users">Команда</button>
-      <button class="stab" data-tab="replies">Шаблоны</button>
-    </div>
-    <div class="sbody" id="sbody"></div>
-  </div>
-</div>
 
 <script>
 (function(){
@@ -1455,15 +1502,10 @@ function renderBots(){
         TRIGGERS[k] + '</option>';
     }).join('');
 
-    el('bots').innerHTML =
-      '<h2>Чат-боты</h2>' +
-      '<p class="lead">Правило — это «условие на входящее сообщение → ответ». ' +
-      'Сработавшее правило отвечает клиенту мгновенно, в любое время суток.</p>' +
-      '<p class="lead"><b>Когда бот молчит.</b> Если у диалога есть ответственный — ' +
-      'его ведёт человек, бот не вмешивается. Если оператор отвечал менее 30 минут назад — ' +
-      'бот берёт паузу, чтобы не перебивать живую беседу, и включается сам. ' +
-      'И есть жёсткий выключатель «Бот: выкл» в самом диалоге. ' +
-      'Текущее состояние видно на этой кнопке над перепиской.</p>' +
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Сценарии', 'Правило — это «условие на входящее сообщение → ответ». Оно отвечает клиенту ' +
+        'мгновенно, в любое время суток. Бот молчит, если у диалога есть ответственный или оператор ' +
+        'писал менее 30 минут назад, и его можно выключить кнопкой в самом диалоге.') +
 
       '<div class="card"><h3>Новое правило</h3>' +
       '<div class="row2"><input id="bName" placeholder="Название, например «Прайс»"></div>' +
@@ -1501,7 +1543,7 @@ function renderBots(){
             (r.is_active ? 'Выключить' : 'Включить') + '</button>' +
           '<button class="ghost mini" data-rdel="' + r.id + '">Удалить</button>' +
         '</div></div>';
-      }).join('') : '<div class="hint">Пока ни одного правила.</div>') + '</div>';
+      }).join('') : '<div class="hint">Пока ни одного правила.</div>') + '</div></div>';
 
     el('bAdd').onclick = function(){
       el('bErr').textContent = '';
@@ -1525,13 +1567,13 @@ function renderBots(){
         });
     };
 
-    Array.prototype.forEach.call(el('bots').querySelectorAll('[data-rule]'), function(b){
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-rule]'), function(b){
       b.onclick = function(){
         api('/bot-rules/' + b.dataset.rule, { method:'PATCH',
           body:{ isActive: b.dataset.active === 'true' } }).then(renderBots).catch(showErr);
       };
     });
-    armDelete(el('bots').querySelectorAll('[data-rdel]'), function(b){
+    armDelete(pageBox().querySelectorAll('[data-rdel]'), function(b){
       return api('/bot-rules/' + b.dataset.rdel, { method:'DELETE' }).then(renderBots);
     });
   }).catch(showErr);
@@ -1559,27 +1601,27 @@ function armDelete(nodes, action){
 
 /* ══════════════ Настройки ══════════════ */
 
-function openSettings(){ el('settings').classList.add('on'); paintSettings() }
-function closeSettings(){ el('settings').classList.remove('on') }
-
-function paintSettings(){
-  Array.prototype.forEach.call(document.querySelectorAll('.stab'), function(b){
-    b.classList.toggle('on', b.dataset.tab === S.tab);
-  });
-  el('sbody').innerHTML = '<div class="empty">Загружаю...</div>';
-  ({ profile:tabProfile, channels:tabChannels, users:tabUsers, replies:tabReplies })[S.tab]();
+/* Разделы рисуются в одном контейнере #page. Заголовок страницы
+   задаётся здесь, чтобы каждый раздел не собирал его заново. */
+function pageHead(title, sub, right){
+  return '<div class="pg-head"><div><h2>' + esc(title) + '</h2>' +
+    (sub ? '<p>' + sub + '</p>' : '') + '</div>' + (right || '') + '</div>';
 }
 
+function pageBox(){ return el('page') }
+
 function sErr(e){
-  el('sbody').innerHTML = '<div class="empty">Не удалось загрузить: ' +
-    esc((e && e.message) || 'ошибка') + '</div>';
+  pageBox().innerHTML = '<div class="pg"><div class="empty">Не удалось загрузить: ' +
+    esc((e && e.message) || 'ошибка') + '</div></div>';
 }
 
 function tabProfile(){
   api('/me').then(function(d){
     ME = d;
     var t = d.tenant || {}, u = d.user || {}, c = d.counts || {};
-    el('sbody').innerHTML =
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Профиль и организация', 'Кто вы в системе и что сейчас подключено.') +
+      '<div class="grid">' +
       '<div class="card"><h3>Организация</h3><div class="kv">' +
       '<div class="k">Название</div><div>' + esc(t.name) + '</div>' +
       '<div class="k">Идентификатор</div><div><code>' + esc(t.slug) + '</code></div>' +
@@ -1601,8 +1643,30 @@ function tabProfile(){
       '<div class="k">Сотрудников</div><div>' + esc(c.users) + '</div>' +
       '<div class="k">Диалогов</div><div>' + esc(c.conversations) + '</div>' +
       '<div class="k">Сообщений</div><div>' + esc(c.messages) + '</div>' +
-      '</div></div>';
+      '</div></div></div></div>';
   }).catch(sErr);
+}
+
+/* ── Каналы ──────────────────────────────────────────────────────
+   Отдельная страница: слева плитки подключённых каналов, ниже —
+   витрина «подключить». Настройки конкретного канала живут на своей
+   странице (openChannel), а не в общем списке: там будут приветствие,
+   автоответы и расписание, и в списке им места нет. */
+
+var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
+  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_bot:'VB', viber_user:'VB' };
+
+function chPill(c){
+  return c.status === 'active' ? '<span class="pill ok">работает</span>'
+    : c.status === 'degraded' ? '<span class="pill crit">нужно переподключить</span>'
+    : '<span class="pill warn">выключен</span>';
+}
+
+function chSub(c){
+  var bits = [CH[c.type] || c.type];
+  if (c.meta && c.meta.username) bits.push('@' + c.meta.username);
+  if (c.meta && c.meta.phone) bits.push(c.meta.phone);
+  return bits.join(' · ');
 }
 
 function tabChannels(){
@@ -1610,63 +1674,59 @@ function tabChannels(){
     CHANNELS = d.channels || [];
     fillChannelFilter();
 
-    var html =
-      '<div class="card"><h3>Подключить Telegram-бота</h3>' +
+    var tiles = CHANNELS.map(function(c){
+      return '<div class="tile click" data-open="' + c.id + '">' +
+        '<div class="t1"><div class="chico ' + esc(c.type) + '">' + (CH_ICON[c.type] || '••') + '</div>' +
+        '<div style="min-width:0"><div class="ttl">' + esc(c.display_name) + '</div>' +
+        '<div class="sub">' + esc(chSub(c)) + '</div></div></div>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + chPill(c) +
+        (c.last_error ? '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>' : '') +
+        '</div>' +
+        '<div class="stat"><div><b>' + esc(c.conversations) + '</b>диалогов</div></div>' +
+        '<div class="acts"><button class="ghost mini" data-open2="' + c.id + '">Настроить</button>' +
+        '<button class="ghost mini" data-toggle="' + c.id + '" data-to="' +
+          (c.status === 'active' ? 'disconnected' : 'active') + '">' +
+          (c.status === 'active' ? 'Выключить' : 'Включить') + '</button></div></div>';
+    }).join('');
+
+    var connect =
+      '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
+      '<div><div class="ttl">Telegram-бот</div><div class="sub">Отдельный бот для поддержки</div></div></div>' +
+      '<div class="sub" style="white-space:normal">Токен выдаёт <b>@BotFather</b>: /newbot для нового бота ' +
+      'или /token для существующего.</div>' +
       '<div class="row2"><input id="btok" type="password" placeholder="123456789:AAF..." autocomplete="off">' +
       '<button id="badd">Подключить</button></div>' +
-      '<div class="hint">Токен выдаёт <b>@BotFather</b>: команда /newbot для нового бота ' +
-      'или /token для существующего. Токен шифруется и обратно не показывается — ' +
-      'сохраните копию у себя.</div>' +
-      '<div class="err" id="berr"></div><div class="ok" id="bok"></div></div>';
+      '<div class="err" id="berr"></div><div class="ok" id="bok"></div></div>' +
 
-    html +=
-      '<div class="card" id="metaCard"><h3>Facebook Messenger и Instagram</h3>' +
-      '<div id="metaBody"><div class="hint">Войдите через Facebook под аккаунтом, который управляет страницей. ' +
-      'Instagram подключается через страницу Facebook, к которой он привязан, и должен быть ' +
-      'профессиональным аккаунтом (бизнес или автор).</div>' +
-      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>' +
-      '<div class="err" id="metaErr"></div></div></div>';
+      '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
+      '<div><div class="ttl">Instagram и Messenger</div><div class="sub">Через страницу Facebook</div></div></div>' +
+      '<div id="metaBody"><div class="sub" style="white-space:normal">Войдите под аккаунтом, который управляет ' +
+      'страницей. Instagram должен быть профессиональным аккаунтом и привязан к этой странице.</div>' +
+      '<div class="acts"><button id="metaGo">Войти через Facebook</button></div>' +
+      '<div class="err" id="metaErr"></div></div></div>' +
 
-    html +=
-      '<div class="card"><h3>Подключить Telegram по номеру</h3>' +
-      '<div class="hint">Личный или рабочий аккаунт Telegram — клиенты пишут на ваш номер, ' +
-      'как обычно, а переписка появляется здесь. Ответы уходят от вашего имени.</div>' +
-      '<div class="row2" style="margin-top:10px"><input id="uname" placeholder="Название, например: Продажи" autocomplete="off">' +
-      '<button id="uqr">Показать QR-код</button></div>' +
-      '<div id="uqrbox"></div>' +
-      '<div class="hint">Telegram не любит массовые рассылки с личных аккаунтов: ' +
-      'отвечайте клиентам, но не пишите сотням незнакомых людей — за это блокируют номер.</div></div>';
+      '<div class="tile"><div class="t1"><div class="chico telegram_user">TG</div>' +
+      '<div><div class="ttl">Telegram по номеру</div><div class="sub">Личный или рабочий аккаунт</div></div></div>' +
+      '<div class="sub" style="white-space:normal">Клиенты пишут на ваш номер как обычно, переписка появляется здесь, ' +
+      'ответы уходят от вашего имени.</div>' +
+      '<div class="row2"><input id="uname" placeholder="Название, например: Продажи" autocomplete="off">' +
+      '<button id="uqr">Показать QR-код</button></div><div id="uqrbox"></div></div>' +
 
-    html += '<div class="card"><h3>Подключено (' + CHANNELS.length + ')</h3>' +
-      (CHANNELS.length ? CHANNELS.map(function(c){
-        var pill = c.status === 'active' ? '<span class="pill">работает</span>'
-          : c.status === 'degraded' ? '<span class="pill crit">нужно переподключить</span>'
-          : '<span class="pill warn">выключен</span>';
-        var bits = [];
-        if (c.meta && c.meta.username) bits.push('@' + c.meta.username);
-        bits.push('диалогов: ' + c.conversations);
-        if (c.meta && c.meta.phone) bits.push(c.meta.phone);
-        if (c.last_error) bits.push(errLabel(c.last_error));
-        return '<div class="item"><div>' +
-          '<div class="t">' + esc(c.display_name) + pill + '</div>' +
-          '<div class="s">' + esc(CH[c.type] || c.type) + ' · ' + esc(bits.join(' · ')) + '</div>' +
-          '</div><div class="row2" style="flex:none">' +
-          '<button class="ghost mini" data-toggle="' + c.id + '" data-to="' +
-            (c.status === 'active' ? 'disconnected' : 'active') + '">' +
-            (c.status === 'active' ? 'Выключить' : 'Включить') + '</button>' +
-          '<button class="ghost mini" data-del="' + c.id + '">Удалить</button>' +
-          '</div></div>';
-      }).join('') : '<div class="hint">Пока ни одного канала.</div>') + '</div>';
-
-    // Честный список того, чего ещё нет. Пустой экран без объяснений хуже:
-    // непонятно, это не сделано или сломалось.
-    html += '<div class="card"><h3>Готовятся</h3>' +
       ['whatsapp_cloud','whatsapp_user','viber_bot','viber_user'].map(function(t){
-        return '<div class="item"><div><div class="t">' + esc(CH[t]) +
-          '<span class="pill soon">скоро</span></div></div></div>';
-      }).join('') + '</div>';
+        return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
+          '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
+          '<div class="sub">Готовится</div></div></div>' +
+          '<div class="acts"><button class="ghost mini" disabled>Скоро</button></div></div>';
+      }).join('');
 
-    el('sbody').innerHTML = html;
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Каналы', 'Мессенджеры, из которых приходят сообщения. У каждого канала свои настройки: ' +
+        'приветствие, автоответы и рабочие часы.') +
+      (CHANNELS.length
+        ? '<div class="pg-sec"><h3>Подключено · ' + CHANNELS.length + '</h3><div class="grid">' + tiles + '</div></div>'
+        : '') +
+      '<div class="pg-sec"><h3>Подключить канал</h3><div class="grid">' + connect + '</div></div>' +
+      '</div>';
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
     el('metaGo').onclick = startMeta;
@@ -1696,107 +1756,107 @@ function tabChannels(){
         });
     };
 
-    Array.prototype.forEach.call(el('sbody').querySelectorAll('[data-toggle]'), function(b){
-      b.onclick = function(){
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-toggle]'), function(b){
+      b.onclick = function(ev){
+        ev.stopPropagation();
         busy(b, true);
         api('/channels/' + b.dataset.toggle, { method:'PATCH', body:{ status: b.dataset.to } })
           .then(tabChannels).catch(function(){ busy(b, false) });
       };
     });
-    armDelete(el('sbody').querySelectorAll('[data-del]'), function(b){
-      return api('/channels/' + b.dataset.del, { method:'DELETE' }).then(tabChannels);
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-open],[data-open2]'), function(b){
+      b.onclick = function(ev){
+        ev.stopPropagation();
+        openChannel(b.dataset.open || b.dataset.open2);
+      };
     });
   }).catch(sErr);
 }
 
-/* Вход через Facebook уводит со страницы и возвращает на /app#meta-pick=...
-   Токен входа в Rozmovio живёт в sessionStorage вкладки и переход переживает. */
-var META_ERRORS = {
-  cancelled:'Вход через Facebook отменён.',
-  state:'Ссылка устарела — нажмите «Войти через Facebook» ещё раз.',
-  exchange:'Facebook не подтвердил вход. Попробуйте ещё раз.',
-  unavailable:'Подключение Facebook ещё не включено на сервере.'
-};
+/* Страница одного канала: всё, что относится к нему, в одном месте. */
+function openChannel(id){
+  var c = null;
+  for (var i = 0; i < CHANNELS.length; i++) if (CHANNELS[i].id === id) c = CHANNELS[i];
+  if (!c) return tabChannels();
+  S.channelId = id;
 
-function readMetaHash(){
-  var h = location.hash || '';
-  var m = h.match(/meta-pick=([0-9a-f-]+)/);
-  var e = h.match(/meta-error=([a-z]+)/);
-  if (!m && !e) return false;
-  if (m) S.metaPick = m[1];
-  if (e) S.metaError = META_ERRORS[e[1]] || 'Не удалось подключить Facebook';
-  history.replaceState(null, '', location.pathname);
-  S.tab = 'channels';
-  openSettings();
-  return true;
-}
+  var meta = c.meta || {};
+  var rows = [
+    ['Тип канала', esc(CH[c.type] || c.type)],
+    ['Состояние', chPill(c)],
+    ['Идентификатор у провайдера', '<code>' + esc(c.external_id) + '</code>'],
+    ['Диалогов', esc(c.conversations)],
+    ['Подключён', esc(fmtDate(c.created_at))]
+  ];
+  if (meta.username) rows.splice(2, 0, ['Имя пользователя', '@' + esc(meta.username)]);
+  if (meta.phone) rows.splice(2, 0, ['Номер', esc(meta.phone)]);
+  if (meta.pageName) rows.splice(2, 0, ['Страница Facebook', esc(meta.pageName)]);
+  if (c.last_error) rows.push(['Последняя ошибка', '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>']);
 
-function startMeta(){
-  busy(el('metaGo'), true);
-  api('/settings/channels/meta/start').then(function(r){ location.href = r.url })
-    .catch(function(e){
-      busy(el('metaGo'), false);
-      var p = (e && e.payload) || {};
-      el('metaErr').textContent = p.error === 'meta_unavailable'
-        ? META_ERRORS.unavailable : 'Не удалось начать вход';
-    });
-}
+  pageBox().innerHTML = '<div class="pg">' +
+    '<button class="back-link" id="chBack">← Все каналы</button>' +
+    pageHead(c.display_name, esc(chSub(c)),
+      '<div class="row2"><button class="ghost mini" id="chToggle">' +
+      (c.status === 'active' ? 'Выключить' : 'Включить') + '</button>' +
+      '<button class="ghost mini" id="chDel">Удалить</button></div>') +
 
-function showMetaPick(id){
-  var box = el('metaBody');
-  box.innerHTML = '<div class="empty">Загружаю страницы...</div>';
-  api('/settings/channels/meta/pick/' + id).then(function(d){
-    var pages = d.pages || [];
-    if (!pages.length){
-      S.metaPick = null;
-      box.innerHTML = '<div class="err">У этого аккаунта Facebook нет страниц, или при входе ' +
-        'не отмечена ни одна. Нажмите «Войти через Facebook» и на шаге выбора отметьте нужные страницы.</div>' +
-        '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
-      el('metaGo').onclick = startMeta;
-      return;
-    }
-    box.innerHTML = '<div class="hint">Отметьте, что подключить:</div>' +
-      pages.map(function(p){
-        return '<div class="item"><div><div class="t">' + esc(p.name) + '</div>' +
-          '<div class="s"><label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="messenger" checked> Messenger</label>' +
-          (p.instagram
-            ? ' &nbsp; <label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="instagram" checked> Instagram' +
-              (p.instagram.username ? ' @' + esc(p.instagram.username) : '') + '</label>'
-            : ' &nbsp; <span class="muted">Instagram к странице не привязан</span>') +
-          '</div></div></div>';
-      }).join('') +
-      '<div class="row2" style="margin-top:10px"><button id="metaSave">Подключить выбранное</button></div>' +
-      '<div class="err" id="metaErr"></div>';
-    if (S.metaError){ el('metaErr').textContent = S.metaError; S.metaError = null; }
-    el('metaSave').onclick = function(){
-      var sel = {};
-      Array.prototype.forEach.call(box.querySelectorAll('[data-mp]'), function(c){
-        sel[c.dataset.mp] = sel[c.dataset.mp] || { id: c.dataset.mp };
-        sel[c.dataset.mp][c.dataset.k] = c.checked;
-      });
-      busy(el('metaSave'), true);
-      api('/settings/channels/meta/pick/' + id, { method:'POST',
-        body:{ pages: Object.keys(sel).map(function(k){ return sel[k] }) } })
-        .then(function(r){
-          var bad = (r.results || []).filter(function(x){ return !x.ok });
-          S.metaPick = bad.length ? id : null;
-          var ok = (r.results || []).length - bad.length;
-          toast(ok ? 'Подключено каналов: ' + ok : 'Ничего не подключено');
-          if (bad.length){
-            S.metaError = bad.map(function(x){ return x.page + ': ' + x.error }).join('; ');
-          }
-          tabChannels();
-        })
-        .catch(function(){ busy(el('metaSave'), false); el('metaErr').textContent = 'Не удалось подключить' });
-    };
-  }).catch(function(){
-    S.metaPick = null;
-    box.innerHTML = '<div class="err">Выбор страниц устарел (15 минут). Войдите через Facebook ещё раз.</div>' +
-      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
-    el('metaGo').onclick = startMeta;
+    '<div class="pg-sec"><h3>Название в интерфейсе</h3>' +
+    '<div class="tile"><div class="row2"><input id="chName" value="' + esc(c.display_name) + '">' +
+    '<button id="chSave">Сохранить</button></div>' +
+    '<div class="sub" style="white-space:normal">Так канал называется в списке чатов и в фильтрах. ' +
+    'У клиента название не видно.</div><div class="ok" id="chOk"></div></div></div>' +
+
+    '<div class="pg-sec"><h3>О канале</h3><div class="tile"><div class="kv">' +
+    rows.map(function(r){ return '<div class="k">' + r[0] + '</div><div>' + r[1] + '</div>' }).join('') +
+    '</div></div></div>' +
+
+    '<div class="pg-sec"><h3>Автоматизация</h3><div class="grid">' +
+    '<div class="tile click" id="chFlows"><div class="t1"><div class="chico soon">⚡</div>' +
+    '<div><div class="ttl">Сценарии этого канала</div>' +
+    '<div class="sub">Приветствие, автоответы, цепочки</div></div></div>' +
+    '<div class="sub" style="white-space:normal">Правила и цепочки, которые срабатывают на сообщения ' +
+    'именно в этом канале.</div>' +
+    '<div class="acts"><button class="ghost mini">Открыть сценарии</button></div></div>' +
+    '</div></div></div>';
+
+  el('chBack').onclick = tabChannels;
+  el('chFlows').onclick = function(){ setView('bots') };
+  el('chSave').onclick = function(){
+    busy(el('chSave'), true);
+    api('/channels/' + id, { method:'PATCH', body:{ displayName: el('chName').value.trim() } })
+      .then(function(){
+        el('chOk').textContent = 'Сохранено';
+        return api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() });
+      })
+      .catch(function(){ el('chOk').textContent = '' })
+      .then(function(){ busy(el('chSave'), false) });
+  };
+  el('chToggle').onclick = function(){
+    busy(el('chToggle'), true);
+    api('/channels/' + id, { method:'PATCH',
+      body:{ status: c.status === 'active' ? 'disconnected' : 'active' } })
+      .then(function(){ return api('/channels') })
+      .then(function(d){ CHANNELS = d.channels || []; openChannel(id) })
+      .catch(function(){ busy(el('chToggle'), false) });
+  };
+  armDelete([el('chDel')], function(){
+    return api('/channels/' + id, { method:'DELETE' }).then(tabChannels);
   });
 }
 
+/* ── Интеграции ─────────────────────────────────────────────────── */
+function pageIntegrations(){
+  pageBox().innerHTML = '<div class="pg">' +
+    pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке клиента, ' +
+      'а новые обращения превращаются в лиды.') +
+    '<div class="pg-sec"><h3>CRM</h3><div class="grid">' +
+    '<div class="tile"><div class="t1"><div class="chico messenger">Z</div>' +
+    '<div><div class="ttl">Zoho CRM</div><div class="sub">Виджет в карточке клиента</div></div></div>' +
+    '<div class="sub" style="white-space:normal">Подключение по кнопке появится здесь: вход в Zoho, ' +
+    'выбор организации и установка виджета. Сейчас идёт настройка приложения в консоли Zoho.</div>' +
+    '<div class="acts"><button disabled>Подключить Zoho</button></div></div>' +
+    '</div></div></div>';
+}
 function errLabel(e){
   var r = (e && e.reason) || '';
   if (r === 'session_revoked') return 'сеанс завершён в Telegram — подключите номер заново';
@@ -1886,7 +1946,9 @@ function tabUsers(){
     var opts = Object.keys(ROLES).filter(function(r){ return r !== 'owner' })
       .map(function(r){ return '<option value="' + r + '">' + ROLES[r] + '</option>' }).join('');
 
-    el('sbody').innerHTML =
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Команда', 'Операторы отвечают клиентам, наблюдатели только читают, ' +
+        'администраторы меняют каналы и состав команды.') +
       '<div class="card"><h3>Пригласить сотрудника</h3>' +
       '<div class="row2"><input id="uem" type="email" placeholder="почта" autocomplete="off">' +
       '<input id="unm" placeholder="имя" autocomplete="off">' +
@@ -1926,7 +1988,7 @@ function tabUsers(){
         });
     };
 
-    Array.prototype.forEach.call(el('sbody').querySelectorAll('[data-user]'), function(b){
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-user]'), function(b){
       b.onclick = function(){
         busy(b, true);
         api('/users/' + b.dataset.user, { method:'PATCH',
@@ -1940,7 +2002,9 @@ function tabUsers(){
 function tabReplies(){
   api('/quick-replies').then(function(d){
     QR = d.quickReplies || [];
-    el('sbody').innerHTML =
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead('Шаблоны ответов', 'Заготовки, которые оператор вставляет в переписку командой ' +
+        '<b>/имя</b>. Вложения к шаблонам появятся в следующем обновлении.') +
       '<div class="card"><h3>Новый шаблон</h3>' +
       '<div class="row2"><input id="qsc" placeholder="короткое имя, например цена"></div>' +
       '<div class="row2" style="margin-top:9px">' +
@@ -1956,7 +2020,7 @@ function tabReplies(){
           '<div class="t"><code>/' + esc(q.shortcut) + '</code></div>' +
           '<div class="s">' + esc(q.body) + '</div></div>' +
           '<button class="ghost mini" data-qr="' + q.id + '">Удалить</button></div>';
-      }).join('') : '<div class="hint">Пока пусто.</div>') + '</div>';
+      }).join('') : '<div class="hint">Пока пусто.</div>') + '</div></div>';
 
     el('qadd').onclick = function(){
       el('qerr').textContent = '';
@@ -1972,7 +2036,7 @@ function tabReplies(){
         });
     };
 
-    armDelete(el('sbody').querySelectorAll('[data-qr]'), function(b){
+    armDelete(pageBox().querySelectorAll('[data-qr]'), function(b){
       return api('/quick-replies/' + b.dataset.qr, { method:'DELETE' })
         .then(function(){ tabReplies(); renderComposer(true) });
     });
@@ -1993,7 +2057,10 @@ var ICONS = {
   bellOff:'<path d="M13.7 21a2 2 0 0 1-3.4 0M18.6 13A17 17 0 0 1 18 8a6 6 0 0 0-9.3-5M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14M2 2l20 20"/>',
   exit:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   clip:'<path d="M21 12.8l-8.5 8.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 1 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
-  bolt:'<path d="M13 2L4.1 13.3a.7.7 0 0 0 .5 1.2H11l-1 8.5 8.9-11.3a.7.7 0 0 0-.5-1.2H12z"/>'
+  bolt:'<path d="M13 2L4.1 13.3a.7.7 0 0 0 .5 1.2H11l-1 8.5 8.9-11.3a.7.7 0 0 0-.5-1.2H12z"/>',
+  plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.4 3.4l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.6 20.6l1.7-1.7"/>',
+  team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'
 };
 
 function icon(name){
@@ -2190,13 +2257,27 @@ function showErr(e){
   if (e && e.status === 401){ logout(); el('gateErr').textContent = 'Токен недействителен или истёк'; }
 }
 
+var VIEWS = {
+  channels: tabChannels,
+  bots: renderBots,
+  replies: tabReplies,
+  users: tabUsers,
+  profile: tabProfile,
+  integrations: pageIntegrations
+};
+
 function setView(view){
   el('app').dataset.view = view;
-  if (view === 'chats') backToList();
+  if (view === 'chats') { backToList(); }
   Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
     b.classList.toggle('on', b.dataset.view === view);
   });
-  if (view === 'bots') renderBots();
+  if (view !== 'chats') {
+    S.view = view;
+    S.channelId = null;
+    pageBox().innerHTML = '<div class="pg"><div class="empty">Загружаю...</div></div>';
+    (VIEWS[view] || function(){})();
+  }
 }
 
 function start(){
@@ -2258,16 +2339,7 @@ el('fQ').oninput = function(){
 };
 
 el('cardBtn').onclick = function(){ el('app').classList.toggle('no-card') };
-el('cog').onclick = openSettings;
 el('out').onclick = logout;
-el('sclose').onclick = closeSettings;
-el('settings').onclick = function(e){ if (e.target === el('settings')) closeSettings() };
-document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape' && el('settings').classList.contains('on')) closeSettings();
-});
-Array.prototype.forEach.call(document.querySelectorAll('.stab'), function(b){
-  b.onclick = function(){ S.tab = b.dataset.tab; paintSettings() };
-});
 
 /* ── Колокольчик: звук и уведомления ─────────────────────────────
    Одна кнопка на два переключателя. Первое нажатие включает звук,
