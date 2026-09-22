@@ -648,7 +648,28 @@ export const INBOX_HTML = `<!DOCTYPE html>
 (function(){
 'use strict';
 
-var TOKEN = sessionStorage.getItem('omnidesk_token') || '';
+/**
+ * Токен доступа.
+ *
+ * Лежит в localStorage, а не в cookie: страница работает внутри рамки
+ * Zoho, а сторонние cookie там режет Safari. Раньше это был
+ * sessionStorage — он живёт в пределах одной вкладки, и человек,
+ * открывший вторую, попадал на форму входа, хотя только что вошёл.
+ * Из sessionStorage тоже читаем: у тех, кто уже вошёл, сеанс не
+ * оборвётся на этом обновлении.
+ */
+function tokenRead(){
+  try { return localStorage.getItem('omnidesk_token') || sessionStorage.getItem('omnidesk_token') || '' }
+  catch(e){ return '' }
+}
+function tokenWrite(v){
+  try {
+    if (v) { localStorage.setItem('omnidesk_token', v); sessionStorage.setItem('omnidesk_token', v) }
+    else { localStorage.removeItem('omnidesk_token'); sessionStorage.removeItem('omnidesk_token') }
+  } catch(e){}
+}
+
+var TOKEN = tokenRead();
 var current = null, convs = [], timer = null;
 var QR = [], CHANNELS = [], USERS = [], ME = null, COUNTS = {};
 var F = { status:'open', assignee:'all', channelId:'', q:'' };
@@ -2890,7 +2911,7 @@ function start(){
 function logout(){
   clearInterval(timer);
   TOKEN = ''; current = null; convs = [];
-  sessionStorage.removeItem('omnidesk_token');
+  tokenWrite('');
   el('app').style.display = 'none';
   el('gate').style.display = 'flex';
   gateStep('stepEmail');
@@ -2970,7 +2991,7 @@ function gateStep(name){
 
 function enterWith(token){
   TOKEN = token;
-  sessionStorage.setItem('omnidesk_token', TOKEN);
+  tokenWrite(TOKEN);
   start();
 }
 
