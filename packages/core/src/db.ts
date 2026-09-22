@@ -103,7 +103,12 @@ export async function withTenant<T>(
  * лишь таблицу, которая нужна до определения тенанта И не содержит данных
  * клиентов. Проверка при старте падает на всём, чего здесь нет.
  */
-export const ROUTING_TABLES = ['channel_routes', 'zoho_org_routes', 'user_routes'] as const;
+export const ROUTING_TABLES = [
+  'channel_routes',
+  'zoho_org_routes',
+  'user_routes',
+  'data_deletion_requests',
+] as const;
 
 /**
  * Для операций, выполняемых до определения тенанта: маршрутизация вебхуков,

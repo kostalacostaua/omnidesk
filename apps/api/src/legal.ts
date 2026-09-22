@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { withSystem, type Pool } from '@omnidesk/core';
 
 /**
  * Политика конфиденциальности и инструкция по удалению данных.
@@ -23,7 +25,45 @@ function page(title: string, body: string): string {
 </style></head><body>${body}</body></html>`;
 }
 
-export function registerLegal(app: FastifyInstance, opts: { contactEmail: string; operator: string }): void {
+export interface LegalDeps {
+  contactEmail: string;
+  operator: string;
+  pool: Pool;
+  appUrl: string;
+  /** Секрет приложения Meta: им подписан запрос на удаление данных. */
+  metaAppSecret: string;
+}
+
+/**
+ * Разбор signed_request от Meta.
+ *
+ * Формат: «подпись.данные», обе части в base64url. Подпись — HMAC-SHA256
+ * от ВТОРОЙ части (строки, а не разобранного JSON) на секрете приложения.
+ * Сравнение обязательно постоянного времени: иначе по времени ответа
+ * можно подобрать подпись побайтово.
+ */
+export function parseSignedRequest(
+  signed: string,
+  appSecret: string,
+): { user_id?: string; algorithm?: string } | null {
+  const [sigPart, dataPart] = signed.split('.');
+  if (!sigPart || !dataPart) return null;
+  const expected = createHmac('sha256', appSecret).update(dataPart).digest();
+  const given = Buffer.from(sigPart, 'base64url');
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(dataPart, 'base64url').toString('utf8')) as {
+      user_id?: string;
+      algorithm?: string;
+    };
+    if (payload.algorithm && payload.algorithm.toUpperCase() !== 'HMAC-SHA256') return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function registerLegal(app: FastifyInstance, opts: LegalDeps): void {
   const email = opts.contactEmail;
   const who = opts.operator;
 
@@ -84,10 +124,86 @@ or write to us at the same address.</p>
     reply.type('text/html; charset=utf-8').send(html);
 
   app.get('/privacy', send(privacy) as never);
+
+  // Meta шлёт запрос на удаление данных как обычную форму, а не JSON.
+  // Fastify такой тип без плагина не разбирает, поэтому парсер здесь.
+  app.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_req, body, done) => {
+      const params = new URLSearchParams(body as string);
+      done(null, Object.fromEntries(params.entries()));
+    },
+  );
+
+  /**
+   * Запрос на удаление данных от Meta.
+   *
+   * Отвечаем сразу: подтверждаем приём, даём код и адрес, по которому
+   * человек увидит состояние. Само удаление делает воркер — оно может
+   * занять время, а Meta ждёт ответ в пределах секунд.
+   */
+  app.post<{ Body: { signed_request?: string } }>('/meta/data-deletion', async (req, reply) => {
+    const signed = req.body?.signed_request ?? '';
+    if (!opts.metaAppSecret) return reply.code(503).send({ error: 'meta_not_configured' });
+    const payload = signed ? parseSignedRequest(signed, opts.metaAppSecret) : null;
+    if (!payload?.user_id) {
+      app.log.warn('Запрос на удаление данных с неверной подписью');
+      return reply.code(400).send({ error: 'invalid_signed_request' });
+    }
+
+    const code = randomBytes(8).toString('hex');
+    await withSystem(opts.pool, 'запрос на удаление данных', async (db) => {
+      await db.query(
+        `INSERT INTO data_deletion_requests (provider, external_id, confirmation_code)
+         VALUES ('meta', $1, $2)`,
+        [payload.user_id, code],
+      );
+    });
+    app.log.info({ code }, 'Принят запрос на удаление данных Meta');
+
+    return {
+      url: `${opts.appUrl}/data-deletion?code=${code}`,
+      confirmation_code: code,
+    };
+  });
+
+  app.get<{ Querystring: { code?: string } }>('/data-deletion', async (req, reply) => {
+    const code = (req.query.code ?? '').replace(/[^a-f0-9]/g, '').slice(0, 32);
+    if (!code) return reply.type('text/html; charset=utf-8').send(deletion);
+
+    const row = await withSystem(opts.pool, 'состояние удаления данных', async (db) => {
+      const { rows } = await db.query<{ status: string; created_at: Date; processed_at: Date | null }>(
+        `SELECT status, created_at, processed_at FROM data_deletion_requests
+          WHERE confirmation_code = $1 LIMIT 1`,
+        [code],
+      );
+      return rows[0] ?? null;
+    });
+
+    const status = !row
+      ? '<p>Request <b>' + code + '</b> was not found. It may have been completed and removed. ' +
+        'Write to <a href="mailto:' + email + '">' + email + '</a> and we will check.</p>'
+      : row.status === 'done'
+        ? '<p>Request <b>' + code + '</b>: <b>completed</b>. All data we had about this account was deleted on ' +
+          (row.processed_at ?? row.created_at).toISOString().slice(0, 10) + '.</p>'
+        : row.status === 'failed'
+          ? '<p>Request <b>' + code + '</b>: we could not complete it automatically. ' +
+            'Our team was notified and will finish it manually; write to <a href="mailto:' + email +
+            '">' + email + '</a> for the current state.</p>'
+          : '<p>Request <b>' + code + '</b>: <b>received</b> on ' +
+            row.created_at.toISOString().slice(0, 10) +
+            '. Deletion runs within minutes and always within 30 days.</p>';
+
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(page('Data deletion request', '<h1>Data deletion request</h1>' + status +
+        '<p><a href="/data-deletion">How to request deletion</a></p>'));
+  });
   // Один и тот же текст под несколькими адресами: проверка ссылки
   // у Meta капризна к написанию, и проще отвечать на все варианты,
   // чем гадать, какой из них она примет.
-  for (const path of ['/data-deletion', '/datadeletion', '/data_deletion', '/deletion']) {
+  for (const path of ['/datadeletion', '/data_deletion', '/deletion']) {
     app.get(path, send(deletion) as never);
   }
 }

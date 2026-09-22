@@ -1558,8 +1558,88 @@ worker.on('failed', (job, err) => {
 
 worker.on('ready', () => log('info', 'Воркер входящих сообщений запущен'));
 
+// ═══════════════════════════════════════════════════════════════════════
+// Удаление данных по запросу из Facebook
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Человек удаляет приложение в настройках Facebook и просит удалить свои
+// данные. api принимает запрос и кладёт его в data_deletion_requests,
+// а удаление идёт здесь: тенант в момент запроса неизвестен, и найти
+// собеседника можно только перебором организаций.
+//
+// Идентификатор привязан к странице (PSID) или к аккаунту Instagram,
+// поэтому ищем по contact_identities. Удаление контакта каскадом уносит
+// диалоги, сообщения и заметки — отдельно их чистить не нужно.
+
+const DELETION_POLL_MS = 60_000;
+
+async function processDeletionRequests(): Promise<void> {
+  const pending = await withSystem(pool, 'запросы на удаление данных', async (db) => {
+    const { rows } = await db.query<{ id: string; external_id: string }>(
+      `SELECT id, external_id FROM data_deletion_requests
+        WHERE status = 'pending' ORDER BY created_at LIMIT 20`,
+    );
+    return rows;
+  });
+  if (!pending.length) return;
+
+  const tenants = await withSystem(pool, 'список организаций', async (db) => {
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM tenants`);
+    return rows.map((r) => r.id);
+  });
+
+  for (const req of pending) {
+    let deleted = 0;
+    try {
+      for (const tenantId of tenants) {
+        deleted += await withTenant(pool, tenantId, async (db) => {
+          const { rowCount } = await db.query(
+            `DELETE FROM contacts WHERE id IN (
+               SELECT contact_id FROM contact_identities
+                WHERE channel_type IN ('messenger','instagram') AND external_id = $1)`,
+            [req.external_id],
+          );
+          return rowCount ?? 0;
+        });
+      }
+      await withSystem(pool, 'отметка об удалении', async (db) => {
+        await db.query(
+          `UPDATE data_deletion_requests
+              SET status = 'done', deleted_contacts = $2, processed_at = now()
+            WHERE id = $1`,
+          [req.id, deleted],
+        );
+      });
+      log('info', 'Запрос на удаление данных выполнен', { requestId: req.id, deleted });
+    } catch (err) {
+      await withSystem(pool, 'ошибка удаления', async (db) => {
+        await db.query(
+          `UPDATE data_deletion_requests SET status = 'failed', last_error = $2 WHERE id = $1`,
+          [req.id, String((err as Error).message).slice(0, 500)],
+        );
+      }).catch(() => undefined);
+      log('error', 'Запрос на удаление данных не выполнен', {
+        requestId: req.id,
+        error: (err as Error).message,
+      });
+    }
+  }
+}
+
+let deletionTimer: NodeJS.Timeout | null = null;
+async function deletionLoop(): Promise<void> {
+  try {
+    await processDeletionRequests();
+  } catch (err) {
+    log('error', 'Обход запросов на удаление упал', { error: (err as Error).message });
+  }
+  deletionTimer = setTimeout(deletionLoop, DELETION_POLL_MS);
+}
+void deletionLoop();
+
 async function shutdown(signal: string): Promise<void> {
   log('info', `${signal}: завершаю работу`);
+  if (deletionTimer) clearTimeout(deletionTimer);
   // Даём текущим задачам доработать, новые не берём.
   await worker.close();
   await outboundWorker.close();

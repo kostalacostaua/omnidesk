@@ -175,6 +175,9 @@ registerSettings(app, {
 registerLegal(app, {
   contactEmail: process.env['CONTACT_EMAIL'] ?? 'support@rozmovio.com',
   operator: process.env['LEGAL_OPERATOR'] ?? 'KL Systems',
+  pool,
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+  metaAppSecret: process.env['META_APP_SECRET'] ?? '',
 });
 
 app.get('/health', async () => ({ status: 'ok' }));
