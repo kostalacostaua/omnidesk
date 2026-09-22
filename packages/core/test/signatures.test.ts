@@ -4,6 +4,7 @@ import {
   safeEqual,
   verifyMetaSignature,
   verifyMetaSubscription,
+  telegramForwardSecret,
   verifyTelegramSecret,
   verifyZohoWidgetSignature,
 } from '../src/signatures.js';
@@ -168,5 +169,31 @@ describe('verifyZohoWidgetSignature — контур идентичности в
       ok: false,
       reason: 'missing_secret',
     });
+  });
+});
+
+describe('пересылка обновлений своим ботом', () => {
+  const master = 'общий-секрет-вебхуков';
+  const ch = 'b2f1c4d0-0000-4000-8000-000000000001';
+
+  it('общий секрет по-прежнему подходит: наши вебхуки не ломаются', () => {
+    expect(verifyTelegramSecret(master, master, ch)).toBe(true);
+  });
+
+  it('производный секрет канала подходит', () => {
+    expect(verifyTelegramSecret(telegramForwardSecret(master, ch), master, ch)).toBe(true);
+  });
+
+  it('секрет чужого канала не подходит', () => {
+    const other = telegramForwardSecret(master, 'b2f1c4d0-0000-4000-8000-000000000002');
+    expect(verifyTelegramSecret(other, master, ch)).toBe(false);
+  });
+
+  it('без идентификатора канала производный секрет не принимается', () => {
+    expect(verifyTelegramSecret(telegramForwardSecret(master, ch), master)).toBe(false);
+  });
+
+  it('секрет достаточно длинный, чтобы его не подобрали', () => {
+    expect(telegramForwardSecret(master, ch).length).toBe(48);
   });
 });

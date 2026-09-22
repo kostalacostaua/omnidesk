@@ -12,6 +12,7 @@ import {
   graphGet,
   graphPost,
   safeEqual,
+  telegramForwardSecret,
   mtprotoLoginKey,
   mtprotoPasswordKey,
   type MtprotoLoginJob,
@@ -309,7 +310,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
   });
 
   // ── Подключение Telegram-бота из интерфейса ───────────────────────
-  app.post<{ Body: { botToken?: string; displayName?: string } }>(
+  app.post<{ Body: { botToken?: string; displayName?: string; mode?: string } }>(
     '/settings/channels/telegram',
     async (req, reply) => {
       const auth = requireAuth(req);
@@ -370,7 +371,36 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         );
       });
 
-      let mode: 'polling' | 'webhook' = 'polling';
+      let mode: 'polling' | 'webhook' | 'forward' = 'polling';
+
+      /**
+       * Свой бот клиента.
+       *
+       * Вебхук у Telegram один на бота: поставив свой, мы отобрали бы
+       * обновления у чужого кода. Поэтому для самописных ботов другой
+       * порядок — их код продолжает получать обновления как раньше и
+       * присылает нам копию на выданный адрес. Отправка идёт через тот
+       * же токен, так что отвечать можно и из Rozmovio, и из их кода.
+       */
+      if (req.body?.mode === 'forward') {
+        await withTenant(pool, auth.tenantId, async (db) => {
+          await db.query(
+            `UPDATE channels SET meta = meta || $2::jsonb WHERE id = $1`,
+            [channelId, JSON.stringify({ mode: 'forward' })],
+          );
+        });
+        app.log.info({ channelId }, 'Подключён свой бот Telegram: режим пересылки');
+        return reply.code(201).send({
+          id: channelId,
+          username: bot.username,
+          mode: 'forward',
+          forward: {
+            url: `${deps.publicUrl}/webhooks/telegram/${channelId}`,
+            secret: telegramForwardSecret(deps.telegramWebhookSecret, channelId),
+            header: 'X-Telegram-Bot-Api-Secret-Token',
+          },
+        });
+      }
 
       if (deps.publicUrl) {
         const hookRes = await fetch(`${deps.telegramApiRoot}/bot${botToken}/setWebhook`, {

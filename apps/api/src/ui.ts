@@ -670,6 +670,9 @@ function tokenWrite(v){
 }
 
 var TOKEN = tokenRead();
+
+/** Перевод строки. В этом файле его нельзя написать escape-последовательностью. */
+var NL = String.fromCharCode(10);
 var current = null, convs = [], timer = null;
 var QR = [], CHANNELS = [], USERS = [], ME = null, COUNTS = {};
 var F = { status:'open', assignee:'all', channelId:'', q:'' };
@@ -1978,7 +1981,13 @@ function tabChannels(){
       'или /token для существующего.</div>' +
       '<div class="row2"><input id="btok" type="password" placeholder="123456789:AAF..." autocomplete="off">' +
       '<button id="badd">Подключить</button></div>' +
-      '<div class="err" id="berr"></div><div class="ok" id="bok"></div></div>' +
+      '<label class="row" style="gap:7px;margin-top:8px;font-size:12px;color:var(--t2);cursor:pointer">' +
+      '<input type="checkbox" id="bown" style="width:auto"> у меня свой бот со своим кодом</label>' +
+      '<div class="hint" id="bownHint" style="display:none">Мы не будем трогать его вебхук. ' +
+      'Ваш код продолжит получать обновления и будет присылать нам копию — адрес и секрет ' +
+      'покажем после подключения.</div>' +
+      '<div class="err" id="berr"></div><div class="ok" id="bok"></div>' +
+      '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
       '<div><div class="ttl">Instagram и Messenger</div><div class="sub">Через страницу Facebook</div></div></div>' +
@@ -2015,16 +2024,57 @@ function tabChannels(){
     if (S.metaError && !S.metaPick) { el('metaErr').textContent = S.metaError; S.metaError = null; }
     if (S.metaPick) showMetaPick(S.metaPick);
 
+    el('bown').onchange = function(){
+      el('bownHint').style.display = this.checked ? 'block' : 'none';
+    };
+
     el('badd').onclick = function(){
       var token = el('btok').value.trim();
+      var own = el('bown').checked;
       el('berr').textContent = ''; el('bok').textContent = '';
       if (!token) return;
       busy(el('badd'), true);
-      api('/settings/channels/telegram', { method:'POST', body:{ botToken: token } })
+      api('/settings/channels/telegram', { method:'POST',
+        body: own ? { botToken: token, mode: 'forward' } : { botToken: token } })
         .then(function(r){
           el('bok').textContent = 'Готово: @' + (r.username || 'бот') +
-            (r.mode === 'polling' ? ' (режим опроса)' : ' (вебхук)');
+            (r.mode === 'forward' ? ' (свой бот)'
+              : r.mode === 'polling' ? ' (режим опроса)' : ' (вебхук)');
           el('btok').value = '';
+
+          // Свой бот: показываем, куда слать копию обновлений. Список
+          // каналов не перерисовываем — иначе адрес с секретом исчезнет
+          // с экрана раньше, чем человек успеет их скопировать.
+          if (r.mode === 'forward' && r.forward) {
+            el('bfwd').style.display = 'block';
+            el('bfwd').innerHTML =
+              '<div class="hint" style="margin:0 0 6px">В своём боте на каждое обновление ' +
+              'отправьте его же телом на этот адрес, с заголовком секрета. Ответы можно слать ' +
+              'и из вашего кода, и из Rozmovio — токен один.</div>' +
+              '<div class="kv2">' +
+              '<div class="k">Адрес</div><div><code id="fwdUrl">' + esc(r.forward.url) + '</code></div>' +
+              '<div class="k">Заголовок</div><div><code>' + esc(r.forward.header) + '</code></div>' +
+              '<div class="k">Секрет</div><div><code id="fwdSec">' + esc(r.forward.secret) + '</code></div>' +
+              '</div>' +
+              '<div class="row2" style="margin-top:8px">' +
+              '<button class="ghost mini" id="fwdCopy">Скопировать адрес и секрет</button>' +
+              '<button class="ghost mini" id="fwdDone">Готово</button></div>';
+
+            el('fwdCopy').onclick = function(){
+              var text = 'URL: ' + r.forward.url + NL +
+                r.forward.header + ': ' + r.forward.secret;
+              if (navigator.clipboard) navigator.clipboard.writeText(text)
+                .then(function(){ toast('Скопировано') });
+              else {
+                var t = document.createElement('textarea');
+                t.value = text; document.body.appendChild(t); t.select();
+                document.execCommand('copy'); document.body.removeChild(t);
+                toast('Скопировано');
+              }
+            };
+            el('fwdDone').onclick = tabChannels;
+            return;
+          }
           setTimeout(tabChannels, 900);
         })
         .catch(function(e){

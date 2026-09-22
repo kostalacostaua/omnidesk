@@ -157,9 +157,12 @@ app.post<{ Params: { channelId: string } }>(
   async (req, reply) => {
     const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
 
+    // Второй аргумент проверки — идентификатор канала: у клиента со
+    // своим ботом секрет производный от него, и чужой не подойдёт.
     if (!verifyTelegramSecret(
       typeof headerSecret === 'string' ? headerSecret : undefined,
       TELEGRAM_WEBHOOK_SECRET,
+      req.params.channelId,
     )) {
       app.log.warn({ ip: req.ip }, 'Отклонён вебхук Telegram: неверный secret_token');
       return reply.code(401).send({ error: 'invalid_secret' });

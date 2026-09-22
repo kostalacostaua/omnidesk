@@ -48,9 +48,28 @@ export function verifyMetaSignature(
 export function verifyTelegramSecret(
   headerValue: string | undefined,
   expectedSecret: string,
+  channelId?: string,
 ): boolean {
   if (!headerValue || !expectedSecret) return false;
-  return safeEqual(expectedSecret, headerValue);
+  if (safeEqual(expectedSecret, headerValue)) return true;
+  // Свой бот клиента шлёт копию обновлений сам и знает не общий секрет,
+  // а производный от него и от канала: так секрет одного клиента не
+  // подходит к каналу другого.
+  if (channelId && safeEqual(telegramForwardSecret(expectedSecret, channelId), headerValue)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Секрет для пересылки обновлений своим ботом.
+ *
+ * Выводится из общего секрета и идентификатора канала, а не хранится
+ * в базе: ingress проверяет его без единого запроса к базе на горячем
+ * пути, а подобрать его, зная чужой, нельзя.
+ */
+export function telegramForwardSecret(masterSecret: string, channelId: string): string {
+  return createHmac('sha256', masterSecret).update(`tg-forward:${channelId}`).digest('hex').slice(0, 48);
 }
 
 /**

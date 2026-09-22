@@ -55,6 +55,31 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   .m.out{align-self:flex-end;background:var(--accent);color:var(--on-accent);
     border-bottom-right-radius:3px}
   .m .meta{font-size:10px;opacity:.7;margin-top:3px}
+  .mwrap{display:flex;flex-direction:column;max-width:100%}
+  .mwrap.in{align-items:flex-start}
+  .mwrap.out{align-items:flex-end}
+  .quote{border-left:2px solid currentColor;padding:2px 0 2px 8px;margin:0 0 5px;
+    font-size:11px;opacity:.72;line-height:1.35;max-height:40px;overflow:hidden}
+  .quote b{display:block;font-size:10px;opacity:.9}
+  .rx{display:flex;gap:3px;margin-top:3px;flex-wrap:wrap}
+  .rx .r{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:0 6px;font-size:12px;line-height:1.6}
+  .mtools{display:flex;gap:4px;margin-top:2px;opacity:0;transition:opacity .12s}
+  .mwrap:hover .mtools{opacity:1}
+  .mtools button{background:transparent;border:1px solid var(--line);color:var(--t3);
+    border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;box-shadow:none}
+  .mtools button:hover{color:var(--t1);background:var(--hover)}
+  .replybar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--t2);
+    background:var(--panel2);border-radius:var(--r1);padding:6px 9px;margin-bottom:8px}
+  .replybar .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .replybar .c{cursor:pointer;color:var(--t3);font-weight:700;margin-left:auto}
+  .picker{position:absolute;background:var(--solid);border:1px solid var(--line2);
+    border-radius:9px;padding:5px;display:flex;gap:1px;z-index:60;box-shadow:var(--lift)}
+  .picker button{background:transparent;border:0;font-size:18px;padding:3px 5px;
+    border-radius:6px;line-height:1;color:inherit;box-shadow:none}
+  .picker button:hover{background:var(--hover);transform:scale(1.15)}
+  /* На телефоне наведения нет — инструменты видно всегда. */
+  @media(hover:none){.mtools{opacity:1}}
   .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none}
   .comp .row{display:flex;gap:6px;align-items:flex-end}
   .comp textarea{min-height:34px;max-height:120px;border-radius:7px;min-width:0}
@@ -119,6 +144,9 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   </div>
   <div id="msgs"></div>
   <div class="comp" id="comp" style="display:none">
+    <div class="replybar" id="rbar" style="display:none">
+      <span class="t" id="rtext"></span><span class="c" id="rcancel">×</span>
+    </div>
     <div class="fileprev" id="fprev" style="display:none">
       <span id="fname"></span><span class="c" id="fcancel">×</span>
     </div>
@@ -149,6 +177,8 @@ var TOKEN = '';
 try { TOKEN = sessionStorage.getItem('rz_widget_token') || localStorage.getItem('rz_widget_token') || '' } catch(e){}
 
 var NL = String.fromCharCode(10);
+var MSGS = [];
+var replyTo = null;
 var CONV = null;
 var timer = null;
 var record = null;
@@ -259,16 +289,48 @@ function load(){
   api('/conversations/' + CONV + '/messages').then(function(d){
     var box = el('msgs');
     var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-    box.innerHTML = (d.messages || []).map(function(m){
+    MSGS = d.messages || [];
+    box.innerHTML = MSGS.map(function(m){
       var text = (m.content && m.content.text) || '';
       var att = (m.content && m.content.attachments) || [];
       if (att.length && !text) text = '📎 ' + (att[0].filename || 'вложение');
       else if (att.length) text = text + NL + '📎 ' + (att[0].filename || 'вложение');
       var when = new Date(m.sent_at);
       var hh = String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
-      return '<div class="m ' + (m.direction === 'in' ? 'in' : 'out') + '">' + esc(text) +
-        '<div class="meta">' + hh + (m.sender_type === 'bot' ? ' · бот' : '') + '</div></div>';
+      var side = m.direction === 'in' ? 'in' : 'out';
+
+      var quote = m.reply_to_text
+        ? '<div class="quote"><b>' + (m.reply_to_direction === 'out' ? 'Вы' : 'Клиент') + '</b>' +
+          esc(String(m.reply_to_text).slice(0, 120)) + '</div>'
+        : '';
+
+      var rx = (m.reactions || []).map(function(r){
+        return '<span class="r">' + esc(r.emoji || r) + '</span>';
+      }).join('');
+
+      // Реакцию ставим только на сообщение клиента и только когда оно
+      // уже дошло до провайдера: без внешнего идентификатора ставить
+      // её не на что.
+      var tools = '<div class="mtools">' +
+        '<button data-reply="' + m.id + '">Ответить</button>' +
+        (side === 'in' && m.external_id ? '<button data-rx="' + m.id + '">Реакция</button>' : '') +
+        '</div>';
+
+      return '<div class="mwrap ' + side + '">' +
+        '<div class="m ' + side + '">' + quote + esc(text) +
+        '<div class="meta">' + hh + (m.sender_type === 'bot' ? ' · бот' : '') + '</div></div>' +
+        (rx ? '<div class="rx">' + rx + '</div>' : '') +
+        tools +
+        '</div>';
     }).join('');
+
+    Array.prototype.forEach.call(box.querySelectorAll('[data-reply]'), function(b){
+      b.onclick = function(){ setReply(b.dataset.reply) };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-rx]'), function(b){
+      b.onclick = function(ev){ ev.stopPropagation(); showPicker(b, b.dataset.rx) };
+    });
+
     if (atBottom) box.scrollTop = box.scrollHeight;
   }).catch(function(){});
 }
@@ -346,6 +408,76 @@ el('tpl').onclick = function(){
   });
 };
 
+/* ── Ответ на сообщение ──────────────────────────────────────────
+   Цитата уходит как ссылка на внешний идентификатор сообщения:
+   у провайдера свой номер, наш ему ни о чём не говорит. */
+function setReply(id){
+  var m = MSGS.filter(function(x){ return x.id === id })[0];
+  if (!m || !m.external_id){
+    el('sendErr').textContent = 'На это сообщение ответить нельзя: оно ещё не доставлено';
+    return;
+  }
+  replyTo = {
+    ext: m.external_id,
+    mine: m.direction !== 'in',
+    text: (m.content && m.content.text) || 'сообщение'
+  };
+  el('rbar').style.display = 'flex';
+  el('rtext').textContent = (replyTo.mine ? 'Ответ на своё: ' : 'Ответ клиенту: ') +
+    String(replyTo.text).slice(0, 80);
+  el('txt').focus();
+}
+
+el('rcancel').onclick = function(){ replyTo = null; el('rbar').style.display = 'none' };
+
+/**
+ * Реакции.
+ *
+ * Набор не произвольный: Telegram принимает только фиксированный
+ * список, всё остальное отклоняет с ошибкой. Здесь самые ходовые
+ * из него — те же, что в рабочем месте.
+ */
+var RX = ['👍','👎','❤','🔥','🎉','😁','😢','🙏','👌','🤔'];
+
+function showPicker(anchor, messageId){
+  var old = document.querySelector('.picker');
+  if (old) old.remove();
+
+  var box = document.createElement('div');
+  box.className = 'picker';
+  box.innerHTML = RX.map(function(x){ return '<button data-e="' + x + '">' + x + '</button>' })
+    .join('') + '<button data-e="">✖</button>';
+  document.body.appendChild(box);
+
+  var r = anchor.getBoundingClientRect();
+  box.style.left = Math.max(6, Math.min(r.left, window.innerWidth - box.offsetWidth - 6)) + 'px';
+  box.style.top = Math.max(6, r.top - box.offsetHeight - 6) + 'px';
+
+  Array.prototype.forEach.call(box.children, function(btn){
+    btn.onclick = function(){
+      box.remove();
+      api('/messages/' + messageId + '/reactions', {
+        method: 'POST', body: { emoji: btn.dataset.e || null }
+      }).then(function(){
+        // Реакция уходит в очередь: в ленте появится, когда провайдер
+        // подтвердит. Обновляем чуть позже, а не мгновенно.
+        setTimeout(load, 900);
+      }).catch(function(e){
+        var p = (e && e.payload) || {};
+        el('sendErr').textContent = p.error === 'message_not_delivered_yet'
+          ? 'Сообщение ещё не доставлено' : 'Не удалось поставить реакцию';
+      });
+    };
+  });
+
+  setTimeout(function(){
+    document.addEventListener('click', function once(){
+      box.remove();
+      document.removeEventListener('click', once);
+    });
+  }, 0);
+}
+
 /** Чтение файла в base64: тем же способом, что и в рабочем месте. */
 function readAsBase64(file){
   return new Promise(function(resolve, reject){
@@ -376,6 +508,7 @@ el('send').onclick = function(){
   el('sendErr').textContent = '';
 
   var payload = { text: text };
+  if (replyTo && replyTo.ext) payload.replyToExternalId = replyTo.ext;
   var prepared = Promise.resolve();
 
   if (pending && pending.qr) {
@@ -393,7 +526,14 @@ el('send').onclick = function(){
 
   prepared
     .then(function(){ return api('/conversations/' + CONV + '/messages', { method:'POST', body: payload }) })
-    .then(function(){ ta.value = ''; pending = null; showFile(); load() })
+    .then(function(){
+      ta.value = '';
+      pending = null;
+      replyTo = null;
+      el('rbar').style.display = 'none';
+      showFile();
+      load();
+    })
     .catch(function(e){
       var p = (e && e.payload) || {};
       el('sendErr').textContent = p.error === 'file_too_large' ? 'Файл больше 20 МБ'

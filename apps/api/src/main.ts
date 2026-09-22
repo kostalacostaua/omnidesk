@@ -36,6 +36,7 @@ import { registerLegal } from './legal.js';
 import { registerLanding, LANDING_HTML } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
+import { registerDocs } from './openapi.js';
 import { APP_ICON_SVG } from './brand.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -204,6 +205,8 @@ registerSettings(app, {
 });
 
 registerWidget(app, { pool, requireAuth: (req) => requireAuth(req as never) });
+
+registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));
 
 registerZoho(app, {
   pool,
