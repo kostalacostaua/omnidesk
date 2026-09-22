@@ -26,6 +26,7 @@ import { INBOX_HTML, UI_BUILD } from './ui.js';
 import { registerSettings } from './settings.js';
 import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
+import { createMailer } from './mailer.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -130,8 +131,7 @@ registerEmailAuth(app, {
   // Семь дней: смена не такая частая, чтобы просить код каждый день,
   // и не такая долгая, чтобы забытая вкладка жила месяцами.
   issueToken: (tenantId, userId) => signJwt({ sub: userId, tid: tenantId }, 7 * 24 * 3600),
-  smtpUrl: process.env['SMTP_URL'] ?? '',
-  mailFrom: process.env['MAIL_FROM'] ?? 'OmniDesk <no-reply@localhost>',
+  mailer: createMailer(process.env, (line) => app.log.info(line)),
   appName: process.env['APP_NAME'] ?? 'OmniDesk',
 });
 

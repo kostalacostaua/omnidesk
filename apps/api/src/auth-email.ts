@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
-import nodemailer from 'nodemailer';
+import type { Mailer } from './mailer.js';
 import { withSystem, type Pool } from '@omnidesk/core';
 
 /**
@@ -27,8 +27,7 @@ export interface EmailAuthDeps {
   pool: Pool;
   /** Выдаёт токен доступа для пары «тенант + пользователь». */
   issueToken: (tenantId: string, userId: string) => string;
-  smtpUrl: string;
-  mailFrom: string;
+  mailer: Mailer;
   appName: string;
 }
 
@@ -56,31 +55,27 @@ interface RouteRow {
 export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): void {
   const { pool, issueToken } = deps;
 
-  // Транспорт создаётся один раз: nodemailer держит пул соединений,
-  // и пересоздание на каждое письмо означало бы новый TLS-хэндшейк.
-  const transport = deps.smtpUrl ? nodemailer.createTransport(deps.smtpUrl) : null;
+  const { mailer } = deps;
 
-  if (!transport) {
+  if (mailer.kind === 'log') {
     app.log.warn(
-      'SMTP_URL не задан: коды входа будут писаться в лог api, а не отправляться почтой. ' +
-        'Для локальной проверки это удобно, для боевого сервера — недопустимо.',
+      'Почта не настроена (нет RESEND_API_KEY и SMTP_URL): коды входа пишутся в лог api. ' +
+        'Для проверки это удобно, для работы с клиентами — нет.',
     );
   }
 
   async function deliver(email: string, code: string): Promise<void> {
-    if (!transport) {
-      // Локальный режим. Код в логе — единственный способ войти, пока
-      // почта не настроена. Помечаем строку так, чтобы её было видно.
+    if (mailer.kind === 'log') {
+      // Код в логе — единственный способ войти, пока почта не настроена.
       app.log.info(`КОД ВХОДА для ${email}: ${code} (действует ${CODE_TTL_MIN} минут)`);
       return;
     }
 
-    await transport.sendMail({
-      from: deps.mailFrom,
+    await mailer.send({
       to: email,
+      // Тема начинается с самого кода: в списке писем и в уведомлении
+      // на телефоне человек видит его, не открывая письмо.
       subject: `${code} — код входа в ${deps.appName}`,
-      // Тема письма начинается с самого кода намеренно: в списке писем
-      // и в уведомлении на телефоне человек видит его, не открывая письмо.
       text:
         `Код входа: ${code}` +
         `\n\nДействует ${CODE_TTL_MIN} минут. Если вы не запрашивали вход — просто удалите это письмо.`,

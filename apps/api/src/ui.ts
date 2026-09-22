@@ -25,7 +25,7 @@
  * каждый раз: «браузер показывает старое — это кэш или контейнер?».
  * Видна в исходнике страницы и в логе запуска api.
  */
-export const UI_BUILD = '2026-08-19-2';
+export const UI_BUILD = '2026-09-22-1';
 
 export const INBOX_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -175,6 +175,17 @@ export const INBOX_HTML = `<!DOCTYPE html>
     background:var(--crit);color:#fff;font-size:9.5px;font-weight:700;display:flex;
     align-items:center;justify-content:center;padding:0 4px;font-variant-numeric:tabular-nums}
   #rail .grow{flex:1}
+
+  /* Кнопка «назад» нужна только там, где список и переписка
+     не помещаются рядом. На широком экране она лишняя. */
+  .thead .back{display:none;flex:none}
+  @media(max-width:820px){.thead .back{display:inline-flex}}
+
+  #toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,12px);opacity:0;
+    pointer-events:none;background:var(--accent);color:var(--on-accent);padding:10px 14px;
+    border-radius:8px;font-size:12.5px;font-weight:600;max-width:min(520px,calc(100% - 32px));
+    box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:95;transition:opacity .18s ease,transform .18s ease}
+  #toast.on{opacity:1;transform:translate(-50%,0)}
 
   /* ─── Список диалогов ──────────────────────────────────────────── */
   #list{background:var(--panel);border-right:1px solid var(--line);
@@ -421,7 +432,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
 <div id="app" data-view="chats">
   <nav id="rail">
-    <div class="logo">OD</div>
+    <div class="logo" id="logo" title="К чатам" style="cursor:pointer">OD</div>
     <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
     <button class="rbtn" data-view="bots" data-icon="bot">Боты</button>
     <div class="grow"></div>
@@ -461,6 +472,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   <div id="bots"></div>
 </div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <div id="settings">
   <div class="sheet">
@@ -666,6 +679,7 @@ function renderHead(){
   var mine = ME && ME.user && c.assignee_id === ME.user.id;
 
   el('thead').innerHTML =
+    '<button class="ghost mini back" id="aBack" title="К списку чатов">← Чаты</button>' +
     '<div class="who">' +
       '<div class="av" data-av="' + (c.has_avatar ? c.contact_id : '') + '" style="background:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
@@ -688,7 +702,29 @@ function renderHead(){
   };
   paintAvatars();
   el('aBot').onclick = function(){ patchConv({ botEnabled: !c.bot_enabled }) };
-  el('aClose').onclick = function(){ patchConv({ status: closed ? 'open' : 'resolved' }) };
+  el('aClose').onclick = function(){
+    var closing = !closed;
+    patchConv({ status: closing ? 'resolved' : 'open' }).then(function(){
+      // Закрытый чат исчезает из «Открытых» — это правильно, но без
+      // подсказки выглядит как потеря переписки. Говорим, где он теперь.
+      if (closing) toast('Чат закрыт. Он во вкладке «Закрытые» и вернётся в «Открытые», как только клиент напишет.');
+    });
+  };
+  el('aBack').onclick = backToList;
+}
+
+/** Возврат к списку. На узком экране список и переписка не помещаются вместе. */
+function backToList(){
+  el('app').classList.remove('thread-open');
+}
+
+var toastTimer = null;
+function toast(text){
+  var t = el('toast');
+  t.textContent = text;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove('on') }, 5000);
 }
 
 /**
@@ -1802,6 +1838,7 @@ function showErr(e){
 
 function setView(view){
   el('app').dataset.view = view;
+  if (view === 'chats') backToList();
   Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
     b.classList.toggle('on', b.dataset.view === view);
   });
@@ -1840,6 +1877,7 @@ function logout(){
 Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
   b.onclick = function(){ setView(b.dataset.view) };
 });
+el('logo').onclick = function(){ setView('chats') };
 
 Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
   b.onclick = function(){
