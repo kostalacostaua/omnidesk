@@ -2748,6 +2748,8 @@ function tabChannels(){
       L('(вона у розділі «Інтеграції»).</div>') +
       '<div class="row2"><input id="waTok" type="password" placeholder="EAAG..." autocomplete="off">' +
       '<input id="waNum" placeholder="Phone number ID" autocomplete="off"></div>' +
+      '<div class="row2"><input id="waWaba" placeholder="' +
+        L('ID акаунта WhatsApp Business (якщо попросимо)') + '" autocomplete="off"></div>' +
       L('<div class="acts"><button id="waGo">Підключити</button></div>') +
       L('<div class="hint">Поза вікном 24 годин WhatsApp дозволяє лише погоджені шаблони — ') +
       L('вони підтягнуться з вашого акаунта самі.</div>') +
@@ -2785,7 +2787,8 @@ function tabChannels(){
       el('waErr').textContent = '';
       busy(el('waGo'), true);
       api('/settings/channels/whatsapp', { method:'POST', body:{
-        token: el('waTok').value.trim(), phoneNumberId: el('waNum').value.trim()
+        token: el('waTok').value.trim(), phoneNumberId: el('waNum').value.trim(),
+        wabaId: el('waWaba').value.trim()
       }})
         .then(function(d){
           /* Номер подключён, но аккаунт не подписан на приложение —
@@ -2793,8 +2796,13 @@ function tabChannels(){
              Молчать об этом нельзя: снаружи это выглядит как «канал
              работает», и причину потом ищут неделю. */
           if (d && d.subscribeError){
-            el('waErr').textContent = L('Номер підключено, але акаунт WhatsApp не підписався на застосунок: вхідні не надходитимуть. Перевірте, що системному користувачу видано доступ до акаунта WhatsApp Business, і натисніть «Підключити» ще раз.') +
-              ' [' + d.subscribeError + ']';
+            /* Отдельный текст для случая, когда аккаунт просто не
+               нашёлся: человеку нужно не «проверьте доступ», а ровно
+               одно действие — вписать идентификатор в третье поле. */
+            el('waErr').textContent = d.subscribeError === 'no_waba'
+              ? L('Не вдалося визначити акаунт WhatsApp Business автоматично. Відкрийте WhatsApp Manager → Огляд акаунта, скопіюйте «Ідентифікатор акаунта WhatsApp Business» у третє поле і натисніть «Підключити» ще раз. Без цього вхідні не надходитимуть.')
+              : L('Номер підключено, але акаунт WhatsApp не підписався на застосунок: вхідні не надходитимуть. Перевірте, що системному користувачу видано доступ до акаунта WhatsApp Business, і натисніть «Підключити» ще раз.') +
+                ' [' + d.subscribeError + ']';
             busy(el('waGo'), false);
             return;
           }

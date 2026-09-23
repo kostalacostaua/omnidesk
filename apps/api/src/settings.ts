@@ -190,7 +190,9 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
    * Иначе неверный идентификатор выясняется в момент, когда оператор
    * отвечает клиенту, — то есть слишком поздно.
    */
-  app.post<{ Body: { token?: string; phoneNumberId?: string; displayName?: string } }>(
+  app.post<{
+    Body: { token?: string; phoneNumberId?: string; displayName?: string; wabaId?: string };
+  }>(
     '/settings/channels/whatsapp',
     async (req, reply) => {
       const auth = requireAuth(req);
@@ -229,14 +231,46 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
        * такого поля нет, а проверка токена возвращает список объектов,
        * на которые выданы права.
        */
-      let waba: string | null = null;
+      let waba: string | null = (req.body?.wabaId ?? '').trim() || null;
       let subscribe: string | null = null;
       try {
-        const debug = await graphGet<DebugTokenReply>('debug_token', {
-          input_token: token,
-          access_token: token,
-        });
-        waba = wabaFromDebug(debug);
+        /**
+         * Способа узнать аккаунт по номеру у Graph нет, поэтому идём
+         * тремя путями, от самого удобного к самому надёжному.
+         *
+         * Первый — проверка токена. Он работает для токена из
+         * Embedded Signup: там granular_scopes перечисляют аккаунты, на
+         * которые выданы права. Для токена системного пользователя
+         * таких списков нет, и это не сбой, а другое устройство токена.
+         *
+         * Второй — спросить у самого номера. Поле недокументировано и
+         * есть не всегда, но когда есть, избавляет человека от лишнего
+         * копирования.
+         *
+         * Третий — идентификатор, введённый руками. Он и был причиной
+         * стольких попыток: пока автоматика не сработала, человеку
+         * нечем было помочь себе самому.
+         */
+        if (!waba) {
+          const debug = await graphGet<DebugTokenReply>('debug_token', {
+            input_token: token,
+            access_token: token,
+          });
+          waba = wabaFromDebug(debug);
+        }
+
+        if (!waba) {
+          try {
+            const parent = await graphGet<{ whatsapp_business_account?: { id?: string } }>(
+              phoneNumberId,
+              { access_token: token, fields: 'whatsapp_business_account' },
+            );
+            waba = parent.whatsapp_business_account?.id ?? null;
+          } catch {
+            /* поля нет — идём дальше, это ожидаемо */
+          }
+        }
+
         if (waba) {
           await graphPost(`${waba}/subscribed_apps`, { access_token: token }, undefined);
         } else {
