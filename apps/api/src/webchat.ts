@@ -733,7 +733,13 @@ export function chatPage(
   form{display:flex;gap:8px;padding:12px;border-top:1px solid #e6e9f2;flex:none;background:#fff;
     padding-bottom:calc(12px + env(safe-area-inset-bottom))}
   textarea{flex:1;resize:none;border:1px solid #d7dce9;border-radius:12px;padding:10px 12px;
-    font:16px/1.4 inherit;max-height:120px;min-height:44px;outline:none}
+    /* Ровно 16 пикселей и по отдельным свойствам. Сокращённая запись
+       font со словом inherit недопустима, браузер выбрасывал её целиком,
+       и поле оставалось с 13,3 пикселя по умолчанию. Всё, что меньше
+       шестнадцати, Safari на айфоне считает мелким и при касании
+       приближает страницу — а обратно уже не отдаляет. */
+    font-size:16px;line-height:1.4;font-family:inherit;
+    max-height:120px;min-height:44px;outline:none}
   textarea:focus{border-color:var(--brand)}
   button.send{border:0;background:var(--brand);color:#fff;border-radius:12px;padding:0 16px;
     font-weight:600;cursor:pointer;font-size:14px}
