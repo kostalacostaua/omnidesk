@@ -35,7 +35,16 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="omnidesk-build" content="${UI_BUILD}">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1530">
+<!-- Значок и режим приложения на телефоне. На iOS раздел «Поделиться →
+     На экран Домой» после этого открывает инбокс без адресной строки. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rozmovio">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
@@ -51,8 +60,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
   ${BRAND_CSS}
   .qrwrap{display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin:14px 0 4px;
     padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
-  .qr{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;flex:none}
-  .qr svg{width:100%;height:100%;display:block}
+  /* Именно .qrwrap .qr, а не просто .qr: тот же класс носит строка в
+     списке шаблонов, и без этой оговорки каждый шаблон превращался в
+     белый квадрат 220×220 — на телефоне из-за этого в панели помещался
+     ровно один шаблон, а между ними зияла пустота. */
+  .qrwrap .qr{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;flex:none}
+  .qrwrap .qr svg{width:100%;height:100%;display:block}
   .steps{margin:0;padding-left:18px;line-height:1.9;font-size:13px}
 
   /* ─── Вход ─────────────────────────────────────────────────────── */
@@ -72,7 +85,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
     font-family:ui-monospace,Menlo,monospace}
 
   /* ─── Каркас ───────────────────────────────────────────────────── */
-  #app{display:none;grid-template-columns:66px 316px minmax(0,1fr) 284px;height:100vh}
+  /* 100vh на iOS — это высота БЕЗ адресной строки: поле ответа
+     уезжает под неё, и человек видит переписку, но не видит, куда
+     писать. dvh считает видимую часть, а при открытой клавиатуре
+     высоту доставляет visualViewport (см. fitHeight). */
+  #app{display:none;grid-template-columns:66px 316px minmax(0,1fr) 284px;height:100vh;height:100dvh}
   #app.no-card{grid-template-columns:66px 316px minmax(0,1fr)}
   #app[data-view="bots"]{grid-template-columns:66px minmax(0,1fr)}
   #app[data-view="bots"] #list,#app[data-view="bots"] #thread,
@@ -82,7 +99,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
   @media(max-width:1180px){#app{grid-template-columns:66px 306px minmax(0,1fr)}
     #app #card{display:none}}
   @media(max-width:820px){
-    #app{grid-template-columns:56px minmax(0,1fr)}
+    /* 62, а не 56: «Сповіщення» иначе переносится одной буквой. */
+    #app{grid-template-columns:62px minmax(0,1fr)}
     #app.thread-open #list{display:none}
     #app:not(.thread-open) #thread{display:none}}
 
@@ -592,6 +610,46 @@ export const INBOX_HTML = `<!DOCTYPE html>
     #app:not([data-view="chats"]){grid-template-columns:66px minmax(0,1fr)}
     .pg{padding:20px 16px 50px}
   }
+
+  /* ─── Телефон ───────────────────────────────────────────────────
+     Не «адаптив ради адаптива»: на 390 точках ширины поле ответа в
+     одной строке с четырьмя кнопками сжимается до сотни пикселей —
+     человек не видит, что печатает. Поэтому на телефоне поле стоит
+     отдельной строкой во всю ширину, а кнопки уходят под него.
+
+     Шапка переписки там же переносится: имя клиента и кнопки не
+     помещаются в одну строку, и до этого имя просто пропадало —
+     сжималось до нуля, потому что кнопки не сжимаются. */
+  @media(max-width:820px){
+    /* «Сповіщення» и «Notifications» в 56 точек одной строкой не
+       влезают: переносим слово, а не обрезаем его. */
+    .rbtn{width:60px;font-size:9px;padding:8px 2px;white-space:normal;
+      overflow-wrap:anywhere;line-height:1.1}
+    .thead{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
+    .thead .back{order:1;flex:none}
+    /* Действия сжимаются и прокручиваются вбок, а не переносятся:
+       перенос забирал третью строку у переписки. */
+    .thead .acts{order:2;flex:1 1 0;min-width:0;justify-content:flex-start;
+      overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+    .thead .acts::-webkit-scrollbar{display:none}
+    .thead .who{order:3;flex:1 1 100%;min-width:0}
+
+    .composer{padding:9px 12px calc(9px + env(safe-area-inset-bottom))}
+    .composer .row{flex-wrap:wrap;gap:6px}
+    .composer .row textarea{order:-1;flex:1 1 100%;width:100%}
+    .composer .row #send{margin-left:auto}
+    /* 16 пикселей — не про вкус. При меньшем размере Safari на iOS
+       увеличивает страницу при фокусе в поле, и вёрстка разъезжается
+       уже необратимо: обратно он её не уменьшает. */
+    .composer textarea,.composer input{font-size:16px}
+    .composer textarea{min-height:46px;max-height:30vh}
+
+    /* Список шаблонов занимал треть экрана и почти весь был пустым. */
+    .tplbox{max-height:152px}
+    .tplbox .qr{padding:7px 10px;font-size:13px}
+    .tplbox .qr .x{margin-top:1px;font-size:12px}
+    .emobox{max-height:34vh}
+  }
 </style>
 </head>
 <body>
@@ -936,12 +994,18 @@ function currentConv(){
 
 var lastThread = null;
 
-function openConv(id){
+function openConv(id, fromHistory){
   current = id;
   lastThread = null;
   replyTo = null;
   pendingFile = null;
   el('app').classList.add('thread-open');
+  // Открытый диалог — это шаг в истории браузера. Без него жест «назад»
+  // на телефоне уводит с сайта целиком, хотя человек ждал возврата к
+  // списку чатов.
+  if (!fromHistory) {
+    try { history.pushState({ conv:id }, '', location.pathname + location.search) } catch (e) {}
+  }
   renderList();
   renderHead();
   loadThread();
@@ -996,8 +1060,55 @@ function renderHead(){
 
 /** Возврат к списку. На узком экране список и переписка не помещаются вместе. */
 function backToList(){
+  // Если диалог открывали мы и шаг в истории наш — уходим через историю:
+  // тогда экранная кнопка и жест «назад» делают одно и то же, а лишние
+  // шаги не копятся.
+  if (history.state && history.state.conv) { history.back(); return }
+  closeThread();
+}
+
+function closeThread(){
   el('app').classList.remove('thread-open');
 }
+
+/**
+ * Жест «назад» на телефоне.
+ *
+ * Возврат из диалога — в список, а не из приложения. Если в истории
+ * лежит другой диалог (человек листал несколько), открываем его.
+ */
+window.addEventListener('popstate', function(e){
+  var st = e.state || {};
+  if (st.conv) { if (st.conv !== current) openConv(st.conv, true); return }
+  closeThread();
+});
+
+/**
+ * Высота окна на телефоне.
+ *
+ * iOS не уменьшает окно, когда открывается клавиатура: она просто
+ * закрывает нижнюю часть страницы вместе с полем ответа. visualViewport
+ * знает настоящую видимую высоту — по ней и живём.
+ */
+/** Телефон. Ширина, а не «мобильность»: подписи считаем по месту. */
+function narrow(){ return window.innerWidth <= 820 }
+
+function fitHeight(){
+  var vv = window.visualViewport;
+  if (!vv) return;
+  // На широком экране высотой распоряжается вёрстка: снимаем свою.
+  if (window.innerWidth > 820){ el('app').style.height = ''; return }
+  el('app').style.height = Math.round(vv.height) + 'px';
+  // Клавиатура выехала — последнее сообщение должно остаться на виду.
+  var box = el('msgs');
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+if (window.visualViewport){
+  window.visualViewport.addEventListener('resize', fitHeight);
+  window.visualViewport.addEventListener('scroll', fitHeight);
+}
+window.addEventListener('orientationchange', function(){ setTimeout(fitHeight, 250) });
 
 var toastTimer = null;
 function toast(text){
@@ -1234,7 +1345,9 @@ function renderComposer(force){
     // кнопка, которая на нажатие отвечает «не настроено», — это
     // обещание, которого интерфейс не держит.
     (AI.ready ? L('<button class="icob" id="ai" title="Чернетка відповіді від ШІ">✨</button>') : '') +
-    L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту. Enter — надіслати, Shift+Enter — перенос"></textarea>') +
+    (narrow()
+      ? L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту"></textarea>')
+      : L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту. Enter — надіслати, Shift+Enter — перенос"></textarea>')) +
     L('<button id="send">Надіслати</button></div><div class="err" id="sendErr"></div>');
 
   var ta = el('txt');
@@ -4109,6 +4222,7 @@ function start(){
   applyLang();
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
+  fitHeight();
   paintIcons();
   paintBell();
   paintThemeBtn();

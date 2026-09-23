@@ -42,7 +42,7 @@ import { registerNotify } from './notify.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
-import { APP_ICON_SVG } from './brand.js';
+import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -453,6 +453,49 @@ app.get('/app', sendUi);
 app.get('/favicon.ico', async (_req, reply) => reply.redirect('/favicon.svg'));
 app.get('/favicon.svg', async (_req, reply) =>
   reply.type('image/svg+xml').header('cache-control', 'public, max-age=86400').send(APP_ICON_SVG),
+);
+
+/**
+ * Значок на домашнем экране и манифест приложения.
+ *
+ * Инбокс открывают с телефона, и браузерная вкладка для сменной работы
+ * неудобна: адресная строка съедает высоту, жест «назад» уводит с
+ * сайта. Добавленный на домашний экран, он открывается как приложение —
+ * без адресной строки и с собственным значком.
+ *
+ * iOS не понимает SVG в apple-touch-icon, поэтому PNG. Оба размера
+ * отдаются из кода: тома со статикой у контейнера нет.
+ */
+const png = (reply: FastifyReply, body: Buffer) =>
+  reply.type('image/png').header('cache-control', 'public, max-age=604800').send(body);
+
+app.get('/icon-180.png', async (_req, reply) => png(reply, APP_ICON_180));
+app.get('/icon-192.png', async (_req, reply) => png(reply, APP_ICON_192));
+app.get('/icon-512.png', async (_req, reply) => png(reply, APP_ICON_512));
+app.get('/apple-touch-icon.png', async (_req, reply) => png(reply, APP_ICON_180));
+app.get('/apple-touch-icon-precomposed.png', async (_req, reply) => png(reply, APP_ICON_180));
+
+app.get('/manifest.webmanifest', async (_req, reply) =>
+  reply
+    .type('application/manifest+json; charset=utf-8')
+    .header('cache-control', 'public, max-age=3600')
+    .send({
+      name: process.env['APP_NAME'] ?? 'Rozmovio',
+      short_name: 'Rozmovio',
+      description: 'Месенджери клієнтів в одному вікні',
+      start_url: '/app',
+      scope: '/',
+      display: 'standalone',
+      orientation: 'portrait-primary',
+      background_color: '#0E1530',
+      theme_color: '#0E1530',
+      lang: 'uk',
+      icons: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+    }),
 );
 
 /**
