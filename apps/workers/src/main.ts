@@ -94,9 +94,21 @@ const META_APP_ID = process.env['META_APP_ID'] ?? '';
 /** Meta отдаёт вложения до 25 МБ. */
 const MAX_META_MEDIA_BYTES = 25 * 1024 * 1024;
 
+/**
+ * Поля, ради которых запись вообще пишется: что именно пошло не так.
+ *
+ * Они дублируются в текст сообщения, а не только лежат рядом. Причина
+ * практическая: просмотрщик логов показывает одно поле msg, а остальное
+ * молча отбрасывает. Из-за этого «Отправка не удалась» выглядела как
+ * запись без причины — при том, что причина была записана.
+ */
+const LOUD = ['error', 'reason', 'detail'];
+
 const log = (level: string, msg: string, extra: Record<string, unknown> = {}): void => {
+  const loud = LOUD.map((k) => extra[k]).find((v) => typeof v === 'string' && v);
+  const text = loud ? `${msg}: ${String(loud).slice(0, 400)}` : msg;
   // Структурированный лог. Содержимое сообщений сюда не попадает никогда.
-  console.log(JSON.stringify({ level, msg, ts: new Date().toISOString(), ...extra }));
+  console.log(JSON.stringify({ level, msg: text, ts: new Date().toISOString(), ...extra }));
 };
 
 /**
