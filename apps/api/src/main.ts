@@ -316,6 +316,7 @@ registerAi(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as neve
 const notify = registerNotify(app, {
   pool,
   connection: redis,
+  masterKey,
   requireAuth: (req) => requireAuth(req as never),
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });

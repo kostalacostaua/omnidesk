@@ -672,6 +672,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .tplbox .qr{padding:7px 10px;font-size:13px}
     .tplbox .qr .x{margin-top:1px;font-size:12px}
     .emobox{max-height:34vh}
+
+    /* 30 точек заголовка на телефоне съедают четверть экрана. */
+    .pg{padding:18px 16px 60px}
+    .pg-head{margin-bottom:16px}
+    .pg-head h2{font-size:23px}
+    .pg-head p{font-size:13px}
   }
 </style>
 </head>
@@ -3620,7 +3626,8 @@ function ntWhere(t){
   var c = t.config || {};
   if (t.kind === 'telegram'){
     var bot = (NT.data.bots || []).filter(function(b){ return b.id === c.channelId })[0];
-    return (bot ? bot.display_name : L('бот не знайдений')) + ' → ' + (c.chatId || '—');
+    var name = c.botName || (bot ? bot.display_name : L('бот не знайдений'));
+    return name + ' → ' + (c.chatId || '—');
   }
   if (t.kind === 'email') return c.to || '—';
   return NT.data.pushSubscriptions + ' ' + L('пристроїв');
@@ -3672,17 +3679,26 @@ function ntAdd(){
   var bots = NT.data.bots || [];
   var push = NT.data.push || {};
 
+  /* Бот для оповещений — отдельная история от бота-канала. Канал-бот
+     есть далеко не у всех: клиенты пишут в Instagram и на номер, а
+     дежурной группе нужен свой бот, которого клиентам не показывают.
+     Поэтому либо выбрать уже подключённого, либо вписать свой токен. */
   var tg = '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
     L('<div><div class="ttl">Група Telegram</div><div class="sub">Повідомлення читають усі, хто в групі</div></div></div>') +
+    L('<div class="sub" style="white-space:normal">Створіть бота у <b>@BotFather</b>, додайте його у вашу групу ') +
+    L('і зробіть адміністратором. Потім натисніть «Знайти групи» — ми запитаємо їх у Telegram самі.</div>') +
     (bots.length
-      ? L('<div class="sub" style="white-space:normal">Додайте бота в групу, зробіть адміністратором, ') +
-        L('і вкажіть ідентифікатор групи — його видно у відповіді getUpdates або в @getmyid_bot.</div>') +
-        '<div class="row2"><select id="ntBot">' +
+      ? '<div class="row2"><select id="ntBot">' +
         bots.map(function(b){ return '<option value="' + b.id + '">' + esc(b.display_name) + '</option>' }).join('') +
-        '</select><input id="ntChat" placeholder="-4846124329" autocomplete="off"></div>' +
-        L('<div class="acts"><button id="ntAddTg">Додати</button></div>')
-      : L('<div class="sub" style="white-space:normal">Спочатку підключіть Telegram-бота в розділі «Канали»: ') +
-        L('оповіщення надсилає він, окремий токен не потрібен.</div>')) +
+        L('<option value="">інший бот — за токеном</option></select></div>')
+      : '') +
+    '<div class="row2"><input id="ntTok" type="password" placeholder="123456789:AAF..." autocomplete="off">' +
+    L('<button class="ghost" id="ntFind">Знайти групи</button></div>') +
+    '<div id="ntChats"></div>' +
+    '<div class="row2"><input id="ntChat" placeholder="-4846124329" autocomplete="off">' +
+    L('<button id="ntAddTg">Додати</button></div>') +
+    L('<div class="hint">Якщо група не знайшлася — напишіть у ній будь-що і натисніть «Знайти групи» ') +
+    L('ще раз: Telegram віддає боту тільки свіжі оновлення.</div>') +
     '<div class="err" id="ntTgErr"></div></div>';
 
   var mail = '<div class="tile"><div class="t1"><div class="chico soon">@</div>' +
@@ -3775,8 +3791,16 @@ function wireNotify(){
     };
   });
 
+  if (el('ntFind')) el('ntFind').onclick = ntFindChats;
+
   if (el('ntAddTg')) el('ntAddTg').onclick = function(){
-    ntCreate('telegram', { channelId: el('ntBot').value, chatId: el('ntChat').value.trim() }, 'ntTgErr');
+    var token = el('ntTok') ? el('ntTok').value.trim() : '';
+    var bot = el('ntBot') ? el('ntBot').value : '';
+    if (!token && !bot){
+      el('ntTgErr').textContent = L('Виберіть бота або вкажіть токен');
+      return;
+    }
+    ntCreate('telegram', { channelId: bot, chatId: el('ntChat').value.trim() }, 'ntTgErr', token);
   };
   if (el('ntAddMail')) el('ntAddMail').onclick = function(){
     ntCreate('email', { to: el('ntMail').value.trim() }, 'ntMailErr');
@@ -3789,13 +3813,57 @@ function wireNotify(){
 
 /* Новый адресат создаётся сразу подписанным на всё: человек добавляет
    его, чтобы получать оповещения, а не чтобы потом искать галочки. */
-function ntCreate(kind, config, errBox){
+function ntCreate(kind, config, errBox, token){
   var events = (NT.data.events || []).map(function(e){ return e.id });
   el(errBox).textContent = '';
-  api('/settings/notify', { method:'POST', body:{ kind:kind, config:config, events:events } })
+  api('/settings/notify', {
+    method:'POST',
+    body:{ kind:kind, config:config, events:events, token: token || undefined },
+  })
     .then(function(){ toast(L('Адресата додано')); tabNotify() })
     .catch(function(e){
       el(errBox).textContent = ((e.payload||{}).detail) || L('Не вдалося додати');
+    });
+}
+
+/**
+ * Найти группы, в которых состоит бот.
+ *
+ * Идентификатор группы негде посмотреть в самом Telegram, и на этом
+ * настройка обычно и заканчивалась: человек упирался в поле «-4846...»
+ * и шёл искать стороннего бота. Спрашиваем у Telegram напрямую — для
+ * бота добавление в группу тоже обновление.
+ */
+function ntFindChats(){
+  var box = el('ntChats'), err = el('ntTgErr');
+  err.textContent = '';
+  busy(el('ntFind'), true);
+
+  var body = {};
+  var token = el('ntTok') ? el('ntTok').value.trim() : '';
+  if (token) body.token = token;
+  else if (el('ntBot') && el('ntBot').value) body.channelId = el('ntBot').value;
+  else { busy(el('ntFind'), false); err.textContent = L('Виберіть бота або вкажіть токен'); return }
+
+  api('/settings/notify/telegram/chats', { method:'POST', body:body })
+    .then(function(d){
+      busy(el('ntFind'), false);
+      var list = d.chats || [];
+      if (!list.length){
+        box.innerHTML = L('<div class="hint">Групи не знайшлися. Додайте бота у групу, ') +
+          L('напишіть у ній будь-що і спробуйте ще раз.</div>');
+        return;
+      }
+      box.innerHTML = '<div class="row2"><select id="ntChatPick">' +
+        list.map(function(c){
+          return '<option value="' + esc(c.id) + '">' + esc(c.title) + ' (' + esc(c.id) + ')</option>';
+        }).join('') + '</select></div>';
+      el('ntChat').value = list[0].id;
+      el('ntChatPick').onchange = function(){ el('ntChat').value = this.value };
+    })
+    .catch(function(e){
+      busy(el('ntFind'), false);
+      err.textContent = ((e.payload||{}).detail) || L('Не вдалося запитати Telegram');
     });
 }
 

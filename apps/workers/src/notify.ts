@@ -61,6 +61,8 @@ interface TargetRow {
   title: string;
   config: Record<string, unknown>;
   events: string[];
+  /** Токен собственного бота адресата. Пусто — берём у канала. */
+  credentials_enc: Buffer | null;
 }
 
 /** Ключ задачи. Двоеточия в ключе идемпотентности BullMQ не принимает. */
@@ -147,7 +149,7 @@ export function createNotifier(deps: NotifyDeps) {
   ): Promise<TargetRow[]> {
     return withTenant(pool, tenantId, async (db) => {
       const { rows } = await db.query<TargetRow>(
-        `SELECT id, kind, title, config, events FROM notify_targets
+        `SELECT id, kind, title, config, events, credentials_enc FROM notify_targets
           WHERE tenant_id = $1 AND is_active = true
             AND ($2::uuid IS NULL OR id = $2::uuid)
             AND ($2::uuid IS NOT NULL OR $3 = ANY (events))`,
@@ -175,31 +177,38 @@ export function createNotifier(deps: NotifyDeps) {
   /**
    * Отправка в группу Telegram.
    *
-   * Токен не хранится у адресата: он ссылается на уже подключённый
-   * канал-бота, и токен читается оттуда. Второй экземпляр того же
-   * секрета — это второе место, откуда он может утечь.
+   * Бот бывает двух видов. Если у компании уже подключён канал-бот,
+   * адресат ссылается на него и своего токена не хранит: второй
+   * экземпляр секрета — второе место, откуда он может утечь. Если
+   * канала-бота нет — а его чаще нет, клиенты пишут в Instagram и на
+   * номер, — у адресата свой токен, зашифрованный ключом компании.
    */
   async function sendTelegram(
     tenantId: string,
-    config: Record<string, unknown>,
+    target: TargetRow,
     text: string,
   ): Promise<void> {
-    const channelId = String(config['channelId'] ?? '');
+    const config = target.config;
     const chatId = String(config['chatId'] ?? '');
-    if (!channelId || !chatId) {
-      throw new UnrecoverableError('Не вказано бота або групу');
-    }
+    if (!chatId) throw new UnrecoverableError('Не вказано групу');
 
-    const token = await withTenant(pool, tenantId, async (db) => {
-      const { rows } = await db.query<{ credentials_enc: Buffer }>(
-        `SELECT credentials_enc FROM channels
-          WHERE id = $1 AND type IN ('telegram_bot', 'telegram_business') LIMIT 1`,
-        [channelId],
-      );
-      const enc = rows[0]?.credentials_enc;
-      if (!enc) return null;
-      return decryptJson<{ token: string }>(masterKey, tenantId, enc).token;
-    });
+    // Свой бот адресата, если он есть; иначе — бот подключённого
+    // канала. Второй путь остаётся ради тех, у кого канал уже заведён:
+    // лишний токен в базе — лишнее место, откуда он может утечь.
+    const token = target.credentials_enc
+      ? decryptJson<{ token: string }>(masterKey, tenantId, target.credentials_enc).token
+      : await withTenant(pool, tenantId, async (db) => {
+          const channelId = String(config['channelId'] ?? '');
+          if (!channelId) return null;
+          const { rows } = await db.query<{ credentials_enc: Buffer }>(
+            `SELECT credentials_enc FROM channels
+              WHERE id = $1 AND type IN ('telegram_bot', 'telegram_business') LIMIT 1`,
+            [channelId],
+          );
+          const enc = rows[0]?.credentials_enc;
+          if (!enc) return null;
+          return decryptJson<{ token: string }>(masterKey, tenantId, enc).token;
+        });
     if (!token) throw new UnrecoverableError('Бот для оповіщень не знайдений');
 
     const res = await fetch(`${telegramRoot}/bot${token}/sendMessage`, {
@@ -322,7 +331,7 @@ export function createNotifier(deps: NotifyDeps) {
     for (const target of targets) {
       try {
         if (target.kind === 'telegram') {
-          await sendTelegram(job.tenantId, target.config, telegramText(message, appUrl));
+          await sendTelegram(job.tenantId, target, telegramText(message, appUrl));
         } else if (target.kind === 'email') {
           await sendEmail(target.config, message.title, message.body, link);
         } else {

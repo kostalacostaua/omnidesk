@@ -3,6 +3,8 @@ import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import {
   NOTIFY_EVENTS,
+  decryptJson,
+  encryptJson,
   NOTIFY_HINTS,
   NOTIFY_TITLES,
   QUEUE_NOTIFY,
@@ -38,6 +40,7 @@ import {
 interface NotifyDeps {
   pool: Pool;
   connection: Redis;
+  masterKey: Buffer;
   requireAuth: (req: unknown) => { tenantId: string; userId: string } | null;
   log: (level: string, msg: string, extra?: Record<string, unknown>) => void;
 }
@@ -46,6 +49,8 @@ const auth401 = { error: 'unauthorized' };
 
 interface TargetBody {
   kind?: string;
+  /** Токен собственного бота адресата. Наружу не возвращается. */
+  token?: string;
   title?: string;
   config?: Record<string, unknown>;
   events?: string[];
@@ -78,9 +83,15 @@ export interface NotifyApi {
  * момент, когда оповещение не пришло, — а это ровно тот момент, когда
  * человек на него рассчитывал.
  */
-export function checkConfig(kind: string, config: Record<string, unknown>): string | null {
+export function checkConfig(
+  kind: string,
+  config: Record<string, unknown>,
+  hasOwnBot = false,
+): string | null {
   if (kind === 'telegram') {
-    if (!String(config['channelId'] ?? '').trim()) return 'Виберіть бота';
+    if (!hasOwnBot && !String(config['channelId'] ?? '').trim()) {
+      return 'Виберіть бота або вкажіть токен окремого';
+    }
     const chat = String(config['chatId'] ?? '').trim();
     if (!chat) return 'Вкажіть ідентифікатор групи';
     // У групп он отрицательный и длинный, у канала — начинается с -100.
@@ -113,7 +124,8 @@ export function cleanEvents(events: unknown): NotifyEvent[] {
 }
 
 export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyApi {
-  const { pool, connection, requireAuth, log } = deps;
+  const { pool, connection, masterKey, requireAuth, log } = deps;
+  const tgRoot = process.env['TELEGRAM_API_ROOT'] ?? 'https://api.telegram.org';
 
   const queue = new Queue<NotifyJob>(QUEUE_NOTIFY, {
     connection,
@@ -243,6 +255,124 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
     };
   });
 
+  /**
+   * Кто этот бот.
+   *
+   * Токен проверяется до сохранения: неверный выясняется иначе только
+   * тогда, когда оповещение не пришло, — а это ровно тот момент, когда
+   * на него рассчитывали.
+   */
+  async function botIdentity(token: string): Promise<{ name: string } | { error: string }> {
+    try {
+      const res = await fetch(`${tgRoot}/bot${token}/getMe`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        result?: { username?: string; first_name?: string };
+        description?: string;
+      };
+      if (!res.ok || !body.ok) {
+        return { error: body.description ?? 'Telegram не прийняв токен' };
+      }
+      const r = body.result ?? {};
+      return { name: r.username ? `@${r.username}` : (r.first_name ?? 'бот') };
+    } catch {
+      return { error: 'Telegram не відповів' };
+    }
+  }
+
+  /** Токен адресата: свой, если задан, иначе от подключённого канала. */
+  async function targetToken(
+    tenantId: string,
+    targetId: string,
+  ): Promise<string | null> {
+    return withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{ credentials_enc: Buffer | null; config: Record<string, unknown> }>(
+        `SELECT credentials_enc, config FROM notify_targets WHERE id = $1`,
+        [targetId],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      if (row.credentials_enc) {
+        return decryptJson<{ token: string }>(masterKey, tenantId, row.credentials_enc).token;
+      }
+      const channelId = String(row.config?.['channelId'] ?? '');
+      if (!channelId) return null;
+      const { rows: ch } = await db.query<{ credentials_enc: Buffer }>(
+        `SELECT credentials_enc FROM channels WHERE id = $1`,
+        [channelId],
+      );
+      const enc = ch[0]?.credentials_enc;
+      return enc ? decryptJson<{ token: string }>(masterKey, tenantId, enc).token : null;
+    });
+  }
+
+  /**
+   * Какие группы знает бот.
+   *
+   * Идентификатор группы негде посмотреть в самом Telegram, и это
+   * главная причина, по которой оповещения не доводят до конца: человек
+   * упирается в поле «chatId» и уходит искать стороннего бота. Здесь мы
+   * спрашиваем это у самого Telegram: он помнит последние обновления, а
+   * добавление бота в группу — тоже обновление.
+   */
+  app.post<{ Body: { channelId?: string; token?: string } }>(
+    '/settings/notify/telegram/chats',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      let token = String(req.body?.token ?? '').trim();
+      if (!token) {
+        const channelId = String(req.body?.channelId ?? '').trim();
+        if (!channelId) return reply.code(400).send({ error: 'no_bot' });
+        token = (await withTenant(pool, auth.tenantId, async (db) => {
+          const { rows } = await db.query<{ credentials_enc: Buffer }>(
+            `SELECT credentials_enc FROM channels
+              WHERE id = $1 AND type IN ('telegram_bot', 'telegram_business')`,
+            [channelId],
+          );
+          const enc = rows[0]?.credentials_enc;
+          return enc ? decryptJson<{ token: string }>(masterKey, auth.tenantId, enc).token : '';
+        })) as string;
+        if (!token) return reply.code(404).send({ error: 'bot_not_found' });
+      }
+
+      try {
+        const res = await fetch(`${tgRoot}/bot${token}/getUpdates?limit=100`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        const body = (await res.json()) as {
+          ok?: boolean;
+          description?: string;
+          result?: Array<Record<string, { chat?: { id?: number; title?: string; type?: string } }>>;
+        };
+        if (!res.ok || !body.ok) {
+          return reply.code(400).send({
+            error: 'telegram_refused',
+            detail: body.description ?? 'Telegram не прийняв токен',
+          });
+        }
+
+        const seen = new Map<string, { id: string; title: string }>();
+        for (const update of body.result ?? []) {
+          for (const value of Object.values(update)) {
+            const chat = (value as { chat?: { id?: number; title?: string; type?: string } })?.chat;
+            if (!chat?.id || !chat.type || chat.type === 'private') continue;
+            seen.set(String(chat.id), {
+              id: String(chat.id),
+              title: chat.title ?? String(chat.id),
+            });
+          }
+        }
+        return { chats: [...seen.values()] };
+      } catch {
+        return reply.code(502).send({ error: 'telegram_unreachable' });
+      }
+    },
+  );
+
   app.post<{ Body: TargetBody }>('/settings/notify', async (req, reply) => {
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);
@@ -251,17 +381,30 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
     if (!KINDS.includes(kind)) return reply.code(400).send({ error: 'bad_kind' });
 
     const config = (req.body?.config ?? {}) as Record<string, unknown>;
-    const problem = checkConfig(kind, config);
+    const token = String(req.body?.token ?? '').trim();
+
+    const problem = checkConfig(kind, config, Boolean(token));
     if (problem) return reply.code(400).send({ error: 'bad_config', detail: problem });
+
+    // Свой бот проверяется сразу: в настройках должно быть видно, чей
+    // это бот, а не голая строка токена.
+    let enc: Buffer | null = null;
+    if (kind === 'telegram' && token) {
+      const who = await botIdentity(token);
+      if ('error' in who) return reply.code(400).send({ error: 'bad_token', detail: who.error });
+      config['botName'] = who.name;
+      delete config['token'];
+      enc = encryptJson(masterKey, auth.tenantId, { token });
+    }
 
     const title = String(req.body?.title ?? '').trim().slice(0, 120) ||
       (kind === 'telegram' ? 'Група Telegram' : kind === 'email' ? 'Пошта' : 'Пуш у браузер');
 
     const row = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO notify_targets (tenant_id, kind, title, config, events)
-         VALUES ($1, $2, $3, $4::jsonb, $5::text[]) RETURNING id`,
-        [auth.tenantId, kind, title, JSON.stringify(config), cleanEvents(req.body?.events)],
+        `INSERT INTO notify_targets (tenant_id, kind, title, config, events, credentials_enc)
+         VALUES ($1, $2, $3, $4::jsonb, $5::text[], $6) RETURNING id`,
+        [auth.tenantId, kind, title, JSON.stringify(config), cleanEvents(req.body?.events), enc],
       );
       return rows[0] ?? null;
     });
@@ -277,8 +420,12 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
       if (!auth) return reply.code(401).send(auth401);
 
       const current = await withTenant(pool, auth.tenantId, async (db) => {
-        const { rows } = await db.query<{ kind: string; config: Record<string, unknown> }>(
-          `SELECT kind, config FROM notify_targets WHERE id = $1`,
+        const { rows } = await db.query<{
+          kind: string;
+          config: Record<string, unknown>;
+          credentials_enc: Buffer | null;
+        }>(
+          `SELECT kind, config, credentials_enc FROM notify_targets WHERE id = $1`,
           [req.params.id],
         );
         return rows[0] ?? null;
@@ -288,8 +435,23 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
       const config = req.body?.config
         ? ({ ...current.config, ...req.body.config } as Record<string, unknown>)
         : current.config;
-      const problem = checkConfig(current.kind, config);
+      const token = String(req.body?.token ?? '').trim();
+
+      const problem = checkConfig(
+        current.kind,
+        config,
+        Boolean(token) || Boolean(current.credentials_enc),
+      );
       if (problem) return reply.code(400).send({ error: 'bad_config', detail: problem });
+
+      let enc: Buffer | null = null;
+      if (current.kind === 'telegram' && token) {
+        const who = await botIdentity(token);
+        if ('error' in who) return reply.code(400).send({ error: 'bad_token', detail: who.error });
+        config['botName'] = who.name;
+        delete config['token'];
+        enc = encryptJson(masterKey, auth.tenantId, { token });
+      }
 
       await withTenant(pool, auth.tenantId, async (db) => {
         await db.query(
@@ -298,6 +460,7 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
                   config = $3::jsonb,
                   events = COALESCE($4::text[], events),
                   is_active = COALESCE($5, is_active),
+                  credentials_enc = COALESCE($6, credentials_enc),
                   last_error = NULL
             WHERE id = $1`,
           [
@@ -306,6 +469,7 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
             JSON.stringify(config),
             req.body?.events ? cleanEvents(req.body.events) : null,
             typeof req.body?.isActive === 'boolean' ? req.body.isActive : null,
+            enc,
           ],
         );
       });
