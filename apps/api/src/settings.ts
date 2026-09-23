@@ -14,6 +14,7 @@ import {
   MetaApiError,
   decryptJson,
   graphGet,
+  parseTemplates,
   graphPost,
   safeEqual,
   telegramForwardSecret,
@@ -162,6 +163,166 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     });
     return { botPauseMinutes: minutes };
   });
+
+  /**
+   * Подключение номера WhatsApp.
+   *
+   * Через Cloud API: номер живёт в аккаунте WhatsApp Business клиента, а
+   * мы получаем к нему постоянный токен. Embedded Signup — «войти через
+   * Facebook и выбрать номер» — требует проверки приложения в Meta, и до
+   * неё подключение идёт токеном: так клиент может начать работать
+   * сегодня, а не через две недели ожидания.
+   *
+   * Проверяем номер сразу: спрашиваем у Meta, чей он и как выглядит.
+   * Иначе неверный идентификатор выясняется в момент, когда оператор
+   * отвечает клиенту, — то есть слишком поздно.
+   */
+  app.post<{ Body: { token?: string; phoneNumberId?: string; displayName?: string } }>(
+    '/settings/channels/whatsapp',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const token = (req.body?.token ?? '').trim();
+      const phoneNumberId = (req.body?.phoneNumberId ?? '').trim();
+      if (!token || !phoneNumberId) {
+        return reply.code(400).send({ error: 'token_and_number_required' });
+      }
+
+      let number: { display_phone_number?: string; verified_name?: string; id?: string };
+      try {
+        number = await graphGet(phoneNumberId, {
+          access_token: token,
+          fields: 'id,display_phone_number,verified_name,quality_rating',
+        });
+      } catch (err) {
+        return reply.code(400).send({
+          error: 'check_failed',
+          detail: err instanceof Error ? err.message : 'Meta не підтвердила номер',
+        });
+      }
+
+      const owner = await withSystem(pool, 'владелец номера WhatsApp', async (db) => {
+        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+          `SELECT channel_id, tenant_id FROM channel_routes
+            WHERE channel_type = 'whatsapp' AND external_id = $1 LIMIT 1`,
+          [phoneNumberId],
+        );
+        return rows[0] ?? null;
+      });
+
+      if (owner && owner.tenant_id !== auth.tenantId) {
+        return reply.code(409).send({
+          error: 'channel_belongs_to_another_tenant',
+          detail: 'Цей номер уже підключений в іншому акаунті.',
+        });
+      }
+
+      const channelId = owner?.channel_id ?? randomUUID();
+      const title =
+        req.body?.displayName?.trim() ||
+        number.verified_name ||
+        number.display_phone_number ||
+        'WhatsApp';
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, 'whatsapp', $3, $4, $5, $6, 'active')
+           ON CONFLICT (type, external_id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 credentials_enc = EXCLUDED.credentials_enc,
+                 meta = EXCLUDED.meta, status = 'active', last_error = NULL`,
+          [
+            channelId,
+            auth.tenantId,
+            title,
+            phoneNumberId,
+            // pageId и pageToken — общие имена для всех каналов Meta:
+            // отправка ходит через один и тот же код.
+            encryptJson(masterKey, auth.tenantId, { pageId: phoneNumberId, pageToken: token }),
+            JSON.stringify({
+              phone: number.display_phone_number ?? null,
+              verifiedName: number.verified_name ?? null,
+            }),
+          ],
+        );
+      });
+
+      return { channelId, phone: number.display_phone_number ?? null };
+    },
+  );
+
+  /**
+   * Одобренные шаблоны номера.
+   *
+   * Их показывают оператору вместо поля ответа, когда суточное окно
+   * закрыто. Список спрашиваем у Meta каждый раз: шаблон могли одобрить
+   * или отклонить пять минут назад, и устаревший список означает отказ
+   * при отправке.
+   */
+  app.get<{ Params: { id: string } }>(
+    '/channels/:id/whatsapp-templates',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const channel = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows } = await db.query<{ credentials_enc: Buffer; meta: Record<string, unknown> }>(
+          `SELECT credentials_enc, meta FROM channels
+            WHERE id = $1 AND type = 'whatsapp' LIMIT 1`,
+          [req.params.id],
+        );
+        return rows[0] ?? null;
+      });
+      if (!channel) return reply.code(404).send({ error: 'not_found' });
+
+      const creds = decryptJson<{ pageId: string; pageToken: string }>(
+        masterKey,
+        auth.tenantId,
+        channel.credentials_enc,
+      );
+
+      // Шаблоны принадлежат не номеру, а аккаунту WhatsApp Business.
+      // Его идентификатор спрашиваем у самого номера.
+      let wabaId = String(channel.meta?.['wabaId'] ?? '');
+      if (!wabaId) {
+        try {
+          const info = await graphGet<{ whatsapp_business_account?: { id?: string } }>(
+            creds.pageId,
+            { access_token: creds.pageToken, fields: 'whatsapp_business_account' },
+          );
+          wabaId = info.whatsapp_business_account?.id ?? '';
+          if (wabaId) {
+            await withTenant(pool, auth.tenantId, async (db) => {
+              await db.query(
+                `UPDATE channels SET meta = meta || jsonb_build_object('wabaId', $2::text)
+                  WHERE id = $1`,
+                [req.params.id, wabaId],
+              );
+            });
+          }
+        } catch {
+          wabaId = '';
+        }
+      }
+      if (!wabaId) return { templates: [], detail: 'Не вдалося визначити акаунт WhatsApp Business' };
+
+      try {
+        const raw = await graphGet(`${wabaId}/message_templates`, {
+          access_token: creds.pageToken,
+          limit: '100',
+        });
+        return { templates: parseTemplates(raw).filter((t) => t.status === 'APPROVED') };
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'templates_unavailable',
+          detail: err instanceof Error ? err.message : 'Meta не віддала шаблони',
+        });
+      }
+    },
+  );
 
   // ── Каналы ────────────────────────────────────────────────────────
   app.get('/channels', async (req, reply) => {

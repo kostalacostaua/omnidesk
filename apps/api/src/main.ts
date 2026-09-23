@@ -1246,6 +1246,14 @@ app.post<{
   Body: {
     text?: string;
     replyToExternalId?: string;
+    /**
+     * Одобренный шаблон WhatsApp.
+     *
+     * Вне суточного окна свободный текст запрещён самим WhatsApp, и
+     * единственный способ продолжить разговор — шаблон. Поэтому он
+     * проходит там, где обычный текст уже отклоняется.
+     */
+    template?: { name?: string; language?: string; params?: string[] };
     attachment?: {
       filename?: string;
       mime?: string;
@@ -1266,9 +1274,23 @@ app.post<{
     if (!auth) return reply.code(401).send({ error: 'unauthorized' });
 
     const text = (req.body?.text ?? '').trim();
+
+    /*
+     * Шаблон: имя и язык обязательны, остальное — значения переменных.
+     * Текст для ленты собирается в интерфейсе, здесь хранится то, что
+     * поедет в Meta.
+     */
+    const tpl = req.body?.template;
+    const template = tpl?.name
+      ? {
+          name: String(tpl.name),
+          language: String(tpl.language ?? 'uk'),
+          params: (tpl.params ?? []).map((p) => String(p)).slice(0, 10),
+        }
+      : null;
     const upload = req.body?.attachment;
     const fromQr = upload?.fromQuickReply;
-    if (!text && !upload?.dataBase64 && !fromQr?.id) {
+    if (!text && !upload?.dataBase64 && !fromQr?.id && !template) {
       return reply.code(400).send({ error: 'empty_text' });
     }
     if (text.length > 4096) {
@@ -1354,7 +1376,10 @@ app.post<{
         expiresAt: conv.window_expires_at,
       });
 
-      if (!verdict.allowed) {
+      // Шаблон — и есть разрешённый способ писать вне окна. Отказывать
+      // ему по тому же правилу означало бы запретить единственное, что
+      // WhatsApp там разрешает.
+      if (!verdict.allowed && !(template && verdict.requiresTemplate)) {
         return {
           error: 'window_closed' as const,
           reason: verdict.reason,
@@ -1380,6 +1405,7 @@ app.post<{
             Object.assign(
               text ? { text } : {},
               attachment ? { attachments: [attachment] } : {},
+              template ? { template } : {},
               req.body?.replyToExternalId
                 ? { replyToExternalId: req.body.replyToExternalId }
                 : {},

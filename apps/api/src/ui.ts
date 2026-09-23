@@ -1552,6 +1552,99 @@ function toggleTemplates(){
 }
 
 
+/* ── Шаблоны WhatsApp ─────────────────────────────────────────────
+   Вне суточного окна WhatsApp разрешает только их. Список берём у Meta
+   при каждом открытии: шаблон могли одобрить или отклонить только что,
+   а устаревший список означает отказ при отправке. */
+
+var WATPL = { list:[], conv:null };
+
+function waTemplates(box, c){
+  WATPL.conv = c;
+  box.innerHTML = L('<div class="blocked"><b>Вікно 24 години закрито.</b> ') +
+    L('WhatsApp дозволяє продовжити розмову лише погодженим шаблоном.</div>') +
+    L('<div id="waPick" class="hint">Завантажую шаблони...</div>');
+
+  api('/channels/' + c.channel_id + '/whatsapp-templates')
+    .then(function(d){
+      WATPL.list = d.templates || [];
+      if (!WATPL.list.length){
+        el('waPick').innerHTML = L('<div class="hint">Погоджених шаблонів немає. ') +
+          L('Створіть їх у кабінеті Meta: WhatsApp → Message templates.</div>');
+        return;
+      }
+      el('waPick').innerHTML =
+        '<div class="row2"><select id="waTpl">' +
+        WATPL.list.map(function(t, i){
+          return '<option value="' + i + '">' + esc(t.name) + ' · ' + esc(t.language) + '</option>';
+        }).join('') + '</select></div><div id="waVars"></div>' +
+        L('<div class="acts"><button id="waSend">Надіслати шаблон</button></div>') +
+        '<div class="err" id="waTplErr"></div>';
+
+      el('waTpl').onchange = waVars;
+      el('waSend').onclick = waSendTemplate;
+      waVars();
+    })
+    .catch(function(){
+      el('waPick').innerHTML = L('<div class="hint">Не вдалося отримати шаблони від Meta.</div>');
+    });
+}
+
+/* Значения переменных. Показываем и сам текст шаблона: по имени вроде
+   order_update_v3 оператор не поймёт, что именно уйдёт клиенту. */
+function waVars(){
+  var t = WATPL.list[Number(el('waTpl').value)] || {};
+  var rows = '';
+  for (var i = 1; i <= (t.variables || 0); i++){
+    rows += '<div class="row2"><input class="waVar" data-n="' + i + '" placeholder="{{' + i + '}}"></div>';
+  }
+  el('waVars').innerHTML =
+    '<div class="hint" style="white-space:pre-wrap">' + esc(t.body || '') + '</div>' + rows;
+}
+
+/* Подстановка значений вместо {{1}}, {{2}} …
+   Без регулярного выражения намеренно: обратные слэши в этом файле
+   запрещены — он целиком попадает в шаблонную строку, и «слэш эс»
+   доехал бы до браузера просто буквой «эс». */
+function waFill(text, params){
+  var out = String(text || '');
+  for (var i = 0; i < params.length; i++){
+    var n = String(i + 1);
+    out = out.split('{{' + n + '}}').join(params[i]);
+    out = out.split('{{ ' + n + ' }}').join(params[i]);
+  }
+  return out;
+}
+
+function waSendTemplate(){
+  var t = WATPL.list[Number(el('waTpl').value)];
+  if (!t) return;
+
+  var params = Array.prototype.map.call(document.querySelectorAll('.waVar'), function(x){
+    return x.value.trim();
+  });
+  if (params.some(function(v){ return !v })){
+    el('waTplErr').textContent = L('Заповніть усі значення шаблону');
+    return;
+  }
+
+  // В ленте показываем текст с подставленными значениями: оператор
+  // должен видеть, что именно ушло клиенту, а не имя шаблона.
+  var shown = waFill(t.body || t.name, params);
+
+  busy(el('waSend'), true);
+  api('/conversations/' + current + '/messages', { method:'POST', body:{
+    text: shown,
+    template: { name:t.name, language:t.language, params:params }
+  }})
+    .then(function(){ lastThread = null; loadThread(); renderComposer(true) })
+    .catch(function(e){
+      busy(el('waSend'), false);
+      el('waTplErr').textContent = ((e.payload||{}).detail) || L('Не вдалося надіслати');
+    });
+}
+
+
 /* ── Смайлы ───────────────────────────────────────────────────────
    Набор и вставка — общие с виджетом в карточке Zoho, они приходят
    из theme.ts. Здесь остаётся только показ и скрытие панели. */
@@ -2602,7 +2695,19 @@ function tabChannels(){
       L('<div class="acts"><button id="vbGo">Підключити</button></div>') +
       '<div class="err" id="vbErr"></div></div>' +
 
-      ['whatsapp_cloud','whatsapp_user','viber_user'].map(function(t){
+      '<div class="tile"><div class="t1"><div class="chico whatsapp">WA</div>' +
+      L('<div><div class="ttl">WhatsApp Business</div><div class="sub">Номер компанії через Cloud API</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Потрібні токен і <b>Phone number ID</b> з кабінету ') +
+      L('Meta for Developers: розділ WhatsApp → API Setup. Там же вкажіть адресу вебхука ') +
+      L('(вона у розділі «Інтеграції»).</div>') +
+      '<div class="row2"><input id="waTok" type="password" placeholder="EAAG..." autocomplete="off">' +
+      '<input id="waNum" placeholder="Phone number ID" autocomplete="off"></div>' +
+      L('<div class="acts"><button id="waGo">Підключити</button></div>') +
+      L('<div class="hint">Поза вікном 24 годин WhatsApp дозволяє лише погоджені шаблони — ') +
+      L('вони підтягнуться з вашого акаунта самі.</div>') +
+      '<div class="err" id="waErr"></div></div>' +
+
+      ['whatsapp_user','viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
           L('<div class="sub">Готується</div></div></div>') +
@@ -2619,6 +2724,19 @@ function tabChannels(){
       '</div>';
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
+
+    if (el('waGo')) el('waGo').onclick = function(){
+      el('waErr').textContent = '';
+      busy(el('waGo'), true);
+      api('/settings/channels/whatsapp', { method:'POST', body:{
+        token: el('waTok').value.trim(), phoneNumberId: el('waNum').value.trim()
+      }})
+        .then(function(){ toast(L('WhatsApp підключено')); tabChannels() })
+        .catch(function(e){
+          el('waErr').textContent = ((e.payload||{}).detail) || L('Не вдалося підключити');
+          busy(el('waGo'), false);
+        });
+    };
 
     if (el('vbGo')) el('vbGo').onclick = function(){
       el('vbErr').textContent = '';

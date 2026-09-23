@@ -37,6 +37,11 @@ import {
   pickScenario,
   VIBER_CHANNEL,
   ViberError,
+  waKind,
+  waMediaBody,
+  waTemplateBody,
+  waTextBody,
+  waNumber,
   normalizeViber,
   viberFetch,
   viberSend,
@@ -1729,7 +1734,12 @@ async function continueScenario(job: ScenarioJob): Promise<void> {
 interface OutboundRow {
   status: string;
   text: string | null;
-  content: { attachments?: OutAttachment[]; replyToExternalId?: string } | null;
+  content: {
+    attachments?: OutAttachment[];
+    replyToExternalId?: string;
+    /** Одобренный шаблон WhatsApp: вне суточного окна разрешён только он. */
+    template?: { name: string; language: string; params?: unknown[] };
+  } | null;
   peer_id: string | null;
   channel_type: string;
   credentials_enc: Buffer;
@@ -1995,6 +2005,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
 
   if (row.channel_type === VIBER_CHANNEL) return sendViber(job, row, row.peer_id);
 
+  if (row.channel_type === 'whatsapp') return sendWhatsApp(job, row, row.peer_id);
+
   if (row.channel_type !== 'telegram_bot') {
     // Осознанный отказ вместо тихой неправильной отправки.
     // telegram_business требует business_connection_id, у Meta свои методы.
@@ -2193,6 +2205,124 @@ async function sendViber(job: OutboundJob, row: OutboundRow, peerId: string): Pr
     }
     throw err;
   }
+}
+
+/**
+ * Отправка в WhatsApp.
+ *
+ * Три отличия от остальных каналов, и все три — правила WhatsApp, а не
+ * наши. Писать первым нельзя. Свободный текст живёт сутки после
+ * сообщения клиента, дальше — только одобренный шаблон. Вложение
+ * WhatsApp скачивает по ссылке, но публичной, а наше хранилище
+ * закрытое: поэтому файл сначала загружается в Meta.
+ */
+async function sendWhatsApp(job: OutboundJob, row: OutboundRow, peerId: string): Promise<void> {
+  const creds = decryptJson<MetaChannelCredentials>(masterKey, job.tenantId, row.credentials_enc);
+  const token = { access_token: creds.pageToken };
+  const to = waNumber(peerId);
+  const replyTo = row.content?.replyToExternalId;
+
+  const open = row.window_expires_at ? row.window_expires_at.getTime() > Date.now() : false;
+  const template = row.content?.template;
+
+  // Вне окна свободный текст отклонит сам WhatsApp. Отказываем раньше и
+  // понятными словами: иначе оператор видит «не доставлено» без причины.
+  if (!open && !template) {
+    await markFailed(job, { reason: 'window_closed', channelType: 'whatsapp' });
+    throw new UnrecoverableError('Окно 24 часа закрыто: вне его доступны только шаблоны');
+  }
+
+  let firstId: string | undefined;
+
+  try {
+    if (template) {
+      const r = await graphPost<{ messages?: Array<{ id: string }> }>(
+        `${creds.pageId}/messages`,
+        token,
+        waTemplateBody({
+          to,
+          name: template.name,
+          language: template.language,
+          params: (template.params ?? []).map((p: unknown) => String(p)),
+        }),
+      );
+      firstId = r.messages?.[0]?.id;
+    }
+
+    const attachment = (row.content?.attachments ?? []).find((a) => a.storageKey);
+    if (!template && attachment?.storageKey) {
+      const file = await storage.get(attachment.storageKey);
+      if (!file) {
+        await markFailed(job, { reason: 'attachment_missing' });
+        throw new UnrecoverableError('Вложение не найдено в хранилище');
+      }
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append(
+        'file',
+        new Blob([new Uint8Array(file.body)], {
+          type: attachment.mime || 'application/octet-stream',
+        }),
+        attachment.filename || 'file',
+      );
+      const up = await graphPost<{ id: string }>(`${creds.pageId}/media`, token, form);
+
+      const r = await graphPost<{ messages?: Array<{ id: string }> }>(
+        `${creds.pageId}/messages`,
+        token,
+        waMediaBody({
+          to,
+          mediaId: up.id,
+          kind: waKind(attachment.type, attachment.mime),
+          ...(row.text ? { caption: row.text } : {}),
+          ...(attachment.filename ? { filename: attachment.filename } : {}),
+          ...(replyTo ? { replyTo } : {}),
+        }),
+      );
+      firstId = firstId ?? r.messages?.[0]?.id;
+    } else if (!template && row.text) {
+      const r = await graphPost<{ messages?: Array<{ id: string }> }>(
+        `${creds.pageId}/messages`,
+        token,
+        waTextBody({ to, text: row.text, ...(replyTo ? { replyTo } : {}) }),
+      );
+      firstId = firstId ?? r.messages?.[0]?.id;
+    }
+  } catch (err) {
+    if (!(err instanceof MetaApiError)) throw err;
+    if (err.tokenInvalid) {
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE channels SET status = 'degraded',
+                  last_error = '{"reason":"token_revoked"}'::jsonb
+            WHERE id = $1`,
+          [job.channelId],
+        );
+      });
+      await markFailed(job, { reason: 'token_revoked', code: err.body.code });
+      await announceChannelDown(job.tenantId, job.channelId, 'Токен WhatsApp відкликано');
+      throw new UnrecoverableError('Токен WhatsApp отозван — подключите номер заново');
+    }
+    if (err.rateLimited) {
+      log('warn', 'Лимит WhatsApp, притормаживаю', { messageId: job.messageId });
+      throw err;
+    }
+    await markFailed(job, { reason: 'whatsapp_refused', detail: err.body.message ?? '' });
+    throw new UnrecoverableError(`WhatsApp отказал: ${err.body.message ?? 'без описания'}`);
+  }
+
+  if (!firstId) {
+    await markFailed(job, { reason: 'empty_message' });
+    throw new UnrecoverableError('Нечего отправлять: ни текста, ни вложения');
+  }
+
+  await withTenant(pool, job.tenantId, async (db) => {
+    await db.query(
+      `UPDATE messages SET status = 'sent', external_id = $2 WHERE id = $1 AND status = 'pending'`,
+      [job.messageId, firstId],
+    );
+  });
+  log('info', 'Отправлено в WhatsApp', { messageId: job.messageId, externalId: firstId });
 }
 
 /**
