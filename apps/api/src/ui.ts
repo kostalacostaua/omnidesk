@@ -37,7 +37,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script data-theme-boot>${THEME_JS}${EMOJI_JS}</script>
@@ -86,12 +86,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
     #app:not(.thread-open) #thread{display:none}}
 
   /* ─── Панель разделов ──────────────────────────────────────────── */
-  #rail{background:var(--rail);border-right:1px solid var(--line);display:flex;
+  #rail{background:var(--rail);border-right:1px solid var(--glass-line);display:flex;
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
     flex-direction:column;align-items:center;padding:12px 0;gap:2px}
   #rail .logo{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
     margin-bottom:14px}
   #rail .logo svg{width:28px;height:28px;display:block}
-  .rbtn{background:transparent;border:0;color:var(--railT);width:52px;padding:8px 0;
+  .rbtn{background:transparent;border:0;color:var(--railT);width:54px;padding:9px 0;
+    border-radius:var(--r2);
     border-radius:6px;font-size:10px;font-weight:600;display:flex;flex-direction:column;
     align-items:center;gap:5px;cursor:pointer;line-height:1.2;position:relative}
   .rbtn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6;
@@ -99,7 +101,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .rbtn{box-shadow:none;transition:background-color .13s ease,color .13s ease,transform .06s ease}
   .rbtn:hover{color:var(--t1);background:var(--hover)}
   .rbtn:active{transform:scale(.94)}
-  .rbtn.on{color:var(--railOn);background:var(--railOnBg)}
+  .rbtn.on{color:var(--railOn);background:var(--railOnBg);
+    box-shadow:var(--sheen-soft),0 6px 16px -10px rgba(11,16,34,.4)}
   .rbtn.live{color:var(--good)}
   .rbtn .cnt{position:absolute;top:3px;right:6px;min-width:16px;height:16px;border-radius:8px;
     background:var(--crit);color:#fff;font-size:9.5px;font-weight:700;display:flex;
@@ -331,6 +334,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .stab:active{transform:none}
   .stab.on{color:var(--t1);border-color:var(--accent)}
   .sbody{padding:16px;overflow-y:auto;min-height:240px;flex:1}
+  /* Профиль: шапка, строки данных и числа. Не таблица и не карточки
+     в ряд — обычное представление, в котором правится то, что можно
+     править, и видно, что править нельзя. */
+  .prof{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:14px;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r2)}
+  .prof-av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;
+    align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:20px;
+    background-size:cover;background-position:center}
+  .prof-nm{font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .prof-sub{font-size:12.5px;color:var(--t3);margin-top:2px}
+  .prow{display:flex;align-items:flex-start;gap:14px;padding:11px 0;
+    border-bottom:1px solid var(--line)}
+  .prow:last-of-type{border-bottom:0}
+  .prow .pk{width:150px;flex:none;color:var(--t3);font-size:12.5px;padding-top:2px}
+  .prow .pv{flex:1;min-width:0;font-size:13.5px}
+  .prow>button{flex:none}
+  .nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .numbox{background:var(--panel);border:1px solid var(--line);border-radius:var(--r2);
+    padding:14px 16px}
+  .numbox .n{font-size:24px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .numbox .l{font-size:12px;color:var(--t3);margin-top:2px}
+  @media(max-width:620px){
+    .prow{flex-wrap:wrap}
+    .prow .pk{width:100%}
+  }
   .kv{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;font-size:12.5px}
   .kv .k{color:var(--t3)}
   .kv code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
@@ -489,15 +517,19 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #app:not([data-view="chats"]) #card{display:none}
   #app:not([data-view="chats"]){grid-template-columns:66px minmax(0,1fr)}
   #app:not([data-view="chats"]) #page{display:block}
-  .pg{max-width:1080px;margin:0 auto;padding:30px 28px 60px}
+  /* Колонка уже прежней: строка длиной во весь экран читается плохо,
+     а на широком мониторе содержимое расползалось по краям. */
+  .pg{max-width:900px;margin:0 auto;padding:38px 28px 70px}
   .pg-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
     margin-bottom:22px;flex-wrap:wrap}
-  .pg-head h2{margin:0;font-size:26px;font-weight:800;letter-spacing:-.03em;
+  .pg-head h2{margin:0;font-size:29px;font-weight:700;letter-spacing:-.025em;
     font-family:var(--font-display,var(--font))}
   .pg-head p{margin:6px 0 0;color:var(--t2);font-size:13px;max-width:62ch;line-height:1.55}
-  .pg-sec{margin-top:26px}
-  .pg-sec h3{margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.09em;
-    color:var(--t3);font-weight:700}
+  .pg-sec{margin-top:30px}
+  /* Подпись раздела, а не ещё один заголовок: капслок мелким кеглем
+     отделяет разделы, не перебивая название страницы. */
+  .pg-sec h3{margin:0 0 12px;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--t3);font-weight:600}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
   .tile{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);
@@ -600,11 +632,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   <nav id="rail">
     <div class="logo" id="logo" title="К чатам" style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
     <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
-    <button class="rbtn" data-view="channels" data-icon="plug">Каналы</button>
-    <button class="rbtn" data-view="bots" data-icon="bot">Сценарии</button>
+    <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1">Каналы</button>
+    <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1">Сценарии</button>
     <button class="rbtn" data-view="replies" data-icon="bolt">Шаблоны</button>
-    <button class="rbtn" data-view="integrations" data-icon="link">Интеграции</button>
-    <button class="rbtn" data-view="users" data-icon="team">Команда</button>
+    <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1">Интеграции</button>
+    <button class="rbtn" data-view="users" data-icon="team" data-admin="1">Команда</button>
     <div class="grow"></div>
     <button class="rbtn" id="themeTitle" data-icon="sun">Тема</button>
     <button class="rbtn" id="bell" data-icon="bell">Звук</button>
@@ -689,6 +721,9 @@ var current = null, convs = [], timer = null;
 var QR = [], CHANNELS = [], USERS = [], ME = null, COUNTS = {};
 // Подключён ли ИИ: от этого зависит, показывать ли кнопку черновика.
 var AI = { ready:false };
+// Роль вошедшего. До ответа сервера считаем оператором: показать
+// лишнее и убрать — хуже, чем показать нужное чуть позже.
+var ROLE = 'agent';
 var F = { status:'open', assignee:'all', channelId:'', q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
@@ -1949,36 +1984,149 @@ function sErr(e){
     esc((e && e.message) || 'ошибка') + '</div></div>';
 }
 
+/**
+ * Профиль.
+ *
+ * Было три карточки-колонки с двоеточиями — витрина, на которой ничего
+ * нельзя тронуть. Стало обычное представление: шапка с именем и ролью,
+ * под ней строки данных, у изменяемых — кнопка «Изменить». Правится на
+ * месте, без перехода на другую страницу: правка тут одна-две, и ради
+ * неё открывать отдельный экран незачем.
+ *
+ * Название организации меняет только администратор — это вывеска
+ * компании, а не подпись оператора. Почта не меняется вовсе: по ней
+ * приходит код входа, и её смена — это смена ключа от аккаунта.
+ */
 function tabProfile(){
   api('/me').then(function(d){
     ME = d;
+    ROLE = (d && d.user && d.user.role) || 'agent';
+    applyRole();
+
     var t = d.tenant || {}, u = d.user || {}, c = d.counts || {};
+    var admin = isAdmin();
+
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Профиль и организация', 'Кто вы в системе и что сейчас подключено.') +
-      '<div class="grid">' +
-      '<div class="card"><h3>Организация</h3><div class="kv">' +
-      '<div class="k">Название</div><div>' + esc(t.name) + '</div>' +
-      '<div class="k">Идентификатор</div><div><code>' + esc(t.slug) + '</code></div>' +
-      '<div class="k">Тариф</div><div>' + esc(t.plan || 'trial') +
-        ' · мест: ' + esc(t.seats_limit) + '</div>' +
-      '<div class="k">Регион данных</div><div>' + esc((t.region || 'eu').toUpperCase()) + '</div>' +
-      '<div class="k">Подключена</div><div>' + esc(fmtDate(t.created_at)) + '</div>' +
+      pageHead('Профиль', 'Ваши данные и данные организации.') +
+
+      '<div class="prof">' +
+      '<div class="prof-av" style="background-color:' + avatarColor(u.full_name || u.email || 'x') + '">' +
+        esc(initials(u.full_name || u.email)) + '</div>' +
+      '<div style="min-width:0">' +
+      '<div class="prof-nm" id="pfName">' + esc(u.full_name || 'Без имени') + '</div>' +
+      '<div class="prof-sub">' + esc(u.email || '') + '</div>' +
+      '</div>' +
+      '<div class="grow"></div>' +
+      '<span class="pill">' + esc(ROLES[u.role] || u.role || '') + '</span>' +
+      '</div>' +
+
+      '<div class="pg-sec"><h3>Вы</h3><div class="card">' +
+      row('Имя', esc(u.full_name || '—'), 'nm', true) +
+      row('Почта', esc(u.email || '—'), 'em', false,
+        'Почта — это вход в аккаунт. Сменить её может администратор, выслав приглашение на новую.') +
+      row('Роль', esc(ROLES[u.role] || u.role || '—'), 'rl', false,
+        admin ? 'Роли раздаются в разделе «Команда».'
+              : 'Роль назначает владелец или администратор.') +
+      row('В системе с', esc(fmtDate(u.created_at)), 'sn', false) +
+      '<div class="err" id="pfErr"></div>' +
       '</div></div>' +
 
-      '<div class="card"><h3>Ваш профиль</h3><div class="kv">' +
-      '<div class="k">Имя</div><div>' + esc(u.full_name || '—') + '</div>' +
-      '<div class="k">Почта</div><div>' + esc(u.email) + '</div>' +
-      '<div class="k">Роль</div><div>' + esc(ROLES[u.role] || u.role) + '</div>' +
-      '<div class="k">В системе с</div><div>' + esc(fmtDate(u.created_at)) + '</div>' +
+      '<div class="pg-sec"><h3>Организация</h3><div class="card">' +
+      row('Название', esc(t.name || '—'), 'org', admin) +
+      row('Идентификатор', '<code>' + esc(t.slug || '') + '</code>', 'sl', false,
+        'По нему адрес вашей компании в сервисе. Он не меняется.') +
+      row('Тариф', esc(t.plan || 'trial') + ' · мест: ' + esc(t.seats_limit), 'pl', false) +
+      row('Регион данных', esc((t.region || 'eu').toUpperCase()), 'rg', false,
+        'Где физически лежат переписки и файлы.') +
+      row('Подключена', esc(fmtDate(t.created_at)), 'cr', false) +
+      '<div class="err" id="orgErr"></div>' +
       '</div></div>' +
 
-      '<div class="card"><h3>Сейчас в аккаунте</h3><div class="kv">' +
-      '<div class="k">Каналов</div><div>' + esc(c.channels) + '</div>' +
-      '<div class="k">Сотрудников</div><div>' + esc(c.users) + '</div>' +
-      '<div class="k">Диалогов</div><div>' + esc(c.conversations) + '</div>' +
-      '<div class="k">Сообщений</div><div>' + esc(c.messages) + '</div>' +
-      '</div></div></div></div>';
+      '<div class="pg-sec"><h3>Сейчас в аккаунте</h3>' +
+      '<div class="nums">' +
+      num(c.channels, 'каналов') + num(c.users, 'сотрудников') +
+      num(c.conversations, 'диалогов') + num(c.messages, 'сообщений') +
+      '</div></div>' +
+      '</div>';
+
+    // Правка имени человека.
+    if (el('edit-nm')) el('edit-nm').onclick = function(){
+      editRow('nm', u.full_name || '', function(value){
+        return api('/me', { method:'PATCH', body:{ fullName: value } }).then(function(){
+          toast('Имя изменено');
+          tabProfile();
+        });
+      }, 'pfErr');
+    };
+
+    // Правка названия организации — только у администратора.
+    if (el('edit-org')) el('edit-org').onclick = function(){
+      editRow('org', t.name || '', function(value){
+        return api('/tenant', { method:'PATCH', body:{ name: value } }).then(function(){
+          toast('Название изменено');
+          tabProfile();
+        });
+      }, 'orgErr');
+    };
   }).catch(sErr);
+}
+
+/** Строка данных: подпись, значение, при необходимости — «Изменить». */
+function row(label, value, id, editable, hint){
+  return '<div class="prow" id="row-' + id + '">' +
+    '<div class="pk">' + esc(label) + '</div>' +
+    '<div class="pv" id="val-' + id + '">' + value +
+      (hint ? '<div class="hint" style="margin-top:2px">' + esc(hint) + '</div>' : '') + '</div>' +
+    (editable ? '<button class="ghost mini" id="edit-' + id + '">Изменить</button>'
+              : '<span></span>') +
+    '</div>';
+}
+
+/** Число с подписью: четыре таких заменяют таблицу из двух колонок. */
+function num(value, label){
+  return '<div class="numbox"><div class="n">' + esc(value == null ? '—' : value) + '</div>' +
+    '<div class="l">' + esc(label) + '</div></div>';
+}
+
+/**
+ * Правка на месте: строка превращается в поле с кнопками, Enter
+ * сохраняет, Esc возвращает как было. Отдельная форма здесь была бы
+ * длиннее самой правки.
+ */
+function editRow(id, value, save, errId){
+  var cell = el('val-' + id), btn = el('edit-' + id);
+  if (!cell || cell.dataset.editing) return;
+  cell.dataset.editing = '1';
+  btn.style.display = 'none';
+  cell.innerHTML = '<div class="row2"><input id="in-' + id + '"></div>' +
+    '<div class="row2" style="margin-top:6px">' +
+    '<button class="mini" id="ok-' + id + '">Сохранить</button>' +
+    '<button class="ghost mini" id="no-' + id + '">Отмена</button></div>';
+
+  var input = el('in-' + id);
+  input.value = value;
+  input.focus();
+  input.select();
+
+  function done(){ tabProfile() }
+
+  el('no-' + id).onclick = done;
+  el('ok-' + id).onclick = function(){
+    var v = input.value.trim();
+    if (!v){ el(errId).textContent = 'Пустое значение не сохраняется'; return }
+    busy(el('ok-' + id), true);
+    save(v).catch(function(e){
+      var p = e.payload || {};
+      el(errId).textContent = p.error === 'forbidden' ? (p.detail || 'Недостаточно прав')
+        : p.error === 'name_required' ? 'Пустое значение не сохраняется'
+        : 'Не удалось сохранить';
+      busy(el('ok-' + id), false);
+    });
+  };
+  input.onkeydown = function(e){
+    if (e.key === 'Enter') el('ok-' + id).click();
+    if (e.key === 'Escape') done();
+  };
 }
 
 /* ── Каналы ──────────────────────────────────────────────────────
@@ -3200,6 +3348,27 @@ function setView(view){
   }
 }
 
+/**
+ * Показать интерфейс по роли.
+ *
+ * Сервер и так откажет оператору в настройках — проверка стоит на
+ * каждом запросе. Но кнопка, которая отвечает «вам нельзя», хуже, чем
+ * её отсутствие: человек не должен упираться в запертые двери, чтобы
+ * понять, где его работа.
+ */
+function applyRole(){
+  var admin = ROLE === 'owner' || ROLE === 'admin';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-admin]'), function(b){
+    b.style.display = admin ? '' : 'none';
+  });
+  // Если оператор стоял в закрытом для него разделе — возвращаем в чаты.
+  if (!admin && el('app').dataset.view !== 'chats' && el('app').dataset.view !== 'profile'){
+    setView('chats');
+  }
+}
+
+function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
+
 function start(){
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
@@ -3209,7 +3378,11 @@ function start(){
 
   // Справочники грузим один раз при входе: без них список нельзя
   // отфильтровать по каналу, а кнопку «взять себе» — показать.
-  api('/me').then(function(d){ ME = d }).catch(function(){});
+  api('/me').then(function(d){
+    ME = d;
+    ROLE = (d && d.user && d.user.role) || 'agent';
+    applyRole();
+  }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
   api('/settings/ai').then(function(d){

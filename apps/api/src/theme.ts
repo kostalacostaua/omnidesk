@@ -33,8 +33,8 @@
 
 /** Набор значений тёмной темы. Подставляется в два селектора. */
 const DARK = `color-scheme:dark;
-    --bg:#080c1a;--bg2:#0d1226;--panel:rgba(20,27,51,.72);--solid:#141b33;--panel2:#1b2342;
-    --line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);--hover:rgba(255,255,255,.06);
+    --bg:#070a16;--bg2:#0d1226;--panel:rgba(22,29,54,.55);--solid:#141b33;--panel2:rgba(255,255,255,.06);
+    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);--hover:rgba(255,255,255,.07);
     --t1:#eef0f8;--t2:#a3a9bf;--t3:#7e86a3;
     --accent:#6d97ff;--accent-h:#8aadff;--on-accent:#0b1022;--link:#8aadff;
     --accent-soft:rgba(109,151,255,.16);
@@ -44,9 +44,16 @@ const DARK = `color-scheme:dark;
     --lift2:0 30px 80px -30px rgba(0,0,0,.85),0 4px 16px -8px rgba(0,0,0,.6);
     --good:#47cd89;--good-bg:rgba(71,205,137,.12);--warn:#fdb022;--warn-bg:rgba(253,176,34,.12);
     --crit:#f97066;--crit-bg:rgba(249,112,102,.12);
-    --rail:rgba(20,27,51,.6);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(109,151,255,.16);
-    --glass:rgba(20,27,51,.6);--glass-line:rgba(255,255,255,.1);
-    --glow:rgba(122,60,240,.26);`;
+    --rail:rgba(18,24,46,.55);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(255,255,255,.1);
+    --glass:rgba(22,29,54,.55);--glass-line:rgba(255,255,255,.1);
+    --glow:rgba(122,60,240,.34);
+    /* Блик по верхней кромке и мягкая внутренняя тень снизу — то, из
+       чего и состоит ощущение стекла: свет падает сверху. */
+    --sheen:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -1px 0 rgba(0,0,0,.25);
+    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.1);
+    --mesh:radial-gradient(60vw 48vh at 8% -6%,rgba(47,107,255,.22),transparent 60%),
+      radial-gradient(52vw 46vh at 102% 4%,rgba(122,60,240,.2),transparent 62%),
+      radial-gradient(46vw 44vh at 50% 108%,rgba(47,107,255,.12),transparent 60%);`;
 
 /**
  * Величины. Шкала отступов — шаг 4 пикселя: этого достаточно,
@@ -55,11 +62,18 @@ const DARK = `color-scheme:dark;
  */
 export const TOKENS_CSS = `
   :root{color-scheme:light;
-    --font:"Onest",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --font-display:"Onest",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    /* Шрифт. На технике Apple -apple-system отдаёт системный SF — тот
+       самый, за который любят их интерфейсы. Лицензия SF не позволяет
+       раздавать его веб-шрифтом, поэтому везде остальном берётся Inter:
+       он построен на тех же принципах и рядом с SF не спорит. */
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",ui-sans-serif,
+      "Segoe UI",Roboto,sans-serif;
+    --font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",
+      ui-sans-serif,"Segoe UI",sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --bg:#f5f6fb;--bg2:#eef1fa;--panel:rgba(255,255,255,.74);--solid:#fff;--panel2:#eceff8;
-    --line:rgba(11,16,34,.09);--line2:rgba(11,16,34,.16);--hover:rgba(11,16,34,.05);
+    --bg:#eef1f8;--bg2:#e6ebf7;--panel:rgba(255,255,255,.62);--solid:#fff;
+    --panel2:rgba(11,16,34,.045);
+    --line:rgba(11,16,34,.07);--line2:rgba(11,16,34,.13);--hover:rgba(11,16,34,.045);
     --t1:#0b1022;--t2:#5a6178;--t3:#8a90a6;
     --accent:#2657e0;--accent-h:#1c46c0;--on-accent:#fff;--link:#2657e0;
     --accent-soft:rgba(38,87,224,.1);
@@ -67,16 +81,26 @@ export const TOKENS_CSS = `
     --grad:linear-gradient(120deg,var(--brand1),var(--brand2));
     --ring:rgba(38,87,224,.26);
     --shadow:0 1px 2px rgba(11,16,34,.05);
-    --lift:0 10px 30px -12px rgba(11,16,34,.28),0 2px 8px -4px rgba(11,16,34,.14);
+    --lift:0 18px 44px -20px rgba(11,16,34,.3),0 2px 8px -4px rgba(11,16,34,.1);
     --lift2:0 30px 70px -28px rgba(11,16,34,.3),0 4px 14px -8px rgba(11,16,34,.14);
     --good:#067647;--good-bg:#e9faf1;--warn:#b54708;--warn-bg:#fff6e6;
     --crit:#d92d20;--crit-bg:#fdeeed;
-    --rail:rgba(255,255,255,.6);--railT:#8a90a6;--railOn:#0b1022;--railOnBg:rgba(38,87,224,.1);
-    --glass:rgba(255,255,255,.62);--glass-line:rgba(255,255,255,.7);
-    --glow:rgba(47,107,255,.18);
-    --blur:saturate(1.4) blur(20px);
+    --rail:rgba(255,255,255,.5);--railT:#6b7288;--railOn:#0b1022;--railOnBg:rgba(255,255,255,.75);
+    --glass:rgba(255,255,255,.62);--glass-line:rgba(255,255,255,.75);
+    --glow:rgba(47,107,255,.26);
+    /* Стекло — это не прозрачность, а свет на кромке: блик сверху и
+       тонкая внутренняя тень снизу. Без них поверхность выглядит
+       просто выцветшей. */
+    --sheen:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(11,16,34,.05);
+    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.75);
+    --mesh:radial-gradient(56vw 46vh at 6% -8%,rgba(47,107,255,.2),transparent 60%),
+      radial-gradient(50vw 44vh at 104% 2%,rgba(122,60,240,.16),transparent 62%),
+      radial-gradient(44vw 40vh at 52% 106%,rgba(47,107,255,.1),transparent 60%);
+    --blur:saturate(1.8) blur(22px);
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
-    --r1:6px;--r2:8px;--r3:12px;--r4:16px;--r5:24px;--rf:999px;
+    /* Радиусы крупнее прежних: у стекла край видно, и острый угол на
+       полупрозрачной поверхности выглядит сколом. */
+    --r1:10px;--r2:14px;--r3:18px;--r4:22px;--r5:28px;--rf:999px;
     --fast:.06s;--quick:.13s;--calm:.24s;--slow:.42s;
     --ease:cubic-bezier(.32,.72,0,1);}
   @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
@@ -90,9 +114,14 @@ export const TOKENS_CSS = `
  */
 export const BASE_CSS = `
   *{box-sizing:border-box}
+  /* Под стеклом должно что-то быть: на ровной заливке размытие не
+     видно вовсе. Пятна неяркие и неподвижные — это подложка, а не
+     украшение, и читаемость текста она не трогает. */
   body{margin:0;background:var(--bg);color:var(--t1);
-    font:13px/1.5 var(--font);-webkit-font-smoothing:antialiased;
-    text-rendering:optimizeLegibility}
+    font:13.5px/1.5 var(--font);-webkit-font-smoothing:antialiased;
+    letter-spacing:-.005em;text-rendering:optimizeLegibility}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:var(--mesh);background-attachment:fixed}
   a{color:var(--link);text-decoration:none}
   a:hover{text-decoration:underline}
   code,kbd,pre{font-family:var(--mono)}
@@ -102,11 +131,14 @@ export const BASE_CSS = `
   .err{color:var(--crit);font-size:12px;margin-top:6px}
   .ok{color:var(--good);font-size:12px;margin-top:6px}
 
-  textarea,input,select{width:100%;background:var(--panel);color:var(--t1);
-    border:1px solid var(--line2);border-radius:var(--r1);padding:8px 10px;
-    font:inherit;font-size:13px;resize:none;
-    transition:border-color var(--quick) ease,box-shadow var(--quick) ease}
-  textarea:hover,input:hover,select:hover{border-color:var(--t3)}
+  textarea,input,select{width:100%;background:var(--glass);color:var(--t1);
+    border:1px solid var(--line2);border-radius:var(--r1);padding:10px 13px;
+    font:inherit;font-size:13.5px;resize:none;
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen-soft);
+    transition:border-color var(--quick) ease,box-shadow var(--quick) ease,
+      background-color var(--quick) ease}
+  textarea:hover,input:hover,select:hover{border-color:var(--line2);background:var(--solid)}
   /* Кольцо вместо жирной обводки: контур толщиной в два пикселя
      визуально увеличивает поле и дёргает соседние элементы. */
   textarea:focus,input:focus,select:focus{outline:none;border-color:var(--link);
@@ -142,9 +174,11 @@ export const BASE_CSS = `
 
      Ни одна кнопка не переносится: подпись в две строки ломает высоту
      строки и читается как поломка вёрстки. */
-  button{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);
-    border-radius:var(--r1);padding:8px 13px;font:inherit;font-size:12.5px;font-weight:600;
-    cursor:pointer;white-space:nowrap;box-shadow:var(--shadow);position:relative;
+  button{background:var(--accent);color:var(--on-accent);border:1px solid transparent;
+    border-radius:var(--rf);padding:9px 16px;font:inherit;font-size:12.5px;font-weight:600;
+    letter-spacing:-.005em;
+    cursor:pointer;white-space:nowrap;position:relative;
+    box-shadow:var(--sheen),0 6px 18px -8px var(--glow);
     transition:background-color var(--quick) ease,border-color var(--quick) ease,
       color var(--quick) ease,box-shadow var(--quick) ease,transform var(--fast) ease,
       opacity var(--quick) ease}
@@ -156,9 +190,13 @@ export const BASE_CSS = `
   button:disabled{opacity:.5;cursor:default;transform:none;box-shadow:none}
   button:disabled:hover{background:var(--accent);border-color:var(--accent)}
 
-  button.ghost{background:var(--panel);color:var(--t2);border-color:var(--line2);font-weight:600}
-  button.ghost:hover{background:var(--hover);color:var(--t1);border-color:var(--t3)}
-  button.ghost:disabled:hover{background:var(--panel);border-color:var(--line2)}
+  /* Второстепенная кнопка — то же стекло, что и поверхность под ней:
+     она не спорит с основной, но и не выглядит выключенной. */
+  button.ghost{background:var(--glass);color:var(--t2);border-color:var(--line2);font-weight:600;
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen-soft)}
+  button.ghost:hover{background:var(--solid);color:var(--t1);border-color:var(--line2)}
+  button.ghost:disabled:hover{background:var(--glass);border-color:var(--line2)}
   button.quiet{background:transparent;color:var(--t2);border-color:transparent;box-shadow:none}
   button.quiet:hover{background:var(--hover);color:var(--t1);border-color:transparent}
   button.danger{background:var(--crit);border-color:var(--crit);color:#fff}
@@ -166,8 +204,8 @@ export const BASE_CSS = `
   button.grad{background:var(--grad);border-color:transparent;color:#fff;
     box-shadow:0 8px 24px -10px var(--glow)}
   button.grad:hover{background:var(--grad);filter:brightness(1.07)}
-  button.big{padding:13px 22px;font-size:14px;border-radius:var(--r2)}
-  .mini{padding:6px 10px;font-size:12px}
+  button.big{padding:14px 26px;font-size:14.5px}
+  .mini{padding:7px 13px;font-size:12px}
 
   /* Ожидание. Кнопка не просто гаснет — она показывает, что запрос идёт.
      Подпись прячется, а не заменяется словом «Подождите»: так не прыгает
@@ -209,20 +247,28 @@ export const KIT_CSS = `
     color:transparent}
 
   /* Карточка — единица содержимого. Всё остальное складывается из неё. */
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r3);
-    padding:var(--s4)}
+  /* Карточка — единица содержимого и главная стеклянная поверхность:
+     полупрозрачный слой, размытие под ним, блик по верхней кромке.
+     Где размытия нет (старый браузер), внизу файла лежит запасной
+     непрозрачный вид — иначе текст читался бы поверх пятен. */
+  .card{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r4);
+    padding:var(--s5);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),0 10px 30px -18px rgba(11,16,34,.3)}
   .card.pad5{padding:var(--s5)}
   .card.flat{background:transparent;border-color:var(--line)}
 
   /* Плитка — карточка, на которую нажимают. Отличается только тем,
      что отвечает на наведение: поднимается и подсвечивает рамку. */
-  .tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--r3);
-    padding:var(--s4);text-align:left;cursor:pointer;color:inherit;box-shadow:none;
+  .tile{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r4);
+    padding:var(--s5);text-align:left;cursor:pointer;color:inherit;
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),0 10px 30px -18px rgba(11,16,34,.3);
     font-weight:400;white-space:normal;
     transition:transform var(--quick) var(--ease),box-shadow var(--quick) ease,
       border-color var(--quick) ease,background-color var(--quick) ease}
-  .tile:hover{background:var(--panel);border-color:var(--line2);transform:translateY(-2px);
-    box-shadow:var(--lift)}
+  .tile:hover{border-color:var(--line2);transform:translateY(-2px);
+    box-shadow:var(--sheen),var(--lift)}
   .tile:active{transform:translateY(0)}
 
   /* Статус. Цвет здесь несёт смысл, поэтому набор закрыт: четыре
@@ -322,7 +368,27 @@ export const KIT_CSS = `
 `;
 
 /** Всё оформление подряд: токены, теги, блоки. */
-export const BRAND_CSS = TOKENS_CSS + BASE_CSS + KIT_CSS;
+/**
+ * Запасной вид там, где размытия нет.
+ *
+ * Стекло держится на backdrop-filter. Если браузер его не умеет,
+ * полупрозрачная поверхность превращается в мутное пятно поверх
+ * цветной подложки — текст на таком читать нельзя. Поэтому без
+ * размытия поверхности становятся обычными непрозрачными.
+ */
+export const GLASS_FALLBACK_CSS = `
+  @supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
+    .card,.tile,button.ghost,textarea,input,select,#rail,.emobox,.tplbox{
+      background:var(--solid)}
+    body::before{opacity:.35}
+  }
+  @media(prefers-reduced-transparency:reduce){
+    .card,.tile,button.ghost,textarea,input,select,#rail{background:var(--solid)}
+    body::before{opacity:.25}
+  }
+`;
+
+export const BRAND_CSS = TOKENS_CSS + BASE_CSS + KIT_CSS + GLASS_FALLBACK_CSS;
 
 /**
  * Переключатель темы.
