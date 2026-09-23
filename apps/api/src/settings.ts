@@ -299,7 +299,13 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       });
 
       if (subscribe) {
-        app.log.warn({ channelId, reason: subscribe }, 'Аккаунт WhatsApp не подписан на приложение');
+        // Причина уезжает прямо в текст сообщения: вложенные поля
+        // видны не во всех просмотрщиках логов, и ошибка, ради
+        // которой всё это писалось, там как раз и терялась.
+        app.log.warn(
+          { channelId },
+          'Аккаунт WhatsApp не подписан на приложение: ' + subscribe,
+        );
       }
 
       return {
