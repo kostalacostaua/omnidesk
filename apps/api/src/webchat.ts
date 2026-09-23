@@ -214,8 +214,17 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
           direction: string;
           body: string | null;
           sent_at: Date;
+          at_us: string;
         }>(
-          `SELECT m.id, m.direction, m.content->>'text' AS body, m.sent_at
+          // Метка времени возвращается ещё и строкой с микросекундами.
+          // Драйвер отдаёт timestamptz как Date, а у Date точность —
+          // миллисекунда, и «19:22:00.123456» превращается в
+          // «19:22:00.123». Отправленное обратно как after, это значение
+          // снова меньше исходного, условие sent_at > after опять
+          // истинно, и последнее сообщение возвращается при каждом
+          // опросе — раз в три секунды, бесконечно.
+          `SELECT m.id, m.direction, m.content->>'text' AS body, m.sent_at,
+                  to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at_us
              FROM messages m
              JOIN conversations c ON c.id = m.conversation_id
              JOIN contact_identities ci ON ci.contact_id = c.contact_id
@@ -223,7 +232,7 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
               AND c.channel_id = $3
               AND ($4::timestamptz IS NULL OR m.sent_at > $4::timestamptz)
               AND m.content->>'text' IS NOT NULL
-            ORDER BY m.sent_at
+            ORDER BY m.sent_at, m.id
             LIMIT 200`,
           [WEBCHAT_CHANNEL, visitorId, row.channel_id, after && !isNaN(after.getTime()) ? after : null],
         );
@@ -236,6 +245,8 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
           mine: m.direction === 'in',
           text: m.body ?? '',
           at: m.sent_at,
+          /** Метка для следующего опроса: та же, но без потери точности. */
+          cursor: m.at_us,
         })),
       };
     },
@@ -487,6 +498,10 @@ export function chatPage(
      возвращаются при опросе. Чтобы не нарисовать их дважды, держим
      список только что отправленных и гасим совпадение при возврате. */
   var pending = [];
+  /* Показанные сообщения по их номеру. Метка времени как курсор —
+     вещь хрупкая: хватает одной потерянной доли секунды, чтобы одно и
+     то же сообщение возвращалось при каждом опросе. Номер не врёт. */
+  var shown = {};
 
   function parentSay(data){
     try { if (window.parent !== window) window.parent.postMessage(data, '*') } catch(e){}
@@ -534,7 +549,10 @@ export function chatPage(
       var list = d.messages || [];
       for (var i = 0; i < list.length; i++){
         var m = list[i];
-        after = m.at;
+        after = m.cursor || m.at;
+
+        if (m.id && shown[m.id]) continue;
+        if (m.id) shown[m.id] = 1;
 
         if (m.mine){
           var seen = pending.indexOf(m.text);
