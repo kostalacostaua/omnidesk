@@ -575,6 +575,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.instagram{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
   .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
   .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
+  .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.soon{background:var(--panel2);color:var(--t3)}
   .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;
     background:var(--panel2);color:var(--t2);white-space:nowrap}
@@ -827,7 +828,7 @@ function fmtDate(iso){
 var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
-  messenger:'Messenger', viber_bot:'Viber', viber_user:L('Viber номерний') };
+  messenger:'Messenger', viber_business:L('Viber для бізнесу') };
 
 var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
 
@@ -1195,9 +1196,15 @@ function renderComposer(force){
   if (!w.open){
     // Не прячем поле молча — объясняем, почему нельзя. Иначе оператор
     // решит, что сломался интерфейс, и пойдёт писать в поддержку.
+    // Не прячем поле молча — объясняем, почему нельзя. Причина у каналов
+    // разная: в WhatsApp остаются шаблоны, в Viber не остаётся ничего,
+    // пока клиент не напишет сам. Обещать шаблоны там — обманывать.
     box.innerHTML = L('<div class="blocked"><b>Вікно відповіді закрито.</b> ') +
       L('Вільний текст надіслати не можна — так влаштовані правила каналу, ') +
-      L('а не наш застосунок. Доступні тільки схвалені шаблони.</div>');
+      L('а не наш застосунок. ') +
+      (c.channel_type === 'viber_business'
+        ? L('Viber закриває сесію через добу: відповісти можна буде, коли клієнт напише знову.</div>')
+        : L('Доступні тільки схвалені шаблони.</div>'));
     return;
   }
 
@@ -2320,7 +2327,7 @@ function editRow(id, value, save, errId){
    автоответы и расписание, и в списке им места нет. */
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
-  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_bot:'VB', viber_user:'VB' };
+  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB' };
 
 function chPill(c){
   return c.status === 'active' ? L('<span class="pill ok">працює</span>')
@@ -2384,7 +2391,19 @@ function tabChannels(){
       L('<div class="row2"><input id="uname" placeholder="Назва, наприклад: Продажі" autocomplete="off">') +
       L('<button id="uqr">Показати QR-код</button></div><div id="uqrbox"></div></div>') +
 
-      ['whatsapp_cloud','whatsapp_user','viber_bot','viber_user'].map(function(t){
+      '<div class="tile"><div class="t1"><div class="chico viber_business">VB</div>' +
+      L('<div><div class="ttl">Viber для бізнесу</div><div class="sub">Імʼя відправника замість номера</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Особистого Viber за номером не існує: відкритого протоколу ') +
+      L('у них немає, а обхідні способи ведуть до блокування номера. Робочий варіант — Viber для бізнесу ') +
+      L('через офіційного партнера <b>TurboSMS</b>: клієнт бачить назву компанії, а не номер.</div>') +
+      L('<div class="hint">Ключ API і погоджене імʼя відправника — у кабінеті партнера, розділ Viber. ') +
+      L('Відповідати можна добу після повідомлення клієнта: далі Viber закриває сесію.</div>') +
+      '<div class="row2"><input id="vbToken" type="password" placeholder="API key" autocomplete="off">' +
+      L('<input id="vbSender" placeholder="Імʼя відправника"></div>') +
+      L('<div class="acts"><button id="vbGo">Підключити</button></div>') +
+      '<div class="err" id="vbErr"></div></div>' +
+
+      ['whatsapp_cloud','whatsapp_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
           L('<div class="sub">Готується</div></div></div>') +
@@ -2401,6 +2420,20 @@ function tabChannels(){
       '</div>';
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
+
+    if (el('vbGo')) el('vbGo').onclick = function(){
+      el('vbErr').textContent = '';
+      busy(el('vbGo'), true);
+      api('/settings/channels/viber', { method:'POST', body:{
+        token: el('vbToken').value.trim(), sender: el('vbSender').value.trim()
+      }})
+        .then(function(){ toast(L('Viber підключено')); tabChannels() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('vbErr').textContent = p.detail || L('Не вдалося підключити');
+          busy(el('vbGo'), false);
+        });
+    };
     el('metaGo').onclick = startMeta;
     if (S.metaError && !S.metaPick) { el('metaErr').textContent = S.metaError; S.metaError = null; }
     if (S.metaPick) showMetaPick(S.metaPick);
@@ -3131,6 +3164,8 @@ function errLabel(e){
   var r = (e && e.reason) || '';
   if (r === 'session_revoked') return L('сеанс завершено в Telegram — підключіть номер заново');
   if (r === 'token_revoked') return L('токен бота відкликано — підключіть заново');
+  if (r === 'bad_key') return L('ключ партнера не підійшов — перевірте його в кабінеті');
+  if (r === 'refused') return L('партнер відмовив — подробиці в кабінеті партнера');
   return L('помилка: ') + (typeof e === 'string' ? e : JSON.stringify(e));
 }
 

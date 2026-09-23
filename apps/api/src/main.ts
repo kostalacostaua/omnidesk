@@ -572,7 +572,7 @@ app.post('/channels/telegram', async (req, reply) => {
     );
     return reply.code(409).send({
       error: 'channel_belongs_to_another_tenant',
-      detail: 'Этот бот уже подключён в другом аккаунте. Отключите его там или возьмите другого бота.',
+      detail: 'Цей бот уже підключений в іншому акаунті. Відключіть його там або візьміть іншого бота.',
     });
   }
 
@@ -1203,7 +1203,7 @@ app.post<{
         app.log.error({ err, key }, 'Не удалось сохранить вложение');
         return reply.code(500).send({
           error: 'storage_write_failed',
-          detail: 'Хранилище не принимает запись. Проверьте том /data/media у контейнера api.',
+          detail: 'Сховище не приймає запис. Перевірте том /data/media у контейнера api.',
         });
       }
       attachment = {

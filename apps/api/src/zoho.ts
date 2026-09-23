@@ -342,7 +342,7 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
           req.params.id,
         ]);
       });
-      return reply.code(409).send({ error: 'token_rejected', detail: token.error ?? 'нет доступа' });
+      return reply.code(409).send({ error: 'token_rejected', detail: token.error ?? 'немає доступу' });
     }
 
     const users = await fetch(`${row.api_domain}/crm/v6/users?type=CurrentUser`, {

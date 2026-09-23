@@ -12,7 +12,13 @@ export type ChannelType =
   | 'telegram_bot'
   | 'telegram_business'
   /** Личный аккаунт Telegram по номеру телефона (MTProto, вход по QR). */
-  | 'telegram_user';
+  | 'telegram_user'
+  /**
+   * Viber для бизнеса через партнёра: имя отправителя вместо номера.
+   * Личного аккаунта Viber здесь нет и быть не может — открытого
+   * протокола у них нет, а обходные библиотеки ведут к блокировке.
+   */
+  | 'viber_business';
 
 export type Direction = 'in' | 'out';
 export type SenderType = 'customer' | 'agent' | 'bot' | 'system';
@@ -126,6 +132,11 @@ export function computeResponseWindow(
       return { type: 'standard', expiresAt: new Date(t + 24 * HOUR) };
 
     case 'telegram_business':
+      return { type: 'standard', expiresAt: new Date(t + 24 * HOUR) };
+
+    // Viber считает разговор сессией: клиент написал — сутки на ответ.
+    // То же правило, что у Instagram и Messenger, только без тега.
+    case 'viber_business':
       return { type: 'standard', expiresAt: new Date(t + 24 * HOUR) };
 
     case 'telegram_bot':

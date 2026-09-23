@@ -120,7 +120,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
     // у Gemini и OpenAI он разный, и заставлять его вводить незачем.
     const baseUrl = (b.baseUrl ?? '').trim() || PROVIDERS[provider].baseUrl;
     if (!/^https:\/\/\S+$/i.test(baseUrl)) {
-      return reply.code(400).send({ error: 'bad_url', detail: 'Адрес должен начинаться с https://' });
+      return reply.code(400).send({ error: 'bad_url', detail: 'Адреса має починатися з https://' });
     }
     const model = (b.model ?? '').trim();
     if (!model) return reply.code(400).send({ error: 'model_required' });

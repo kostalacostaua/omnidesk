@@ -34,6 +34,12 @@ import {
   withTenant,
   answerMatches,
   pickScenario,
+  VIBER_CHANNEL,
+  ViberError,
+  normalizeViber,
+  viberFetch,
+  viberSend,
+  type ViberCreds,
   AiError,
   askModel,
   needsHuman,
@@ -290,6 +296,13 @@ const scenarioQueue = new Queue<ScenarioJob>(QUEUE_SCENARIO, { connection, defau
 
 /** Связка контактов с CRM: поиск карточки и заведение лида. */
 const crmQueue = new Queue<CrmSyncJob>(QUEUE_CRM_SYNC, { connection, defaultJobOptions });
+
+/**
+ * Входящие. Воркер и сам их разбирает, и сам же кладёт — так приходят
+ * сообщения Viber: у партнёра нет вебхука, и спрашивать о новых
+ * приходится самим.
+ */
+const inboundQueue = new Queue<InboundJob>(QUEUE_INBOUND, { connection, defaultJobOptions });
 
 /**
  * Постановка вложений в очередь скачивания.
@@ -634,6 +647,31 @@ function extractWhatsAppPhoneNumberId(payload: MetaWebhookPayload): string | nul
 
 async function handleInbound(job: InboundJob): Promise<void> {
   if (job.provider === 'mtproto') return handleMtprotoInbound(job);
+
+  if (job.provider === 'viber') {
+    const channel = await findChannelById(job.channelId);
+    if (!channel) {
+      log('warn', 'Канал Viber не найден или отключён', { channelId: job.channelId });
+      return;
+    }
+
+    const m = normalizeViber(job.payload as never, {
+      tenantId: channel.tenant_id,
+      channelId: channel.id,
+    });
+    if (!m) return;
+
+    const { inserted, conversationId, contactId } = await persistMessage(m);
+    log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
+      channelId: channel.id, externalId: m.externalId, channelType: VIBER_CHANNEL,
+    });
+    if (inserted && contactId) await enqueueCrm(m, contactId, conversationId);
+    if (inserted && conversationId) {
+      const sent = await runBot(m, conversationId);
+      if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
+    }
+    return;
+  }
   if (job.provider === 'telegram') {
     const channel = await findChannelById(job.channelId);
     if (!channel) {
@@ -1759,6 +1797,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
     return sendMeta(job, row, row.peer_id, worker);
   }
 
+  if (row.channel_type === VIBER_CHANNEL) return sendViber(job, row, row.peer_id);
+
   if (row.channel_type !== 'telegram_bot') {
     // Осознанный отказ вместо тихой неправильной отправки.
     // telegram_business требует business_connection_id, у Meta свои методы.
@@ -1905,6 +1945,133 @@ const META_ATTACHMENT: Record<string, string> = {
  * ссылкой на публичный файл, а у нас хранилище закрытое; поэтому
  * вложения в Instagram пока честно отклоняем.
  */
+/**
+ * Отправка в Viber.
+ *
+ * Отвечать можно только в открытую сессию: клиент написал — сутки на
+ * ответ. Закрытая сессия у партнёра стоит денег (это уже рассылка, а
+ * не разговор), поэтому вне окна мы не отправляем вовсе, а честно
+ * помечаем сообщение неудачным — оператор видит причину.
+ */
+async function sendViber(job: OutboundJob, row: OutboundRow, peerId: string): Promise<void> {
+  const creds = decryptJson<ViberCreds>(masterKey, job.tenantId, row.credentials_enc);
+
+  const open = row.window_expires_at ? new Date(row.window_expires_at) > new Date() : false;
+  if (!open) {
+    await markFailed(job, { reason: 'window_closed', channelType: VIBER_CHANNEL });
+    throw new UnrecoverableError('Сессия Viber закрыта: клиент не писал больше суток');
+  }
+
+  // Партнёр забирает файл по ссылке, а не принимает его телом. Ссылку
+  // на наше хранилище отдавать нельзя: она открыла бы файл клиента
+  // всему интернету. Поэтому файлы в Viber пока не уходят — текст
+  // уходит, а на вложение оператор получает честный отказ.
+  const attachment = (row.content?.attachments ?? []).find((a) => a.storageKey);
+  if (attachment && !row.text) {
+    await markFailed(job, { reason: 'attachments_not_supported', channelType: VIBER_CHANNEL });
+    throw new UnrecoverableError('Вложения в Viber пока не отправляются');
+  }
+
+  try {
+    const externalId = await viberSend(
+      creds,
+      { chatId: peerId },
+      { ...(row.text ? { text: row.text } : {}) },
+    );
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2, sent_at = now() WHERE id = $1`,
+        [job.messageId, externalId],
+      );
+    });
+    log('info', 'Отправлено в Viber', { messageId: job.messageId, externalId });
+  } catch (err) {
+    const reason = err instanceof ViberError ? err.code : 'network';
+    const detail = err instanceof Error ? err.message : String(err);
+    await markFailed(job, { reason, detail });
+    // Ключ не подошёл — повтор не поможет, а очередь будет занята.
+    if (reason === 'bad_key' || reason === 'empty' || reason === 'no_recipient') {
+      throw new UnrecoverableError(detail);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Опрос Viber.
+ *
+ * У партнёра нет вебхука: он отдаёт новые сообщения по запросу. Поэтому
+ * воркер сам спрашивает «есть новое?» раз в двадцать секунд. Для чата
+ * это незаметно, а нагрузки почти нет: запрос возвращает пусто, пока
+ * никто не написал.
+ *
+ * Опрос живёт здесь, а не в службе опроса Telegram: та отказывается
+ * стартовать там, где настроены вебхуки, и в проде просто не работает.
+ */
+const VIBER_POLL_MS = 20_000;
+
+async function viberTick(): Promise<void> {
+  const routes = await withSystem(pool, 'каналы Viber', async (db) => {
+    const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+      `SELECT channel_id, tenant_id FROM channel_routes
+        WHERE channel_type = $1 AND status = 'active'`,
+      [VIBER_CHANNEL],
+    );
+    return rows;
+  });
+
+  for (const route of routes) {
+    try {
+      const creds = await withTenant(pool, route.tenant_id, async (db) => {
+        const { rows } = await db.query<{ credentials_enc: Buffer }>(
+          `SELECT credentials_enc FROM channels WHERE id = $1 AND status = 'active' LIMIT 1`,
+          [route.channel_id],
+        );
+        return rows[0]?.credentials_enc ?? null;
+      });
+      if (!creds) continue;
+
+      const viber = decryptJson<ViberCreds>(masterKey, route.tenant_id, creds);
+      const messages = await viberFetch(viber);
+      if (!messages.length) continue;
+
+      for (const message of messages) {
+        if (!message.incoming) continue;
+        // Идентификатор сообщения partner-side — ключ дедупликации:
+        // повторная выдача того же сообщения не создаст второе.
+        await inboundQueue.add('viber', {
+          provider: 'viber',
+          channelId: route.channel_id,
+          tenantId: route.tenant_id,
+          payload: message,
+          receivedAt: new Date().toISOString(),
+        }, { jobId: jobKey('vb', message.id) });
+      }
+
+      log('info', 'Получены сообщения Viber', {
+        channelId: route.channel_id, count: messages.length,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const reason = err instanceof ViberError ? err.code : 'network';
+      log('warn', 'Опрос Viber не удался', { channelId: route.channel_id, reason, detail });
+      // last_error — jsonb, и интерфейс читает из него `reason`: строкой
+      // тут записать нельзя, запрос упадёт на разборе JSON.
+      // Негодный ключ сам не починится: гасим канал, чтобы не долбить
+      // партнёра каждые двадцать секунд, и показываем это в интерфейсе.
+      const dead = reason === 'bad_key';
+      await withTenant(pool, route.tenant_id, async (db) => {
+        await db.query(
+          `UPDATE channels SET last_error = $2::jsonb${dead ? `, status = 'degraded'` : ''}
+            WHERE id = $1`,
+          [route.channel_id, JSON.stringify({ reason, detail: detail.slice(0, 300) })],
+        );
+      });
+    }
+  }
+}
+
 async function sendMeta(
   job: OutboundJob,
   row: OutboundRow,
@@ -2097,6 +2264,24 @@ scenarioWorker.on('failed', (job, err) => {
 });
 
 scenarioWorker.on('ready', () => log('info', 'Воркер сценариев запущен'));
+
+/**
+ * Опрос Viber запускается сразу и идёт по кругу.
+ *
+ * setInterval здесь не годится: медленный ответ партнёра наложился бы
+ * на следующий тик, и запросы пошли бы внахлёст. Пауза отсчитывается
+ * после окончания работы, а не до её начала.
+ */
+void (async function viberLoop(): Promise<void> {
+  for (;;) {
+    try {
+      await viberTick();
+    } catch (err) {
+      log('error', 'Цикл Viber упал', { error: err instanceof Error ? err.message : String(err) });
+    }
+    await new Promise((resolve) => setTimeout(resolve, VIBER_POLL_MS));
+  }
+})();
 
 /**
  * Воркер связки с CRM.

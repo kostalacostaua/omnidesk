@@ -178,7 +178,7 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
         // скрывать нечего, а молчание выглядело бы поломкой.
         return reply.code(429).send({
           error: 'too_many_requests',
-          detail: 'Слишком много запросов кода. Попробуйте через час.',
+          detail: 'Занадто багато запитів коду. Спробуйте через годину.',
         });
       }
 
@@ -205,7 +205,7 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
         app.log.error({ err, email }, 'Не удалось отправить код');
         return reply.code(502).send({
           error: 'mail_failed',
-          detail: 'Не удалось отправить письмо. Проверьте настройки почты на сервере.',
+          detail: 'Не вдалося надіслати лист. Перевірте налаштування пошти на сервері.',
         });
       }
     }

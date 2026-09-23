@@ -6,6 +6,9 @@ import type { Redis } from 'ioredis';
 import QRCode from 'qrcode';
 import {
   GRAPH_VERSION,
+  VIBER_CHANNEL,
+  ViberError,
+  viberSenders,
   META_LOGIN_SCOPES,
   PAGE_SUBSCRIBED_FIELDS,
   MetaApiError,
@@ -260,8 +263,8 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         return reply.code(result.error === 'not_found' ? 404 : 400).send({
           error: result.error,
           detail: result.error === 'role_unrestricted'
-            ? 'Владелец и администратор видят все каналы по своей роли'
-            : 'Сотрудник не найден',
+            ? 'Власник і адміністратор бачать усі канали за своєю роллю'
+            : 'Співробітника не знайдено',
         });
       }
 
@@ -465,6 +468,92 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     return { ok: true };
   });
 
+  /**
+   * Подключение Viber для бизнеса.
+   *
+   * «Номерного» Viber здесь нет намеренно: открытого протокола для
+   * личных аккаунтов у Viber не существует, а библиотеки, которые
+   * притворяются телефоном, нарушают правила — номер за это блокируют.
+   * Подключается Viber Business Messages через официального партнёра:
+   * клиент приносит ключ из кабинета и имя отправителя, которое
+   * прошло модерацию.
+   *
+   * Ключ проверяется сразу: список отправителей заодно показывает, то
+   * ли имя написал человек. Иначе про опечатку узнают в тот момент,
+   * когда клиент уже написал, а ответ не ушёл.
+   */
+  app.post<{ Body: { token?: string; sender?: string; displayName?: string } }>(
+    '/settings/channels/viber',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const token = (req.body?.token ?? '').trim();
+      const sender = (req.body?.sender ?? '').trim();
+      if (!token || !sender) return reply.code(400).send({ error: 'token_and_sender_required' });
+
+      let senders: Array<{ id: string; name: string; status: string }> = [];
+      try {
+        senders = await viberSenders(token);
+      } catch (err) {
+        const detail = err instanceof ViberError ? err.message : 'Партнер не відповів';
+        return reply.code(400).send({ error: 'check_failed', detail });
+      }
+
+      const found = senders.find((s) => s.name.toLowerCase() === sender.toLowerCase());
+      if (!found) {
+        return reply.code(400).send({
+          error: 'sender_not_found',
+          detail: senders.length
+            ? `У вас є відправники: ${senders.map((s) => s.name).join(', ')}`
+            : 'У цього ключа немає жодного відправника Viber',
+        });
+      }
+
+      const owner = await withSystem(pool, 'владелец канала Viber', async (db) => {
+        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+          `SELECT channel_id, tenant_id FROM channel_routes
+            WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
+          [VIBER_CHANNEL, found.name],
+        );
+        return rows[0] ?? null;
+      });
+
+      if (owner && owner.tenant_id !== auth.tenantId) {
+        return reply.code(409).send({
+          error: 'channel_belongs_to_another_tenant',
+          detail: 'Цей відправник уже підключений в іншому акаунті.',
+        });
+      }
+
+      const channelId = owner?.channel_id ?? randomUUID();
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+           ON CONFLICT (type, external_id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 credentials_enc = EXCLUDED.credentials_enc,
+                 meta = EXCLUDED.meta, status = 'active', last_error = NULL`,
+          [
+            channelId,
+            auth.tenantId,
+            VIBER_CHANNEL,
+            req.body?.displayName?.trim() || found.name,
+            found.name,
+            encryptJson(masterKey, auth.tenantId, { token, sender: found.name }),
+            JSON.stringify({ sender: found.name, senderStatus: found.status, partner: 'turbosms' }),
+          ],
+        );
+      });
+
+      app.log.info({ channelId, sender: found.name }, 'Подключён Viber для бизнеса');
+      return reply.code(201).send({ id: channelId, sender: found.name, status: found.status });
+    },
+  );
+
   // ── Подключение Telegram-бота из интерфейса ───────────────────────
   app.post<{ Body: { botToken?: string; displayName?: string; mode?: string } }>(
     '/settings/channels/telegram',
@@ -501,7 +590,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       if (owner && owner.tenant_id !== auth.tenantId) {
         return reply.code(409).send({
           error: 'channel_belongs_to_another_tenant',
-          detail: 'Этот бот уже подключён в другом аккаунте.',
+          detail: 'Цей бот уже підключений в іншому акаунті.',
         });
       }
 
