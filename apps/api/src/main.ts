@@ -38,6 +38,7 @@ import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { APP_ICON_SVG } from './brand.js';
+import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -94,9 +95,10 @@ const app = Fastify({
 
 // ─────────────────────────────────────────────────────────────────────────
 // Минимальный JWT (HS256). В проде возьмите библиотеку — здесь показан
-// принцип: токен живёт 15 минут и держится в памяти вкладки, не в cookie
-// (виджет работает в iframe Zoho, third-party cookies убьёт Safari ITP)
-// и не в localStorage (XSS).
+// принцип. Токен страницы живёт в localStorage, а рядом кладётся cookie
+// того же токена: без неё новая вкладка встречала форму входа у уже
+// вошедшего человека. Виджет внутри рамки Zoho cookie не получит
+// (SameSite), и входит заголовком — см. session.ts.
 // ─────────────────────────────────────────────────────────────────────────
 
 function b64url(input: Buffer | string): string {
@@ -146,6 +148,37 @@ function requireAuth(req: { headers: Record<string, unknown> }): AuthedRequest |
   if (typeof tenantId !== 'string' || typeof userId !== 'string') return null;
   return { tenantId, userId };
 }
+
+/** Запомнить вход в cookie. Вызывается страницей сразу после входа. */
+app.post('/auth/session', async (req, reply) => {
+  const header = req.headers['authorization'];
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  const token = header.slice(7);
+  if (!requireAuth(req as never)) return reply.code(401).send({ error: 'unauthorized' });
+  return reply
+    .header('set-cookie', sessionCookie(token, isHttps(req.headers['x-forwarded-proto']), SESSION_TTL))
+    .send({ ok: true });
+});
+
+/** Отдать токен новой вкладке, если сеанс ещё жив. */
+app.get('/auth/session', async (req, reply) => {
+  const token = readCookie(req.headers['cookie'], SESSION_COOKIE);
+  if (!token) return reply.code(401).send({ error: 'no_session' });
+  const payload = verifyJwt(token);
+  if (!payload) {
+    return reply
+      .header('set-cookie', sessionCookie('', isHttps(req.headers['x-forwarded-proto']), 0))
+      .code(401)
+      .send({ error: 'expired' });
+  }
+  return { token };
+});
+
+/** Выход: cookie гасится, иначе следующая вкладка снова войдёт. */
+app.delete('/auth/session', async (req, reply) =>
+  reply.header('set-cookie', sessionCookie('', isHttps(req.headers['x-forwarded-proto']), 0)).send({ ok: true }));
 
 // ─────────────────────────────────────────────────────────────────────────
 

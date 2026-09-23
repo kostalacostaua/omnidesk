@@ -2578,11 +2578,19 @@ function tabReplies(){
       '<div class="row2"><input id="qsc" placeholder="короткое имя, например цена"></div>' +
       '<div class="row2" style="margin-top:9px">' +
       '<textarea id="qbd" rows="3" placeholder="Текст, который подставится в поле ответа"></textarea>' +
-      '</div><div class="row2" style="margin-top:9px"><button id="qadd">Сохранить</button></div>' +
+      '</div>' +
+      // Файл прикладывается сразу при создании. Раньше кнопка «Файл»
+      // была только у сохранённого шаблона, и в пустом списке человек
+      // её не видел вовсе — выходило, что файлов у шаблонов нет.
+      '<div class="row2" style="margin-top:9px;display:flex;gap:8px;align-items:center">' +
+      '<button class="ghost mini" id="qnewFile">Приложить файл</button>' +
+      '<span class="dim" id="qnewName">файл не выбран</span></div>' +
+      '<div class="row2" style="margin-top:9px"><button id="qadd">Сохранить</button></div>' +
       '<div class="hint">В диалоге наберите <b>/имя</b> и нажмите Enter — текст развернётся ' +
       'в поле ответа, останется нажать Enter второй раз.</div>' +
       '<div class="err" id="qerr"></div>' +
-      '<input type="file" id="qrFile" style="display:none"></div>' +
+      '<input type="file" id="qrFile" style="display:none">' +
+      '<input type="file" id="qrNewFile" style="display:none"></div>' +
 
       '<div class="card"><h3>Шаблоны (' + QR.length + ')</h3>' +
       (QR.length ? QR.map(function(q){
@@ -2605,12 +2613,36 @@ function tabReplies(){
           '<button class="ghost mini" data-qr="' + q.id + '">Удалить</button></div></div>';
       }).join('') : '<div class="hint">Пока пусто.</div>') + '</div></div>';
 
+    // Файл к новому шаблону выбирается до сохранения и уезжает сразу
+    // после того, как шаблон получил свой номер.
+    var newFile = null;
+    el('qnewFile').onclick = function(){ el('qrNewFile').value = ''; el('qrNewFile').click() };
+    el('qrNewFile').onchange = function(){
+      var f = this.files && this.files[0];
+      if (!f) return;
+      if (f.size > 20 * 1024 * 1024){ alertLine('Файл больше 20 МБ — Telegram не пропустит'); return }
+      newFile = f;
+      el('qnewName').textContent = f.name;
+    };
+
     el('qadd').onclick = function(){
       el('qerr').textContent = '';
       busy(el('qadd'), true);
       api('/quick-replies', { method:'POST', body:{
         shortcut: el('qsc').value, body: el('qbd').value
-      }}).then(function(){ tabReplies(); renderComposer(true) })
+      }}).then(function(created){
+        var id = created && (created.quickReply ? created.quickReply.id : created.id);
+        if (!newFile || !id) return null;
+        var f = newFile;
+        return readAsBase64(f).then(function(b64){
+          return api('/quick-replies/' + id + '/attachment', { method:'POST', body:{
+            filename: f.name,
+            mime: f.type || 'application/octet-stream',
+            type: fileKind(f.type, f.name),
+            dataBase64: b64
+          }});
+        });
+      }).then(function(){ tabReplies(); renderComposer(true) })
         .catch(function(e){
           var p = e.payload || {};
           el('qerr').textContent = p.error === 'shortcut_too_long'
@@ -2746,13 +2778,31 @@ function paintAvatars(){
     fetch('/avatars/' + id, { headers:{ Authorization:'Bearer ' + TOKEN } })
       .then(function(r){ return r.ok ? r.blob() : Promise.reject(r.status) })
       .then(function(b){
+        // Пустой или не-картиночный ответ — это не лицо. Раньше такой
+        // файл всё равно шёл в фон, буква стиралась, и на месте
+        // аватарки оставался пустой серый кружок.
+        if (!b || !b.size || String(b.type || '').indexOf('image/') !== 0){
+          avatarCache[id] = false;
+          return;
+        }
         var url = URL.createObjectURL(b);
-        avatarCache[id] = url;
-        // Узел мог быть заменён перерисовкой, пока картинка ехала.
-        Array.prototype.forEach.call(document.querySelectorAll('[data-av="' + id + '"]'), function(n){
-          n.style.backgroundImage = 'url(' + url + ')';
-          n.textContent = '';
-        });
+        // Байты могут не быть картинкой, даже если так написано в
+        // заголовке: провайдер иногда отдаёт заглушку или обрезанный
+        // файл. Проверяем разбором и только потом стираем букву.
+        var probe = new Image();
+        probe.onload = function(){
+          avatarCache[id] = url;
+          // Узел мог быть заменён перерисовкой, пока картинка ехала.
+          Array.prototype.forEach.call(document.querySelectorAll('[data-av="' + id + '"]'), function(n){
+            n.style.backgroundImage = 'url(' + url + ')';
+            n.textContent = '';
+          });
+        };
+        probe.onerror = function(){
+          avatarCache[id] = false;
+          URL.revokeObjectURL(url);
+        };
+        probe.src = url;
       })
       .catch(function(){ avatarCache[id] = false; });
   });
@@ -2969,6 +3019,7 @@ function start(){
 
 function logout(){
   clearInterval(timer);
+  api('/auth/session', { method:'DELETE' }).catch(function(){});
   TOKEN = ''; current = null; convs = [];
   tokenWrite('');
   el('app').style.display = 'none';
@@ -3052,6 +3103,16 @@ function enterWith(token){
   TOKEN = token;
   tokenWrite(TOKEN);
   start();
+  sessionKeep();
+}
+
+/**
+ * Попросить сервер запомнить вход в cookie. Без неё новая вкладка
+ * видела форму входа у уже вошедшего человека: localStorage мог быть
+ * пуст, а вход сделан в соседней вкладке или внутри рамки Zoho.
+ */
+function sessionKeep(){
+  api('/auth/session', { method:'POST' }).catch(function(){});
 }
 
 el('ask').onclick = function(){
@@ -3190,7 +3251,23 @@ el('enter').onclick = function(){
 };
 el('tok').onkeydown = function(e){ if (e.key === 'Enter') el('enter').click() };
 
-if (TOKEN) start();
+/**
+ * Запуск. Токен в хранилище страницы — быстрый путь. Если его нет,
+ * спрашиваем сеанс у сервера: вход мог случиться в другой вкладке, а
+ * хранилище у неё своё (или его почистили). Форму входа показываем
+ * только когда и сеанса нет.
+ */
+if (TOKEN) {
+  start();
+  sessionKeep();
+} else {
+  api('/auth/session').then(function(d){
+    if (!d || !d.token) return;
+    TOKEN = d.token;
+    tokenWrite(TOKEN);
+    start();
+  }).catch(function(){});
+}
 })();
 </script>
 </body>
