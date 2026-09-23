@@ -38,6 +38,7 @@ import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
+import { denial, requiredLevel, roleAllows } from './roles.js';
 import { APP_ICON_SVG } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
@@ -180,6 +181,59 @@ app.get('/auth/session', async (req, reply) => {
 /** Выход: cookie гасится, иначе следующая вкладка снова войдёт. */
 app.delete('/auth/session', async (req, reply) =>
   reply.header('set-cookie', sessionCookie('', isHttps(req.headers['x-forwarded-proto']), 0)).send({ ok: true }));
+
+/**
+ * Права ролей — одной проверкой на все запросы.
+ *
+ * Раньше проверялся только вход: кто вошёл, тот мог всё — отключить
+ * канал, стереть сценарий, сменить ключ от модели, выдать себе роль
+ * владельца. Оператора нанимают отвечать клиентам, и такие права у
+ * него не удобство, а способ потерять компанию за вечер.
+ *
+ * Проверка стоит здесь, а не в полусотне обработчиков: там её однажды
+ * забудут дописать, и дыра появится в ручке, о которой никто не
+ * вспомнит. Что кому можно — в roles.ts, отдельно и с тестами.
+ *
+ * Роль берётся из базы, а не из токена: разжалованный оператор иначе
+ * оставался бы администратором до конца недели, пока жив его токен.
+ * Чтобы не ходить в базу на каждый запрос, ответ держится минуту —
+ * этого хватает, чтобы смена роли применилась почти сразу.
+ */
+const roleCache = new Map<string, { role: string; until: number }>();
+const ROLE_TTL_MS = 60_000;
+
+async function roleOf(tenantId: string, userId: string): Promise<string> {
+  const hit = roleCache.get(userId);
+  if (hit && hit.until > Date.now()) return hit.role;
+
+  const role = await withTenant(pool, tenantId, async (db) => {
+    const { rows } = await db.query<{ role: string }>(
+      `SELECT role FROM users WHERE id = $1 AND is_active LIMIT 1`,
+      [userId],
+    );
+    return rows[0]?.role ?? '';
+  });
+
+  roleCache.set(userId, { role, until: Date.now() + ROLE_TTL_MS });
+  return role;
+}
+
+app.addHook('preHandler', async (req, reply) => {
+  const path = (req.raw.url ?? '').split('?')[0] ?? '';
+  const level = requiredLevel(req.method, path);
+  if (level === 'any') return;
+
+  const auth = requireAuth(req as never);
+  // Не вошёл — пусть обработчик сам ответит 401: он знает, чем именно
+  // отвечать, а мы здесь занимаемся только правами.
+  if (!auth) return;
+
+  const role = await roleOf(auth.tenantId, auth.userId);
+  if (roleAllows(role, level)) return;
+
+  app.log.info({ userId: auth.userId, role, path, method: req.method }, 'Отказано по роли');
+  return reply.code(403).send({ error: 'forbidden', detail: denial(role, level) });
+});
 
 // ─────────────────────────────────────────────────────────────────────────
 

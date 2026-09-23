@@ -93,6 +93,46 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     return { tenant, ...data };
   });
 
+  /**
+   * Правка своего имени.
+   *
+   * Имя видно клиентам в подписи ответа и коллегам в списке
+   * ответственных, поэтому менять его человек должен сам, не прося
+   * администратора. Почта здесь не меняется: по ней приходит код
+   * входа, и смена почты — это смена ключа от аккаунта, такое делается
+   * через приглашение, а не текстовым полем в профиле.
+   */
+  app.patch<{ Body: { fullName?: string } }>('/me', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const fullName = (req.body?.fullName ?? '').trim().slice(0, 120);
+    if (!fullName) return reply.code(400).send({ error: 'name_required' });
+
+    await withTenant(pool, auth.tenantId, async (db) => {
+      await db.query(`UPDATE users SET full_name = $2 WHERE id = $1`, [auth.userId, fullName]);
+    });
+    return { ok: true, fullName };
+  });
+
+  /**
+   * Название организации. Оно попадает в письма и в карточку Zoho,
+   * поэтому правится в одном месте — и только администратором:
+   * это вывеска компании, а не подпись оператора.
+   */
+  app.patch<{ Body: { name?: string } }>('/tenant', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const name = (req.body?.name ?? '').trim().slice(0, 160);
+    if (!name) return reply.code(400).send({ error: 'name_required' });
+
+    await withSystem(pool, 'переименование организации', async (db) => {
+      await db.query(`UPDATE tenants SET name = $2 WHERE id = $1`, [auth.tenantId, name]);
+    });
+    return { ok: true, name };
+  });
+
   // ── Каналы ────────────────────────────────────────────────────────
   app.get('/channels', async (req, reply) => {
     const auth = requireAuth(req);
