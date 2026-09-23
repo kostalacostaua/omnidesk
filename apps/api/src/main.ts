@@ -243,6 +243,7 @@ registerInbox(app, { pool, requireAuth: (req) => requireAuth(req as never) });
 
 registerEmailAuth(app, {
   pool,
+  requireAuth: (req) => requireAuth(req as never),
   // Семь дней: смена не такая частая, чтобы просить код каждый день,
   // и не такая долгая, чтобы забытая вкладка жила месяцами.
   issueToken: (tenantId, userId) => signJwt({ sub: userId, tid: tenantId }, 7 * 24 * 3600),

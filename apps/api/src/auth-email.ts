@@ -2,15 +2,18 @@ import type { FastifyInstance } from 'fastify';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import type { Mailer } from './mailer.js';
 import { withSystem, withTenant, type Pool } from '@omnidesk/core';
+import { MIN_LENGTH, checkPassword, hashPassword, verifyPassword } from './password.js';
 
 /**
- * Вход по одноразовому коду на почту.
+ * Вход: одноразовый код на почту и, по желанию, пароль.
  *
- * Почему не пароль. Пароль для такого продукта — это форма
- * восстановления, форма смены, хранение хэшей, и главное: у половины
- * операторов он будет «123456» и записан на мониторе. Код на почту
- * снимает весь этот класс задач и заодно даёт бесплатное подтверждение,
- * что человек действительно владеет ящиком.
+ * Код остаётся основным способом: он ничего не требует от человека и
+ * заодно подтверждает, что ящик его. Пароль появился рядом, потому что
+ * оператор заходит в смену каждое утро, и письмо на каждый вход — это
+ * лишняя минута и зависимость от почты, которая может лежать.
+ *
+ * Пароль задаётся из профиля и только тем, кто уже вошёл: «забыли
+ * пароль» здесь не нужно — код на почту и есть восстановление.
  *
  * Что здесь принципиально:
  *
@@ -33,6 +36,8 @@ export interface EmailAuthDeps {
   allowSignup: boolean;
   /** Сообщить владельцу сервиса о новой компании. Не должно ронять вход. */
   onSignup?: (info: { email: string; company: string; tenantId: string }) => void;
+  /** Нужен для смены своего пароля: её делает только вошедший. */
+  requireAuth?: (req: unknown) => { tenantId: string; userId: string } | null;
 }
 
 const CODE_TTL_MIN = 10;
@@ -361,4 +366,132 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
       return { token: issueToken(chosen.tenant_id, chosen.user_id), tenant: chosen.tenant_name };
     },
   );
+
+  /**
+   * Вход по паролю.
+   *
+   * Ответ на неверную пару одинаков с ответом на «такой почты нет»:
+   * иначе форма входа отвечает на вопрос, работает ли у нас такой
+   * человек. Попытки считаются по почте — шесть символов подбираются
+   * быстро, если никто не считает.
+   */
+  app.post<{ Body: { email?: string; password?: string; tenantId?: string } }>(
+    '/auth/password',
+    async (req, reply) => {
+      const email = (req.body?.email ?? '').trim().toLowerCase();
+      const password = req.body?.password ?? '';
+      if (!email || !password) return reply.code(400).send({ error: 'email_and_password_required' });
+
+      const tries = await withSystem(pool, 'учёт попыток пароля', async (db) => {
+        const { rows } = await db.query<{ attempts: number; blocked: boolean }>(
+          `INSERT INTO auth_codes (email, code_hash, expires_at, attempts)
+           VALUES ($1, '', now() + interval '15 minutes', 0)
+           ON CONFLICT (email) DO UPDATE SET
+             attempts = CASE WHEN auth_codes.expires_at < now() THEN 0 ELSE auth_codes.attempts END
+           RETURNING attempts, attempts >= ${MAX_ATTEMPTS} AS blocked`,
+          [email],
+        );
+        return rows[0] ?? { attempts: 0, blocked: false };
+      });
+      if (tries.blocked) return reply.code(429).send({ error: 'too_many_attempts' });
+
+      const routes = await withSystem(pool, 'маршрут входа по паролю', async (db) => {
+        const { rows } = await db.query<RouteRow & { user_id: string }>(
+          `SELECT r.tenant_id, r.user_id, t.name AS tenant_name
+             FROM user_routes r
+             JOIN tenants t ON t.id = r.tenant_id
+            WHERE r.email = $1 AND r.is_active`,
+          [email],
+        );
+        return rows;
+      });
+
+      const bad = { error: 'bad_credentials' } as const;
+      if (!routes.length) return reply.code(401).send(bad);
+
+      if (routes.length > 1 && !req.body?.tenantId) {
+        return reply.code(300).send({
+          needsWorkspace: routes.map((r) => ({ tenantId: r.tenant_id, name: r.tenant_name })),
+        });
+      }
+
+      const chosen = req.body?.tenantId
+        ? routes.find((r) => r.tenant_id === req.body!.tenantId)
+        : routes[0];
+      if (!chosen) return reply.code(401).send(bad);
+
+      const stored = await withTenant(pool, chosen.tenant_id, async (db) => {
+        const { rows } = await db.query<{ password_hash: string | null }>(
+          `SELECT password_hash FROM users WHERE id = $1 AND is_active`,
+          [chosen.user_id],
+        );
+        return rows[0]?.password_hash ?? null;
+      });
+
+      if (!stored || !(await verifyPassword(password, stored))) {
+        await withSystem(pool, 'неудачная попытка пароля', async (db) => {
+          await db.query(
+            `UPDATE auth_codes SET attempts = attempts + 1,
+                    expires_at = GREATEST(expires_at, now() + interval '15 minutes')
+              WHERE email = $1`,
+            [email],
+          );
+        });
+        return reply.code(401).send(bad);
+      }
+
+      await withSystem(pool, 'успешный вход по паролю', async (db) => {
+        await db.query(`DELETE FROM auth_codes WHERE email = $1`, [email]);
+        await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [chosen.user_id]);
+      });
+
+      app.log.info({ email, tenantId: chosen.tenant_id }, 'Вход по паролю выполнен');
+      return { token: issueToken(chosen.tenant_id, chosen.user_id), tenant: chosen.tenant_name };
+    },
+  );
+
+  /**
+   * Задать или сменить свой пароль. Только для того, кто уже вошёл:
+   * человек, попавший внутрь по коду из почты, уже доказал, что ящик
+   * его, и второго доказательства просить не за что.
+   */
+  app.put<{ Body: { password?: string } }>('/me/password', async (req, reply) => {
+    const auth = deps.requireAuth ? deps.requireAuth(req) : null;
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const password = req.body?.password ?? '';
+    const check = checkPassword(password);
+    if (!check.ok) {
+      return reply.code(400).send({
+        error: 'weak_password',
+        reason: check.reason,
+        minLength: MIN_LENGTH,
+      });
+    }
+
+    const hash = await hashPassword(password);
+    await withTenant(pool, auth.tenantId, async (db) => {
+      await db.query(
+        `UPDATE users SET password_hash = $2, password_set_at = now() WHERE id = $1`,
+        [auth.userId, hash],
+      );
+    });
+
+    app.log.info({ userId: auth.userId }, 'Пароль установлен');
+    return { ok: true };
+  });
+
+  /** Убрать пароль: вход остаётся по коду. */
+  app.delete('/me/password', async (req, reply) => {
+    const auth = deps.requireAuth ? deps.requireAuth(req) : null;
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    await withTenant(pool, auth.tenantId, async (db) => {
+      await db.query(
+        `UPDATE users SET password_hash = NULL, password_set_at = NULL WHERE id = $1`,
+        [auth.userId],
+      );
+    });
+    return { ok: true };
+  });
 }

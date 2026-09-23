@@ -30,7 +30,13 @@ describe('какой уровень нужен запросу', () => {
     expect(requiredLevel('POST', '/conversations/c1/messages')).toBe('write');
     expect(requiredLevel('POST', '/conversations/c1/ai-draft')).toBe('write');
     expect(requiredLevel('POST', '/contacts/p1/crm')).toBe('write');
-    expect(requiredLevel('PATCH', '/me')).toBe('write');
+    expect(requiredLevel('POST', '/conversations/c1/read')).toBe('write');
+  });
+
+  it('своё имя и свой пароль меняет любой, даже наблюдатель', () => {
+    expect(requiredLevel('PATCH', '/me')).toBe('any');
+    expect(requiredLevel('PUT', '/me/password')).toBe('any');
+    expect(requiredLevel('DELETE', '/me/password')).toBe('any');
   });
 
   it('вход, заявка с промо и приём обновлений проверяются не ролью', () => {

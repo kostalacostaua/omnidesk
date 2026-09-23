@@ -598,16 +598,30 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
     <div id="stepEmail" class="step">
       <h1>Rozmovio</h1>
-      <p>Усе листування з клієнтами — в одному вікні. Введіть робочу пошту, і ми надішлемо код із шести цифр.</p>
+      <p data-t>Усе листування з клієнтами — в одному вікні. Введіть робочу пошту, і ми надішлемо код із шести цифр.</p>
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <div class="err" id="gateErr"></div>
       <div style="margin-top:14px"><button id="ask" data-t>Отримати код</button></div>
-      <div class="alt"><a id="toSignup" data-t>Створити компанію</a> · <a id="toToken" data-t>Вхід за токеном</a></div>
+      <div class="alt"><a id="toPass" data-t>Увійти паролем</a> · <a id="toSignup" data-t>Створити компанію</a>
+        · <a id="toToken" data-t>Вхід за токеном</a></div>
+    </div>
+
+    <div id="stepPass" class="step" style="display:none">
+      <h1 data-t>Вхід паролем</h1>
+      <p data-t>Пароль задається в профілі. Не памʼятаєте — увійдіть кодом з пошти.</p>
+      <input id="pEmail" type="email" placeholder="you@company.com" autocomplete="email">
+      <input id="pPass" type="password" placeholder="пароль" data-tp autocomplete="current-password"
+             style="margin-top:9px">
+      <div class="err" id="pErr"></div>
+      <div class="row2" style="margin-top:14px">
+        <button id="pGo" data-t>Увійти</button>
+        <button class="ghost" id="pBack" data-t>Кодом з пошти</button>
+      </div>
     </div>
 
     <div id="stepSignup" class="step" style="display:none">
       <h1 data-t>Нова компанія</h1>
-      <p>Чотирнадцять днів безкоштовно. Пароль вигадувати не потрібно — вхід за кодом на пошту.</p>
+      <p data-t>Чотирнадцять днів безкоштовно. Пароль вигадувати не потрібно — вхід за кодом на пошту.</p>
       <input id="suCompany" placeholder="Назва компанії" data-tp autocomplete="organization">
       <input id="suEmail" type="email" placeholder="you@company.com" autocomplete="email"
              style="margin-top:9px">
@@ -620,7 +634,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
     <div id="stepCode" class="step" style="display:none">
       <h1 data-t>Код надіслано</h1>
-      <p>Перевірте пошту <b id="sentTo"></b>. Код діє 10 хвилин.</p>
+      <p><span data-t>Перевірте пошту</span> <b id="sentTo"></b><span data-t>. Код діє 10 хвилин.</span></p>
       <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
       <div class="err" id="codeErr"></div>
       <div class="row2" style="margin-top:14px">
@@ -631,7 +645,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
     <div id="stepWs" class="step" style="display:none">
       <h1 data-t>Куди входимо?</h1>
-      <p>Ця пошта заведена в кількох організаціях.</p>
+      <p data-t>Ця пошта заведена в кількох організаціях.</p>
       <div id="wsList"></div>
     </div>
 
@@ -648,7 +662,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="foot">Telegram, Instagram і Messenger в одному вікні — і в картці клієнта в Zoho CRM.</div>
+    <div class="foot" data-t>Telegram, Instagram і Messenger в одному вікні — і в картці клієнта в Zoho CRM.</div>
   </div>
 </div>
 
@@ -1695,6 +1709,48 @@ function stepsSummary(steps){
   }).join(' ');
 }
 
+/**
+ * Пауза бота после ответа оператора.
+ *
+ * Стоит первой на странице сценариев, потому что объясняет их
+ * молчание. Самая частая жалоба «сценарии не работают» — это проверка
+ * в том же диалоге, где человек только что отвечал сам: бот честно
+ * молчит, а выглядит это как поломка. Теперь число видно и его можно
+ * поставить в ноль на время проверки.
+ */
+function pauseRow(){
+  var minutes = (ME && ME.tenant && typeof ME.tenant.bot_pause_minutes === 'number')
+    ? ME.tenant.bot_pause_minutes : 30;
+  var opts = [0, 5, 15, 30, 60, 180];
+  if (opts.indexOf(minutes) < 0) opts.push(minutes);
+
+  return '<div class="card" style="margin-bottom:14px">' +
+    '<div class="row2">' +
+    '<div class="lbl" style="width:auto">' + L('Пауза після відповіді оператора') + '</div>' +
+    '<select id="scPause" style="max-width:200px">' +
+    opts.sort(function(a, b){ return a - b }).map(function(m){
+      return '<option value="' + m + '"' + (m === minutes ? ' selected' : '') + '>' +
+        (m === 0 ? L('без паузи') : m + ' ' + L('хв')) + '</option>';
+    }).join('') + '</select></div>' +
+    '<div class="hint">' +
+    L('Поки пауза йде, бот мовчить у цьому діалозі — щоб не влізти в живу розмову. ') +
+    L('Для перевірки сценарію поставте «без паузи».') + '</div>' +
+    '<div class="err" id="scPauseErr"></div></div>';
+}
+
+function wirePause(){
+  if (!el('scPause')) return;
+  el('scPause').onchange = function(){
+    var value = Number(this.value);
+    api('/settings/bot', { method:'PATCH', body:{ botPauseMinutes: value } })
+      .then(function(r){
+        if (ME && ME.tenant) ME.tenant.bot_pause_minutes = r.botPauseMinutes;
+        toast(value ? L('Пауза збережена') : L('Пауза вимкнена'));
+      })
+      .catch(function(){ el('scPauseErr').textContent = L('Не вдалося зберегти') });
+  };
+}
+
 function renderBots(){
   if (SC) return renderScEditor();
   api('/scenarios').then(function(d){
@@ -1702,10 +1758,10 @@ function renderBots(){
     pageBox().innerHTML = '<div class="pg">' +
       pageHead(L('Сценарії'),
         L('Ланцюжок кроків, який веде розмову за оператора: привітатися, запитати, ') +
-        L('почекати, поставити мітку і покликати людину, коли справа дійшла до справи. ') +
-        L('Сценарій мовчить, якщо в діалогу є відповідальний або оператор писав менше ') +
-        L('30 хвилин тому, і вимикається кнопкою в самому діалозі.'),
-        L('<button id="scNew">Новий сценарій</button>')) +
+        L('почекати, поставити мітку і покликати людину, коли справа дійшла до справи.'),
+        '<button id="scNew">' + L('Новий сценарій') + '</button>') +
+
+      pauseRow() +
 
       (SCENARIOS.length
         ? '<div class="grid">' + SCENARIOS.map(function(sc){
@@ -1739,6 +1795,8 @@ function renderBots(){
           L('Почніть з привітання: клієнт пише вперше — бот вітається і обіцяє, ') +
           L('що оператор відповість. Це одна хвилина і відразу видимий ефект.</div></div>')) +
       '</div>';
+
+    wirePause();
 
     el('scNew').onclick = function(){
       SC = { name:'', channel_id:null, trigger_type:'welcome', keywords:[],
@@ -2057,6 +2115,7 @@ function tabProfile(){
       row(L('Пошта'), esc(u.email || '—'), 'em', false,
         L('Пошта — це вхід в акаунт. Змінити її може адміністратор, надіславши запрошення на нову.')) +
       langRow() +
+      passRow(u) +
       row(L('Роль'), esc(ROLES[u.role] || u.role || '—'), 'rl', false,
         admin ? L('Ролі роздаються в розділі «Команда».')
               : L('Роль призначає власник або адміністратор.')) +
@@ -2082,11 +2141,15 @@ function tabProfile(){
       '</div></div>' +
       '</div>';
 
+    wirePass();
+
     el('langSel').onchange = function(){
       langSet(this.value);
-      // Страницу рисуем заново: подписи внутри уже нарисованных
-      // разделов переводятся при сборке, а не по месту.
-      tabProfile();
+      // Перерисовываем всё, а не только профиль: подписи внутри уже
+      // собранных разделов переводятся при сборке, и без этого список
+      // чатов и поле ответа оставались на прежнем языке до обновления
+      // страницы.
+      redrawAll();
     };
 
     // Правка имени человека.
@@ -2127,6 +2190,69 @@ function langRow(){
     }).join('') + '</select></div>' +
     '<div class="hint" style="margin-top:4px">' +
     L('Вибір запамʼятовується в цьому браузері.') + '</div></div><span></span></div>';
+}
+
+/**
+ * Пароль.
+ *
+ * Задаётся тем, кто уже вошёл, и убирается так же. «Забыли пароль»
+ * здесь не нужно: код на почту и есть восстановление, и он никуда не
+ * девается — пароль только второй способ, для тех, кто заходит каждое
+ * утро и не хочет ждать письма.
+ */
+function passRow(u){
+  var set = Boolean(u.password_set_at);
+  return '<div class="prow" id="row-pw"><div class="pk">' + L('Пароль') + '</div>' +
+    '<div class="pv" id="val-pw">' +
+    (set ? L('Задано') : L('Не задано — вхід лише кодом з пошти')) +
+    '</div>' +
+    '<div style="display:flex;gap:6px;flex:none">' +
+    '<button class="ghost mini" id="pwEdit">' + (set ? L('Змінити') : L('Задати')) + '</button>' +
+    (set ? '<button class="ghost mini" id="pwOff">' + L('Прибрати') + '</button>' : '') +
+    '</div></div>';
+}
+
+function wirePass(){
+  el('pwEdit').onclick = function(){
+    var cell = el('val-pw');
+    if (cell.dataset.editing) return;
+    cell.dataset.editing = '1';
+    el('pwEdit').style.display = 'none';
+    cell.innerHTML = '<div class="row2" style="max-width:320px">' +
+      '<input id="pwNew" type="password" autocomplete="new-password" placeholder="' +
+      L('новий пароль, від 8 знаків') + '"></div>' +
+      '<div class="row2" style="margin-top:6px">' +
+      '<button class="mini" id="pwSave">' + L('Зберегти') + '</button>' +
+      '<button class="ghost mini" id="pwCancel">' + L('Скасувати') + '</button></div>';
+
+    el('pwNew').focus();
+    el('pwCancel').onclick = tabProfile;
+    el('pwSave').onclick = function(){
+      var value = el('pwNew').value;
+      busy(el('pwSave'), true);
+      api('/me/password', { method:'PUT', body:{ password: value } })
+        .then(function(){ toast(L('Пароль збережено')); tabProfile() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('pfErr').textContent =
+            p.reason === 'short' ? L('Пароль коротший за 8 знаків') :
+            p.reason === 'weak' ? L('Такий пароль підбирають першим — придумайте інший') :
+            L('Не вдалося зберегти');
+          busy(el('pwSave'), false);
+        });
+    };
+    el('pwNew').onkeydown = function(e){
+      if (e.key === 'Enter') el('pwSave').click();
+      if (e.key === 'Escape') tabProfile();
+    };
+  };
+
+  if (el('pwOff')) armDelete([el('pwOff')], function(){
+    return api('/me/password', { method:'DELETE' }).then(function(){
+      toast(L('Пароль прибрано'));
+      tabProfile();
+    });
+  });
 }
 
 /** Строка данных: подпись, значение, при необходимости — «Изменить». */
@@ -3651,6 +3777,22 @@ function start(){
   timer = setInterval(refresh, 3000);
 }
 
+/**
+ * Перерисовать интерфейс целиком.
+ *
+ * Нужна после смены языка: каркас переводится по месту, а всё
+ * остальное собрано строками и меняется только при новой сборке.
+ */
+function redrawAll(){
+  applyLang();
+  fillChannelFilter();
+  renderList();
+  renderCounts();
+  if (current){ renderHead(); lastThread = null; loadThread(); renderComposer(true) }
+  var view = el('app').dataset.view;
+  if (VIEWS[view]) VIEWS[view]();
+}
+
 function logout(){
   clearInterval(timer);
   api('/auth/session', { method:'DELETE' }).catch(function(){});
@@ -3728,7 +3870,7 @@ el('bell').onclick = function(){
 var pendingEmail = '';
 
 function gateStep(name){
-  ['stepEmail','stepSignup','stepCode','stepWs','stepToken'].forEach(function(id){
+  ['stepEmail','stepSignup','stepPass','stepCode','stepWs','stepToken'].forEach(function(id){
     el(id).style.display = id === name ? 'block' : 'none';
   });
 }
@@ -3825,14 +3967,7 @@ function submitCode(tenantId){
       // 300 приходит, когда почта заведена в нескольких организациях:
       // выбрать за человека нельзя, он попадёт не туда и не поймёт почему.
       if (r.needsWorkspace){
-        el('wsList').innerHTML = r.needsWorkspace.map(function(w){
-          return '<button class="ghost" style="width:100%;margin-top:8px" data-ws="' +
-            w.tenantId + '">' + esc(w.name) + '</button>';
-        }).join('');
-        gateStep('stepWs');
-        Array.prototype.forEach.call(el('wsList').children, function(b){
-          b.onclick = function(){ gateStep('stepCode'); submitCode(b.dataset.ws) };
-        });
+        showWorkspaces(r.needsWorkspace, function(id){ gateStep('stepCode'); submitCode(id) });
         return;
       }
       if (r.token) {
@@ -3860,6 +3995,60 @@ function submitCode(tenantId){
 }
 
 el('verify').onclick = function(){ submitCode(null) };
+/**
+ * Выбор организации, когда почта заведена в нескольких.
+ *
+ * Выбрать за человека нельзя: он попадёт не туда и не поймёт почему.
+ * Одна и та же кнопка нужна и коду, и паролю — отсюда общий вид.
+ */
+function showWorkspaces(list, pick){
+  el('wsList').innerHTML = list.map(function(w){
+    return '<button class="ghost" style="width:100%;margin-top:8px" data-ws="' +
+      w.tenantId + '">' + esc(w.name) + '</button>';
+  }).join('');
+  gateStep('stepWs');
+  Array.prototype.forEach.call(el('wsList').children, function(b){
+    b.onclick = function(){ pick(b.dataset.ws) };
+  });
+}
+
+/**
+ * Вход паролем.
+ *
+ * Ответ на неверную пару один и тот же, что бы ни было не так: иначе
+ * форма отвечает на вопрос, работает ли у нас такой человек.
+ */
+el('toPass').onclick = function(){
+  gateStep('stepPass');
+  el('pEmail').value = el('email').value;
+  (el('pEmail').value ? el('pPass') : el('pEmail')).focus();
+};
+el('pBack').onclick = function(){ gateStep('stepEmail'); el('email').focus() };
+
+function passLogin(tenantId){
+  el('pErr').textContent = '';
+  busy(el('pGo'), true);
+  api('/auth/password', { method:'POST', body:{
+    email: el('pEmail').value.trim(), password: el('pPass').value, tenantId: tenantId || undefined
+  }}).then(function(d){
+    if (d && d.needsWorkspace){
+      busy(el('pGo'), false);
+      showWorkspaces(d.needsWorkspace, passLogin);
+      return;
+    }
+    enterWith(d.token);
+  }).catch(function(e){
+    var p = e.payload || {};
+    el('pErr').textContent = p.error === 'too_many_attempts'
+      ? L('Забагато спроб. Спробуйте за 15 хвилин або увійдіть кодом.')
+      : L('Пошта або пароль не підходять');
+    busy(el('pGo'), false);
+  });
+}
+
+el('pGo').onclick = function(){ passLogin('') };
+el('pPass').onkeydown = function(e){ if (e.key === 'Enter') passLogin('') };
+
 el('again').onclick = function(){ gateStep('stepEmail'); el('email').focus() };
 el('toToken').onclick = function(){ gateStep('stepToken') };
 el('toEmail').onclick = function(){ gateStep('stepEmail') };

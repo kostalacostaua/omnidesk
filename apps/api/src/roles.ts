@@ -50,6 +50,11 @@ export function requiredLevel(method: string, path: string): Level {
   // Публичные ручки: заявка с промо-страницы и вход по коду.
   if (isAuthPath(path) || path === '/leads') return 'any';
 
+  // Своё имя и свой пароль человек меняет сам — в том числе
+  // наблюдатель, которому писать клиентам нельзя. Это про него, а не
+  // про данные компании.
+  if (path === '/me' || path.startsWith('/me/')) return 'any';
+
   // Приём сообщений от каналов идёт по секрету в заголовке, а не по
   // пользователю: роли там нет и быть не может.
   if (path.startsWith('/webhooks/')) return 'any';

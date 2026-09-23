@@ -975,7 +975,12 @@ interface ConvState {
  * заканчивается. Внутри этого окна автоответ действительно перебивал бы
  * живую беседу; за его пределами он снова полезен.
  */
-const BOT_PAUSE_AFTER_HUMAN = '30 minutes';
+/**
+ * Сколько бот молчит после ответа оператора, если компания не задала
+ * своё число. Тридцать минут — разговор, в который бот влезать не
+ * должен; ноль в настройках означает «не молчать вовсе».
+ */
+const BOT_PAUSE_DEFAULT_MIN = 30;
 
 function ruleMatches(rule: BotRule, text: string, isFirstMessage: boolean): boolean {
   const t = text.trim().toLowerCase();
@@ -1317,6 +1322,18 @@ interface AiRow {
   is_active: boolean;
 }
 
+/** Пауза бота у этой компании. Настройка живёт в tenants — RLS там нет. */
+async function botPauseMinutes(tenantId: string): Promise<number> {
+  return withSystem(pool, 'пауза бота', async (db) => {
+    const { rows } = await db.query<{ bot_pause_minutes: number }>(
+      `SELECT bot_pause_minutes FROM tenants WHERE id = $1`,
+      [tenantId],
+    );
+    const value = rows[0]?.bot_pause_minutes;
+    return typeof value === 'number' ? value : BOT_PAUSE_DEFAULT_MIN;
+  });
+}
+
 async function aiAnswer(
   msg: UnifiedMessage,
   conversationId: string,
@@ -1396,17 +1413,23 @@ async function aiAnswer(
  */
 async function runBot(msg: UnifiedMessage, conversationId: string): Promise<number> {
   const text = typeof msg.content.text === 'string' ? msg.content.text : '';
+  const pauseMinutes = await botPauseMinutes(msg.tenantId);
 
   const decision = await withTenant(pool, msg.tenantId, async (db) => {
     const { rows: convRows } = await db.query<ConvState>(
+      // Пауза берётся из настроек компании, а не из константы: человек
+      // проверяет сценарий в том же диалоге, где сам только что
+      // отвечал, ничего не происходит — и делает вывод, что сценарии
+      // не работают. Теперь это число он видит и может поставить ноль.
       `SELECT c.bot_enabled, c.bot_replied_at, c.assignee_id,
               (c.human_replied_at IS NOT NULL
-                 AND c.human_replied_at > now() - interval '${BOT_PAUSE_AFTER_HUMAN}')
+                 AND $2::int > 0
+                 AND c.human_replied_at > now() - ($2::int || ' minutes')::interval)
                 AS human_recently,
               (SELECT count(*) FROM messages m
                 WHERE m.conversation_id = c.id AND m.direction = 'in') AS incoming_count
          FROM conversations c WHERE c.id = $1`,
-      [conversationId],
+      [conversationId, pauseMinutes],
     );
     const conv = convRows[0];
     if (!conv) return { silent: 'диалог не найден' as const };

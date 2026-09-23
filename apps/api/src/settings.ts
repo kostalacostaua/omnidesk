@@ -61,7 +61,8 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
 
     const data = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows: users } = await db.query(
-        `SELECT id, email, full_name, role, last_seen_at, created_at
+        // Сам хэш пароля наружу не идёт — только признак «задан».
+        `SELECT id, email, full_name, role, last_seen_at, created_at, password_set_at
            FROM users WHERE id = $1 LIMIT 1`,
         [auth.userId],
       );
@@ -79,7 +80,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     // Организация лежит в tenants — таблице без RLS, читаем по явному id.
     const tenant = await withSystem(pool, 'профиль организации', async (db) => {
       const { rows } = await db.query(
-        `SELECT id, slug, name, plan, seats_limit, region, created_at
+        `SELECT id, slug, name, plan, seats_limit, region, created_at, bot_pause_minutes
            FROM tenants WHERE id = $1 LIMIT 1`,
         [auth.tenantId],
       );
@@ -132,6 +133,31 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       await db.query(`UPDATE tenants SET name = $2 WHERE id = $1`, [auth.tenantId, name]);
     });
     return { ok: true, name };
+  });
+
+  /**
+   * Пауза бота после ответа оператора.
+   *
+   * Живёт рядом со сценариями, потому что объясняет их поведение:
+   * без неё человек проверяет сценарий в диалоге, где сам только что
+   * отвечал, ничего не происходит — и он решает, что сценарии сломаны.
+   */
+  app.patch<{ Body: { botPauseMinutes?: number } }>('/settings/bot', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const raw = Number(req.body?.botPauseMinutes);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 1440) {
+      return reply.code(400).send({ error: 'bad_pause' });
+    }
+    const minutes = Math.round(raw);
+
+    await withSystem(pool, 'пауза бота', async (db) => {
+      await db.query(`UPDATE tenants SET bot_pause_minutes = $2 WHERE id = $1`, [
+        auth.tenantId, minutes,
+      ]);
+    });
+    return { botPauseMinutes: minutes };
   });
 
   // ── Каналы ────────────────────────────────────────────────────────
