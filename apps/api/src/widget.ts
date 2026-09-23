@@ -80,7 +80,11 @@ export const WIDGET_HTML = `<!DOCTYPE html>
   .picker button:hover{background:var(--hover);transform:scale(1.15)}
   /* На телефоне наведения нет — инструменты видно всегда. */
   @media(hover:none){.mtools{opacity:1}}
-  .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none}
+  /* Колонка задана здесь намеренно: поле ответа включается из кода
+     через display:flex, и без направления панель смайлов встала бы
+     не над строкой ответа, а слева от неё — узким столбиком. */
+  .comp{border-top:1px solid var(--line);padding:9px 12px;background:var(--panel);flex:none;
+    flex-direction:column}
   .comp .row{display:flex;gap:6px;align-items:flex-end}
   .comp textarea{min-height:34px;max-height:min(120px,28vh);border-radius:7px;min-width:0;
     overflow-y:auto}
