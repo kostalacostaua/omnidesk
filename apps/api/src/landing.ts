@@ -377,7 +377,7 @@ export const LANDING_HTML = `<!DOCTYPE html>
       ${chCard(ICON_PH, 'ch.tgph')}
       ${chCard(ICON_IG, 'ch.ig')}
       ${chCard(ICON_MS, 'ch.ms')}
-      ${chCard(ICON_MS, 'ch.wa', true)}
+      ${chCard(ICON_MS, 'ch.wa')}
       ${chCard(ICON_MS, 'ch.vb')}
       ${chCard(ICON_MS, 'ch.vbn', true)}
     </div>
@@ -554,7 +554,7 @@ var T = {
     'ch.tgph.t':'Telegram за номером','ch.tgph.s':'Ваш особистий номер як канал: вхід по QR, переписки приходять у скриньку.',
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Повідомлення бізнес-акаунту, відповіді з імені акаунта, історії та реакції.',
     'ch.ms.t':'Facebook Messenger','ch.ms.s':'Повідомлення сторінці. Відповідь оператора доходить і через добу.',
-    'ch.wa.t':'WhatsApp Business','ch.wa.s':'У роботі: підключення через Cloud API.',
+    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Номер компанії через Cloud API. Поза вікном 24 годин — погоджені шаблони.',
     'ch.vb.t':'Viber для бізнесу','ch.vb.s':'Клієнти пишуть на назву компанії. Підключення через офіційного партнера.',
     'ch.vbn.t':'Viber номерний','ch.vbn.s':'У роботі.',
     'ready':'працює','soon':'скоро',
@@ -609,7 +609,7 @@ var T = {
     'ch.tgph.t':'Telegram by number','ch.tgph.s':'Your personal number as a channel: QR sign-in, chats land in the inbox.',
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Messages to the business account, replies as the account, story replies and reactions.',
     'ch.ms.t':'Facebook Messenger','ch.ms.s':'Messages to the Page. An agent reply is delivered even after 24 hours.',
-    'ch.wa.t':'WhatsApp Business','ch.wa.s':'In progress: Cloud API connection.',
+    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Your company number via Cloud API. Outside the 24-hour window — approved templates.',
     'ch.vb.t':'Viber for Business','ch.vb.s':'Customers write to your company name. Connected through an official partner.',
     'ch.vbn.t':'Viber by number','ch.vbn.s':'In progress.',
     'ready':'live','soon':'soon',
