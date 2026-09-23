@@ -482,6 +482,7 @@ registerLanding(app, {
   pool,
   mailer: createMailer(process.env, (line) => app.log.info(line)),
   notifyTo: process.env['LEADS_TO'] ?? process.env['CONTACT_EMAIL'] ?? 'slastin.kv@gmail.com',
+  webchatKey: process.env['WEBCHAT_SITE_KEY'] ?? '',
   log: (level, msg, extra) => app.log[level](extra ?? {}, msg),
   // Письмо о заявке уходило и раньше. Оповещение — это то же самое,
   // но там, где человек смотрит: в группе поддержки и пушем.

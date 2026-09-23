@@ -832,6 +832,8 @@ export interface LandingDeps {
   mailer: Mailer;
   /** Кому уходит письмо о новой заявке. */
   notifyTo: string;
+  /** Ключ сайта нашего собственного чата: пусто — виджета на странице нет. */
+  webchatKey?: string;
   log: (level: 'info' | 'warn', msg: string, extra?: Record<string, unknown>) => void;
   /** Куда ещё сообщить о заявке: группа в Telegram, пуш, почта команды. */
   onLead?: (lead: {
@@ -867,14 +869,42 @@ function validEmail(v: string): boolean {
   return at > 0 && dot > at + 1 && dot < v.length - 2 && !v.includes(' ') && v.length <= 254;
 }
 
+/**
+ * Наш собственный чат на нашей же промо-странице.
+ *
+ * Тот же виджет, который мы предлагаем клиентам, и подключён он ровно
+ * так же — одной строкой с ключом сайта. Смысл двойной: человеку с
+ * вопросом не нужно искать почту, а мы первыми видим, если в виджете
+ * что-то сломалось.
+ *
+ * Ключ приходит из окружения, а не лежит в коде: он привязан к
+ * конкретному каналу конкретного арендатора, и его замена не должна
+ * требовать правки исходников. Ключ публичный — он и так виден в
+ * исходном коде страницы, — но проверяется на вид: случайная опечатка
+ * в переменной не должна превращаться в кусок разметки.
+ */
+export function widgetTag(siteKey: string): string {
+  const key = (siteKey ?? '').trim();
+  if (!key || !/^wc[a-z0-9]{6,60}$/.test(key)) return '';
+  return `<script src="/chat.js" data-key="${key}" async></script>`;
+}
+
+/** Вставка перед закрытием body: скрипт асинхронный, порядок не важен. */
+function withWidget(html: string, siteKey: string): string {
+  const tag = widgetTag(siteKey);
+  return tag ? html.replace('</body>', tag + NL + '</body>') : html;
+}
+
 export function registerLanding(app: FastifyInstance, opts: LandingDeps): void {
+  const page = withWidget(LANDING_HTML, opts.webchatKey ?? '');
+
   const send = async (_req: unknown, reply: FastifyReply) =>
     reply
       .type('text/html; charset=utf-8')
       // Кэш на пять минут: страница публичная и одинаковая для всех,
       // но после правки текста не хочется ждать час.
       .header('cache-control', 'public, max-age=300')
-      .send(LANDING_HTML);
+      .send(page);
 
   app.get('/promo', send);
 
