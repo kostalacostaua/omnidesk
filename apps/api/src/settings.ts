@@ -15,6 +15,7 @@ import {
   decryptJson,
   graphGet,
   parseTemplates,
+  canSendWhatsapp,
   wabaFromDebug,
   type DebugTokenReply,
   WEBCHAT_CHANNEL,
@@ -251,13 +252,24 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
          * стольких попыток: пока автоматика не сработала, человеку
          * нечем было помочь себе самому.
          */
-        if (!waba) {
-          const debug = await graphGet<DebugTokenReply>('debug_token', {
-            input_token: token,
-            access_token: token,
+        const debug = await graphGet<DebugTokenReply>('debug_token', {
+          input_token: token,
+          access_token: token,
+        });
+        /* Право на отправку проверяем до всего остального: без него
+           канал подключится, входящие пойдут, а ответы будут молча
+           отваливаться — и связать это с забытой галочкой в окне
+           генерации маркера человеку неоткуда. */
+        if (!canSendWhatsapp(debug)) {
+          return reply.code(400).send({
+            error: 'token_cannot_send',
+            detail:
+              'У маркера немає права whatsapp_business_messaging. ' +
+              'Згенеруйте маркер заново і відмітьте обидва права: ' +
+              'whatsapp_business_messaging і whatsapp_business_management.',
           });
-          waba = wabaFromDebug(debug);
         }
+        if (!waba) waba = wabaFromDebug(debug);
 
         if (!waba) {
           try {

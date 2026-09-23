@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { wabaFromDebug } from '../src/whatsapp.js';
+import { canSendWhatsapp, wabaFromDebug } from '../src/whatsapp.js';
 
 /**
  * Идентификатор аккаунта WhatsApp Business достаётся из проверки токена:
@@ -57,5 +57,33 @@ describe('поиск аккаунта по токену', () => {
   it('пустой ответ не роняет разбор', () => {
     expect(wabaFromDebug({})).toBeNull();
     expect(wabaFromDebug({ data: {} })).toBeNull();
+  });
+});
+
+/**
+ * Право на отправку отмечают галочкой рядом с правом на управление, и
+ * отметить одну вместо двух — обычное дело. Проявляется это врозь и
+ * поздно: входящие идут, исходящие отказываются. Поэтому проверяется
+ * заранее.
+ */
+describe('право на отправку', () => {
+  it('есть — отправка разрешена', () => {
+    expect(
+      canSendWhatsapp({
+        data: { scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'] },
+      }),
+    ).toBe(true);
+  });
+
+  it('нет — подключать нельзя, это тихая поломка', () => {
+    expect(canSendWhatsapp({ data: { scopes: ['whatsapp_business_management'] } })).toBe(false);
+  });
+
+  it('список прав пуст — не придираемся', () => {
+    // У части токенов Graph списка не отдаёт. Запрещать подключение
+    // из-за отсутствия сведений — значит ломать рабочий случай.
+    expect(canSendWhatsapp({ data: { scopes: [] } })).toBe(true);
+    expect(canSendWhatsapp({ data: {} })).toBe(true);
+    expect(canSendWhatsapp({})).toBe(true);
   });
 });

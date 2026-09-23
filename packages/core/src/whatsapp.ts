@@ -192,7 +192,27 @@ export function waNumber(raw: string): string {
 export interface DebugTokenReply {
   data?: {
     granular_scopes?: Array<{ scope?: string; target_ids?: string[] }>;
+    /** Плоский список прав. У токена системного пользователя он и есть главный. */
+    scopes?: string[];
   };
+}
+
+/**
+ * Право на отправку.
+ *
+ * Проверяется отдельно от права на управление, потому что их отмечают
+ * галочками в одном окне и легко отметить не обе. Разница вылезает
+ * позже и врозь: входящие приходят (для них хватает управления), а
+ * исходящие отказываются словами «нет разрешения отправлять от имени
+ * этого аккаунта» — и связать это с забытой галочкой почти невозможно.
+ *
+ * Пустой список прав не считаем отказом: у некоторых токенов Graph его
+ * не отдаёт, и запрещать подключение из-за этого нельзя.
+ */
+export function canSendWhatsapp(reply: DebugTokenReply): boolean {
+  const scopes = reply?.data?.scopes ?? [];
+  if (!scopes.length) return true;
+  return scopes.includes('whatsapp_business_messaging');
 }
 
 export function wabaFromDebug(reply: DebugTokenReply): string | null {
