@@ -819,6 +819,15 @@ export interface LandingDeps {
   /** Кому уходит письмо о новой заявке. */
   notifyTo: string;
   log: (level: 'info' | 'warn', msg: string, extra?: Record<string, unknown>) => void;
+  /** Куда ещё сообщить о заявке: группа в Telegram, пуш, почта команды. */
+  onLead?: (lead: {
+    id: string;
+    name?: string | null;
+    company?: string | null;
+    email: string;
+    phone?: string | null;
+    note?: string | null;
+  }) => void;
 }
 
 interface LeadBody {
@@ -932,6 +941,15 @@ export function registerLanding(app: FastifyInstance, opts: LandingDeps): void {
       .catch((err: unknown) =>
         opts.log('warn', 'Письмо о заявке не ушло', { error: String(err) }),
       );
+
+    opts.onLead?.({
+      id: fresh,
+      name: lead.name ?? null,
+      company: lead.company ?? null,
+      email: lead.email,
+      phone: lead.phone ?? null,
+      note: lead.note ?? null,
+    });
 
     return reply.code(201).send({ ok: true });
   });

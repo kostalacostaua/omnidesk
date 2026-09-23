@@ -27,6 +27,16 @@ export const QUEUE_MTPROTO_LOGIN = 'mtproto-login';
  */
 export const QUEUE_SCENARIO = 'scenario';
 
+/**
+ * Оповещения наружу: группа в Telegram, пуш в браузер, письмо.
+ *
+ * Отдельная очередь, потому что отправка идёт в чужие сервисы и может
+ * встать. Сообщение клиента обязано быть записано и показано оператору
+ * независимо от того, ответил ли Telegram на попытку рассказать о нём в
+ * группу поддержки.
+ */
+export const QUEUE_NOTIFY = 'notify';
+
 /** Ключ Redis с состоянием входа по QR. Читает api, пишет sessions. */
 export const mtprotoLoginKey = (loginId: string): string => `mtp:login:${loginId}`;
 /** Ключ Redis для пароля двухэтапной проверки. Живёт секунды и удаляется после чтения. */
@@ -111,6 +121,31 @@ export interface OutboundJob {
   /** Идемпотентность: повторная постановка той же задачи не должна
    *  привести ко второй отправке. */
   idempotencyKey: string;
+}
+
+/**
+ * Оповещение о событии.
+ *
+ * Здесь только само событие и то, о чём оно: текст собирается при
+ * отправке (`renderNotify`). Иначе исправление формулировки означало бы,
+ * что задачи, уже лежащие в очереди, уедут старым текстом.
+ */
+export interface NotifyJob {
+  tenantId: string;
+  event: string;
+  payload: {
+    who?: string | null;
+    text?: string | null;
+    channel?: string | null;
+    conversationId?: string | null;
+    waitingMinutes?: number | null;
+    email?: string | null;
+    phone?: string | null;
+  };
+  /** Ключ идемпотентности: одно событие — одно оповещение. */
+  dedupKey: string;
+  /** Проверка адресата из настроек: уходит мимо подписки на события. */
+  targetId?: string;
 }
 
 export interface MediaJob {

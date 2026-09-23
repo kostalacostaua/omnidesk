@@ -1,7 +1,9 @@
 import nodemailer from 'nodemailer';
+import { createHttpMailer, MailError } from '@omnidesk/core';
+import type { Mail, Mailer } from '@omnidesk/core';
 
 /**
- * Отправка писем.
+ * Отправка писем из api.
  *
  * Три способа, выбираются по тому, какая переменная задана:
  *
@@ -9,33 +11,14 @@ import nodemailer from 'nodemailer';
  *   SMTP_URL       — обычный SMTP. Для своего сервера.
  *   ничего         — письмо не уходит, а пишется в лог.
  *
- * Почему HTTP, а не SMTP. Railway на тарифах Free, Trial и Hobby закрывает
- * исходящие SMTP-порты: это их защита от рассылки спама с их адресов.
- * Соединение просто не устанавливается, и без этой оговорки выглядело бы
- * как «почта почему-то не работает». HTTPS на порту 443 открыт всегда.
+ * Resend и лог живут в ядре (`packages/core/src/mail.ts`): письма
+ * отправляют и воркеры, когда уходит оповещение. SMTP остался здесь,
+ * потому что тянет nodemailer, а в образ воркеров эта зависимость не
+ * нужна.
  */
 
-export interface Mail {
-  to: string;
-  subject: string;
-  text: string;
-  html: string;
-}
-
-export interface Mailer {
-  readonly kind: 'resend' | 'smtp' | 'log';
-  send(mail: Mail): Promise<void>;
-}
-
-export class MailError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-    this.name = 'MailError';
-  }
-}
+export type { Mail, Mailer };
+export { MailError };
 
 interface MailerEnv {
   RESEND_API_KEY?: string;
@@ -49,34 +32,12 @@ export function createMailer(
   log: (line: string) => void,
   fetchImpl: typeof fetch = fetch,
 ): Mailer {
-  const from = env.MAIL_FROM || 'Rozmovio <no-reply@localhost>';
-
-  if (env.RESEND_API_KEY) {
-    const key = env.RESEND_API_KEY;
-    const root = env.RESEND_API_ROOT || 'https://api.resend.com';
-    return {
-      kind: 'resend',
-      async send(mail) {
-        const res = await fetchImpl(`${root}/emails`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ from, to: [mail.to], subject: mail.subject, text: mail.text, html: mail.html }),
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (!res.ok) {
-          // Текст ответа Resend здесь полезен: «domain is not verified»
-          // и «invalid from address» — две разные ошибки настройки,
-          // и по одному коду 403 их не различить.
-          const body = await res.text().catch(() => '');
-          throw new MailError(`Resend ответил ${res.status}: ${body.slice(0, 300)}`, res.status);
-        }
-      },
-    };
-  }
+  if (env.RESEND_API_KEY) return createHttpMailer(env, log, fetchImpl);
 
   if (env.SMTP_URL) {
     // Транспорт создаётся один раз: nodemailer держит пул соединений,
     // и пересоздание на каждое письмо означало бы новый TLS-хэндшейк.
+    const from = env.MAIL_FROM || 'Rozmovio <no-reply@localhost>';
     const transport = nodemailer.createTransport(env.SMTP_URL);
     return {
       kind: 'smtp',
@@ -86,11 +47,5 @@ export function createMailer(
     };
   }
 
-  return {
-    kind: 'log',
-    async send(mail) {
-      // Локальный режим: письмо не уходит. Пишем тему — в ней код.
-      log(`ПИСЬМО для ${mail.to}: ${mail.subject}`);
-    },
-  };
+  return createHttpMailer(env, log, fetchImpl);
 }

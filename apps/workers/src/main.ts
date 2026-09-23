@@ -1,5 +1,6 @@
 import { Queue, UnrecoverableError, Worker } from 'bullmq';
 import { createCrmSync } from './crm.js';
+import { createNotifier } from './notify.js';
 import { Redis } from 'ioredis';
 import {
   QUEUE_INBOUND,
@@ -90,6 +91,22 @@ const log = (level: string, msg: string, extra: Record<string, unknown> = {}): v
   // Структурированный лог. Содержимое сообщений сюда не попадает никогда.
   console.log(JSON.stringify({ level, msg, ts: new Date().toISOString(), ...extra }));
 };
+
+/**
+ * Оповещения наружу.
+ *
+ * Живут здесь, а не в api: событие рождается при обработке сообщения, и
+ * гонять его лишним кругом через HTTP незачем. Обходы «клиент ждёт
+ * ответа» и чистка отметок — тоже отсюда.
+ */
+const notifier = createNotifier({
+  pool,
+  connection,
+  masterKey,
+  log,
+  telegramRoot: process.env['TELEGRAM_API_ROOT'] ?? 'https://api.telegram.org',
+  appUrl: process.env['APP_URL'] ?? process.env['PUBLIC_URL'] ?? '',
+});
 
 interface ChannelRow {
   id: string;
@@ -667,7 +684,7 @@ async function handleInbound(job: InboundJob): Promise<void> {
     });
     if (inserted && contactId) await enqueueCrm(m, contactId, conversationId);
     if (inserted && conversationId) {
-      const sent = await runBot(m, conversationId);
+      const sent = await onInbound(m, conversationId);
       if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
     }
     return;
@@ -706,7 +723,7 @@ async function handleInbound(job: InboundJob): Promise<void> {
       // Бот запускается только на новых входящих: на дубликате он
       // ответил бы второй раз на то же самое сообщение.
       if (inserted && conversationId && m.direction === 'in') {
-        const sent = await runBot(m, conversationId);
+        const sent = await onInbound(m, conversationId);
         if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
       }
     }
@@ -749,7 +766,7 @@ async function handleInbound(job: InboundJob): Promise<void> {
         await enqueueCrm(m, contactId, conversationId);
       }
       if (inserted && conversationId && m.direction === 'in') {
-        const sent = await runBot(m, conversationId);
+        const sent = await onInbound(m, conversationId);
         if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
       }
     }
@@ -866,7 +883,7 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
       }
     }
     if (inserted && conversationId && m.direction === 'in') {
-      const sent = await runBot(m, conversationId);
+      const sent = await onInbound(m, conversationId);
       if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
     }
   }
@@ -925,7 +942,7 @@ async function handleMtprotoInbound(job: InboundJob): Promise<void> {
     log('debug', 'Аватар не приехал вместе с сообщением', { contactId: avatarFor });
   }
   if (inserted && conversationId && m.direction === 'in') {
-    const sent = await runBot(m, conversationId);
+    const sent = await onInbound(m, conversationId);
     if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
   }
 }
@@ -1391,6 +1408,22 @@ async function aiAnswer(
 
   if (needsHuman(text)) {
     log('info', 'ИИ промолчал: разговор для человека', { conversationId });
+    // Молчание ИИ — это и есть передача человеку. Без оповещения она
+    // выглядит как «бот сломался»: клиент ждёт, а в инбокс никто не
+    // смотрит, потому что «там же робот отвечает».
+    await notifier
+      .notify(
+        msg.tenantId,
+        'ai.handoff',
+        {
+          who: msg.peerProfile.name ?? null,
+          text,
+          channel: msg.channelType,
+          conversationId,
+        },
+        `ai.handoff:${conversationId}:${Math.floor(Date.now() / 3600_000)}`,
+      )
+      .catch(() => undefined);
     return 0;
   }
 
@@ -1439,6 +1472,95 @@ async function aiAnswer(
         [msg.tenantId, message]);
     });
     return 0;
+  }
+}
+
+/**
+ * Канал перестал работать.
+ *
+ * Отдельная функция, потому что мест три: отозванный токен бота,
+ * отозванный доступ к странице Meta и негодный ключ партнёра Viber.
+ * Оповещение здесь важнее прочих: пока канал лежит, клиенты пишут в
+ * пустоту, и узнать об этом больше неоткуда.
+ */
+async function announceChannelDown(
+  tenantId: string,
+  channelId: string,
+  detail: string,
+): Promise<void> {
+  try {
+    const name = await withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{ display_name: string }>(
+        `SELECT display_name FROM channels WHERE id = $1`,
+        [channelId],
+      );
+      return rows[0]?.display_name ?? null;
+    });
+    await notifier.notify(
+      tenantId,
+      'channel.down',
+      { channel: name, text: detail },
+      // Раз в сутки на канал: чинить его всё равно человеку, и
+      // напоминать об этом каждой неудачной отправкой — травля.
+      `channel.down:${channelId}:${Math.floor(Date.now() / 86_400_000)}`,
+    );
+  } catch (err) {
+    log('warn', 'Оповещение о канале не поставлено', {
+      channelId, error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Что делаем, когда клиент написал.
+ *
+ * Два действия: рассказать людям (если это начало разговора) и дать
+ * ответить боту. Оба вызываются из четырёх мест — по одному на канал, —
+ * и собраны здесь, чтобы пятый канал не появился без оповещений.
+ */
+async function onInbound(msg: UnifiedMessage, conversationId: string): Promise<number> {
+  await announceNew(msg, conversationId);
+  return runBot(msg, conversationId);
+}
+
+/**
+ * Оповестить о новом диалоге.
+ *
+ * «Новый» — это первое входящее в диалоге, а не новый контакт: клиент,
+ * который вернулся через месяц, начинает разговор заново, и для
+ * дежурного это такое же событие.
+ */
+async function announceNew(msg: UnifiedMessage, conversationId: string): Promise<void> {
+  try {
+    const first = await withTenant(pool, msg.tenantId, async (db) => {
+      const { rows } = await db.query<{ n: string; name: string | null }>(
+        `SELECT (SELECT count(*) FROM messages
+                  WHERE conversation_id = $1 AND direction = 'in') AS n,
+                (SELECT ct.display_name FROM conversations c
+                   JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1) AS name`,
+        [conversationId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!first || Number(first.n) !== 1) return;
+
+    await notifier.notify(
+      msg.tenantId,
+      'conversation.new',
+      {
+        who: first.name ?? msg.peerProfile.name ?? null,
+        text: typeof msg.content.text === 'string' ? msg.content.text : null,
+        channel: msg.channelType,
+        conversationId,
+      },
+      `conversation.new:${conversationId}`,
+    );
+  } catch (err) {
+    // Оповещение никогда не мешает переписке: не ушло — записали в лог
+    // и пошли дальше.
+    log('warn', 'Оповещение о новом диалоге не поставлено', {
+      conversationId, error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -1910,6 +2032,7 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
       );
     });
     await markFailed(job, { code: 401, reason: 'token_revoked' });
+    await announceChannelDown(job.tenantId, job.channelId, 'Токен бота відкликано — підключіть канал заново');
     throw new UnrecoverableError('Токен бота отозван — переподключите канал');
   }
 
@@ -2061,6 +2184,7 @@ async function viberTick(): Promise<void> {
       // Негодный ключ сам не починится: гасим канал, чтобы не долбить
       // партнёра каждые двадцать секунд, и показываем это в интерфейсе.
       const dead = reason === 'bad_key';
+      if (dead) await announceChannelDown(route.tenant_id, route.channel_id, detail);
       await withTenant(pool, route.tenant_id, async (db) => {
         await db.query(
           `UPDATE channels SET last_error = $2::jsonb${dead ? `, status = 'degraded'` : ''}
@@ -2156,6 +2280,7 @@ async function sendMeta(
         );
       });
       await markFailed(job, { reason: 'token_revoked', code: err.body.code });
+      await announceChannelDown(job.tenantId, job.channelId, 'Доступ до сторінки відкликано — підключіть її заново');
       throw new UnrecoverableError('Доступ к странице отозван — подключите её заново');
     }
     if (err.rateLimited) {
@@ -2284,6 +2409,42 @@ void (async function viberLoop(): Promise<void> {
 })();
 
 /**
+ * Обход «клиент ждёт ответа» и чистка отметок.
+ *
+ * Раз в минуту, потому что порог задаётся в минутах: проверять реже
+ * означало бы врать в подписи «через 15 хвилин». Чистка — раз в шесть
+ * часов: отметки старше недели уже ничего не защищают.
+ */
+const WAITING_TICK_MS = 60_000;
+const NOTIFY_CLEANUP_MS = 6 * 3600_000;
+
+void (async function waitingLoop(): Promise<void> {
+  for (;;) {
+    try {
+      await notifier.waitingTick();
+    } catch (err) {
+      log('error', 'Обход ожидающих упал', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAITING_TICK_MS));
+  }
+})();
+
+void (async function notifyCleanupLoop(): Promise<void> {
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, NOTIFY_CLEANUP_MS));
+    try {
+      await notifier.cleanupTick();
+    } catch (err) {
+      log('warn', 'Чистка отметок оповещений не удалась', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+})();
+
+/**
  * Воркер связки с CRM.
  *
  * Работает, только если у организации подключена Zoho; иначе задача
@@ -2399,6 +2560,8 @@ async function shutdown(signal: string): Promise<void> {
   await crmWorker.close();
   await outboundWorker.close();
   await mediaWorker.close();
+  await notifier.worker.close();
+  await notifier.queue.close();
   await mediaQueue.close();
   await scenarioQueue.close();
   await crmQueue.close();

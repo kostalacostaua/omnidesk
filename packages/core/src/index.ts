@@ -11,3 +11,5 @@ export * from './zoho-links.js';
 export * from './ai.js';
 export * from './crm-simple.js';
 export * from './viber.js';
+export * from './notify.js';
+export * from './mail.js';

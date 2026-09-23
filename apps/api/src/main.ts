@@ -38,6 +38,7 @@ import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
+import { registerNotify } from './notify.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -312,6 +313,13 @@ registerWidget(app, {
 
 registerAi(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
 
+const notify = registerNotify(app, {
+  pool,
+  connection: redis,
+  requireAuth: (req) => requireAuth(req as never),
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
 registerCrm(app, {
   pool,
   masterKey,
@@ -399,6 +407,13 @@ registerLanding(app, {
   mailer: createMailer(process.env, (line) => app.log.info(line)),
   notifyTo: process.env['LEADS_TO'] ?? process.env['CONTACT_EMAIL'] ?? 'slastin.kv@gmail.com',
   log: (level, msg, extra) => app.log[level](extra ?? {}, msg),
+  // Письмо о заявке уходило и раньше. Оповещение — это то же самое,
+  // но там, где человек смотрит: в группе поддержки и пушем.
+  onLead: (lead) => {
+    void notify.announceLead(lead).catch((err: unknown) => {
+      app.log.warn({ err }, 'Не удалось поставить оповещение о заявке');
+    });
+  },
 });
 
 /**

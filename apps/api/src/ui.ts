@@ -576,6 +576,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
   .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
+  .ntevs{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 4px}
+  .ntev{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);cursor:pointer}
+  .ntev input{width:auto;margin:0}
   .chico.soon{background:var(--panel2);color:var(--t3)}
   .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;
     background:var(--panel2);color:var(--t2);white-space:nowrap}
@@ -676,6 +679,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
     <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
+    <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
     <div class="grow"></div>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
@@ -3068,6 +3072,24 @@ var ZOHO_ERRORS = {
   org:L('Zoho не віддала відомості про організацію. Перевірте права акаунта.')
 };
 
+/**
+ * Переход по ссылке из оповещения.
+ *
+ * В группу и в пуш уходит адрес вида #chat=<id>: человек нажимает на
+ * оповещение и попадает в тот самый диалог, а не на главную, где ещё
+ * надо найти, о чём было оповещение.
+ */
+function readNotifyHash(){
+  var h = location.hash || '';
+  var chat = h.match(/chat=([0-9a-f-]+)/i);
+  var view = h.match(/view=([a-z]+)/i);
+  if (!chat && !view) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  if (chat){ setView('chats'); openConv(chat[1]); return true }
+  if (VIEWS[view[1]]) setView(view[1]);
+  return true;
+}
+
 function readMetaHash(){
   var h = location.hash || '';
 
@@ -3388,6 +3410,248 @@ function tabUsers(){
       };
     });
   }).catch(sErr);
+}
+
+/* ══════════════ Оповіщення ══════════════
+   Инбокс открыт не всегда: ночью, в выходной, в дороге. Клиент
+   написал — и об этом некому узнать. Поэтому событие уходит туда,
+   куда человек и так смотрит.
+
+   Страница устроена как список адресатов, а не как набор галочек
+   «слать/не слать»: групп бывает две — «продажи» и «поломки», — и у
+   каждой свой список событий. */
+
+var NT = { data:null };
+
+function ntKind(k){
+  return { telegram:L('Група Telegram'), email:L('Пошта'), push:L('Пуш у браузер') }[k] || k;
+}
+
+function ntWhere(t){
+  var c = t.config || {};
+  if (t.kind === 'telegram'){
+    var bot = (NT.data.bots || []).filter(function(b){ return b.id === c.channelId })[0];
+    return (bot ? bot.display_name : L('бот не знайдений')) + ' → ' + (c.chatId || '—');
+  }
+  if (t.kind === 'email') return c.to || '—';
+  return NT.data.pushSubscriptions + ' ' + L('пристроїв');
+}
+
+function ntEvents(t){
+  return (NT.data.events || []).map(function(e){
+    var on = (t.events || []).indexOf(e.id) >= 0;
+    return '<label class="ntev" title="' + esc(e.hint) + '">' +
+      '<input type="checkbox" data-ev="' + e.id + '" data-tid="' + t.id + '"' +
+        (on ? ' checked' : '') + '>' + esc(e.title) + '</label>';
+  }).join('');
+}
+
+function ntCard(t){
+  var err = t.lastError && t.lastError.detail;
+  return '<div class="tile">' +
+    '<div class="t1"><div style="min-width:0">' +
+      '<div class="ttl">' + esc(t.title) + '</div>' +
+      '<div class="sub">' + esc(ntKind(t.kind)) + ' · ' + esc(ntWhere(t)) + '</div>' +
+    '</div></div>' +
+    (t.isActive ? '' : L('<div><span class="pill warn">вимкнено</span></div>')) +
+    (err ? '<div><span class="pill crit">' + esc(err) + '</span></div>' : '') +
+    '<div class="ntevs">' + ntEvents(t) + '</div>' +
+    '<div class="acts">' +
+      L('<button class="ghost mini" data-nt-test="') + t.id + L('">Перевірити</button>') +
+      '<button class="ghost mini" data-nt-off="' + t.id + '" data-to="' + (t.isActive ? '0' : '1') + '">' +
+        (t.isActive ? L('Вимкнути') : L('Увімкнути')) + '</button>' +
+      L('<button class="ghost mini" data-nt-del="') + t.id + L('">Видалити</button>') +
+    '</div></div>';
+}
+
+function ntWaitRow(){
+  var minutes = NT.data.waitingAlertMinutes;
+  var opts = [0, 5, 10, 15, 30, 60];
+  if (opts.indexOf(minutes) < 0) opts.push(minutes);
+  return '<div class="card" style="margin-bottom:14px"><div class="row2">' +
+    '<div class="lbl" style="width:auto">' + L('Вважати, що клієнт чекає, через') + '</div>' +
+    '<select id="ntWait" style="max-width:200px">' +
+    opts.sort(function(a,b){ return a-b }).map(function(m){
+      return '<option value="' + m + '"' + (m === minutes ? ' selected' : '') + '>' +
+        (m === 0 ? L('не перевіряти') : m + ' ' + L('хв')) + '</option>';
+    }).join('') + '</select></div>' +
+    L('<div class="hint">Стосується події «Клієнт чекає відповіді». Нагадування приходить один раз ') +
+    L('на повідомлення, а не щохвилини.</div></div>');
+}
+
+function ntAdd(){
+  var bots = NT.data.bots || [];
+  var push = NT.data.push || {};
+
+  var tg = '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
+    L('<div><div class="ttl">Група Telegram</div><div class="sub">Повідомлення читають усі, хто в групі</div></div></div>') +
+    (bots.length
+      ? L('<div class="sub" style="white-space:normal">Додайте бота в групу, зробіть адміністратором, ') +
+        L('і вкажіть ідентифікатор групи — його видно у відповіді getUpdates або в @getmyid_bot.</div>') +
+        '<div class="row2"><select id="ntBot">' +
+        bots.map(function(b){ return '<option value="' + b.id + '">' + esc(b.display_name) + '</option>' }).join('') +
+        '</select><input id="ntChat" placeholder="-4846124329" autocomplete="off"></div>' +
+        L('<div class="acts"><button id="ntAddTg">Додати</button></div>')
+      : L('<div class="sub" style="white-space:normal">Спочатку підключіть Telegram-бота в розділі «Канали»: ') +
+        L('оповіщення надсилає він, окремий токен не потрібен.</div>')) +
+    '<div class="err" id="ntTgErr"></div></div>';
+
+  var mail = '<div class="tile"><div class="t1"><div class="chico soon">@</div>' +
+    L('<div><div class="ttl">Пошта</div><div class="sub">Кілька адрес через кому</div></div></div>') +
+    '<div class="row2"><input id="ntMail" placeholder="shift@example.com" autocomplete="off">' +
+    L('<button id="ntAddMail">Додати</button></div>') +
+    '<div class="err" id="ntMailErr"></div></div>';
+
+  var pushTile = '<div class="tile"><div class="t1"><div class="chico soon">!</div>' +
+    L('<div><div class="ttl">Пуш у браузер</div><div class="sub">Приходить, навіть коли вкладку закрито</div></div></div>') +
+    (push.ready
+      ? L('<div class="sub" style="white-space:normal">Дозвольте сповіщення у браузері — на цьому пристрої. ') +
+        L('Кожен співробітник вмикає їх собі сам.</div>') +
+        L('<div class="acts"><button id="ntPushOn">Дозволити сповіщення</button>') +
+        L('<button class="ghost mini" id="ntAddPush">Додати адресата</button></div>')
+      : L('<div class="sub" style="white-space:normal">Пуш не налаштований на сервері: немає ключів VAPID. ') +
+        L('Їх видає команда npx web-push generate-vapid-keys, далі вони йдуть у змінні ') +
+        L('VAPID_PUBLIC_KEY і VAPID_PRIVATE_KEY.</div>')) +
+    '<div class="err" id="ntPushErr"></div></div>';
+
+  return L('<div class="pg-sec"><h3>Додати адресата</h3><div class="grid">') +
+    tg + mail + pushTile + '</div></div>';
+}
+
+function tabNotify(){
+  api('/settings/notify').then(function(d){
+    NT.data = d;
+    var list = (d.targets || []).map(ntCard).join('');
+
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead(L('Сповіщення'),
+        L('Куди повідомляти про те, що відбувається в інбоксі, коли на нього ніхто не дивиться.')) +
+      ntWaitRow() +
+      (list
+        ? L('<div class="pg-sec"><h3>Кому надсилати</h3><div class="grid">') + list + '</div></div>'
+        : L('<div class="pg-sec"><div class="empty">Поки нікому. Додайте адресата нижче.</div></div>')) +
+      ntAdd() +
+      '</div>';
+
+    wireNotify();
+  }).catch(sErr);
+}
+
+function ntSave(id, body, done){
+  api('/settings/notify/' + id, { method:'PATCH', body:body })
+    .then(function(){ if (done) done() })
+    .catch(function(e){ toast(((e.payload||{}).detail) || L('Не вдалося зберегти')) });
+}
+
+function wireNotify(){
+  el('ntWait').onchange = function(){
+    var v = Number(this.value);
+    api('/settings/notify-waiting', { method:'PATCH', body:{ waitingAlertMinutes:v } })
+      .then(function(){ NT.data.waitingAlertMinutes = v; toast(L('Збережено')) })
+      .catch(function(){ toast(L('Не вдалося зберегти')) });
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ev]'), function(box){
+    box.onchange = function(){
+      var t = (NT.data.targets || []).filter(function(x){ return x.id === box.dataset.tid })[0];
+      if (!t) return;
+      var set = (t.events || []).filter(function(e){ return e !== box.dataset.ev });
+      if (box.checked) set.push(box.dataset.ev);
+      t.events = set;
+      ntSave(t.id, { events:set });
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-nt-test]'), function(b){
+    b.onclick = function(){
+      busy(b, true);
+      api('/settings/notify/' + b.dataset.ntTest + '/test', { method:'POST' })
+        .then(function(){ toast(L('Надіслали перевірку')) })
+        .catch(function(){ toast(L('Не вдалося надіслати')) })
+        .then(function(){ busy(b, false) });
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-nt-off]'), function(b){
+    b.onclick = function(){
+      ntSave(b.dataset.ntOff, { isActive: b.dataset.to === '1' }, tabNotify);
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-nt-del]'), function(b){
+    b.onclick = function(){
+      api('/settings/notify/' + b.dataset.ntDel, { method:'DELETE' })
+        .then(tabNotify)
+        .catch(function(){ toast(L('Не вдалося видалити')) });
+    };
+  });
+
+  if (el('ntAddTg')) el('ntAddTg').onclick = function(){
+    ntCreate('telegram', { channelId: el('ntBot').value, chatId: el('ntChat').value.trim() }, 'ntTgErr');
+  };
+  if (el('ntAddMail')) el('ntAddMail').onclick = function(){
+    ntCreate('email', { to: el('ntMail').value.trim() }, 'ntMailErr');
+  };
+  if (el('ntAddPush')) el('ntAddPush').onclick = function(){
+    ntCreate('push', {}, 'ntPushErr');
+  };
+  if (el('ntPushOn')) el('ntPushOn').onclick = ntPushSubscribe;
+}
+
+/* Новый адресат создаётся сразу подписанным на всё: человек добавляет
+   его, чтобы получать оповещения, а не чтобы потом искать галочки. */
+function ntCreate(kind, config, errBox){
+  var events = (NT.data.events || []).map(function(e){ return e.id });
+  el(errBox).textContent = '';
+  api('/settings/notify', { method:'POST', body:{ kind:kind, config:config, events:events } })
+    .then(function(){ toast(L('Адресата додано')); tabNotify() })
+    .catch(function(e){
+      el(errBox).textContent = ((e.payload||{}).detail) || L('Не вдалося додати');
+    });
+}
+
+/**
+ * Разрешение на пуш.
+ *
+ * Три отдельных шага, и на каждом браузер может сказать «нет»: спросить
+ * разрешение, зарегистрировать служебный сценарий, подписаться. Молча
+ * ничего не делать здесь нельзя — человек нажал кнопку и ждёт ответа.
+ */
+function ntPushSubscribe(){
+  var box = el('ntPushErr');
+  box.textContent = '';
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)){
+    box.textContent = L('Браузер не підтримує пуш-сповіщення');
+    return;
+  }
+  var key = (NT.data.push || {}).publicKey;
+  if (!key){ box.textContent = L('Пуш не налаштований на сервері'); return }
+
+  busy(el('ntPushOn'), true);
+  Notification.requestPermission().then(function(perm){
+    if (perm !== 'granted') throw new Error(L('Сповіщення заборонені у налаштуваннях браузера'));
+    return navigator.serviceWorker.register('/sw.js');
+  }).then(function(reg){
+    return reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: ntKeyBytes(key) });
+  }).then(function(sub){
+    var j = sub.toJSON();
+    return api('/me/push', { method:'POST', body:{ endpoint:j.endpoint, keys:j.keys } });
+  }).then(function(){
+    toast(L('Пуш увімкнено на цьому пристрої'));
+    tabNotify();
+  }).catch(function(e){
+    busy(el('ntPushOn'), false);
+    box.textContent = (e && e.message) || L('Не вдалося увімкнути пуш');
+  });
+}
+
+/* Ключ приходит в виде base64url, а подписка ждёт байты. */
+function ntKeyBytes(key){
+  var pad = new Array((4 - key.length % 4) % 4 + 1).join('=');
+  var b64 = (key + pad).replace(/-/g, '+').replace(/_/g, '/');
+  var raw = atob(b64), out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
 function tabReplies(){
@@ -3802,7 +4066,8 @@ var VIEWS = {
   replies: tabReplies,
   users: tabUsers,
   profile: tabProfile,
-  integrations: pageIntegrations
+  integrations: pageIntegrations,
+  notify: tabNotify
 };
 
 function setView(view){
@@ -3865,6 +4130,7 @@ function start(){
   refresh();
   readMetaHash();
   readPipedriveHash();
+  readNotifyHash();
   // Три секунды — компромисс: живо ощущается и не создаёт заметной
   // нагрузки. Позже сюда встанут вебсокеты, и опрос уйдёт.
   timer = setInterval(refresh, 3000);
