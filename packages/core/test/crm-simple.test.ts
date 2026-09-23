@@ -6,7 +6,10 @@ import {
   bitrixRoot,
   crmPing,
   digits,
+  pipedriveAuthorizeUrl,
+  pipedriveExchange,
   pipedriveFindOrCreate,
+  pipedrivePhone,
   pipedriveRoot,
 } from '../src/crm-simple.js';
 
@@ -139,5 +142,83 @@ describe('номер телефона', () => {
   it('приводится к цифрам', () => {
     expect(digits('+380 (67) 111-22-33')).toBe('380671112233');
     expect(digits(null)).toBe('');
+  });
+});
+
+/**
+ * Приложение Pipedrive: панель в карточке появляется только у
+ * установленного приложения, а установка — это обмен кода на токены.
+ * Ошибка здесь означает, что панель не открывается вовсе, поэтому проверяется
+ * и заголовок, и срок, и обновление.
+ */
+describe('приложение Pipedrive', () => {
+  const APP = { clientId: 'cid', clientSecret: 'secret' };
+
+  function tokens(extra: Record<string, unknown> = {}) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: 'at-1', refresh_token: 'rt-1', expires_in: 3600,
+        api_domain: 'https://kl.pipedrive.com', ...extra,
+      }),
+    };
+  }
+
+  it('ключи приложения идут заголовком Basic, а не в теле', async () => {
+    const fetchImpl = vi.fn(async () => tokens());
+    await pipedriveExchange({ code: 'code-1', redirectUri: 'https://app.rozmovio.com/pipedrive/callback' },
+      APP, { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, Record<string, unknown>];
+    expect(url).toBe('https://oauth.pipedrive.com/oauth/token');
+    const headers = init.headers as Record<string, string>;
+    expect(headers.authorization).toBe('Basic ' + Buffer.from('cid:secret').toString('base64'));
+    expect(init.body as string).toContain('grant_type=authorization_code');
+    expect(init.body as string).not.toContain('client_secret');
+  });
+
+  it('срок жизни берётся с запасом: токен, истёкший в полёте, ищут дольше', async () => {
+    const fetchImpl = vi.fn(async () => tokens({ expires_in: 3600 }));
+    const t = await pipedriveExchange({ code: 'c' }, APP, { fetchImpl });
+    const hour = Date.now() + 3600 * 1000;
+    expect(t.expiresAt).toBeLessThan(hour);
+    expect(t.expiresAt).toBeGreaterThan(hour - 120 * 1000);
+  });
+
+  it('обновление идёт тем же адресом и сохраняет прежний refresh', async () => {
+    const fetchImpl = vi.fn(async () => tokens({ refresh_token: undefined }));
+    const t = await pipedriveExchange({ refreshToken: 'rt-old' }, APP, { fetchImpl });
+    expect((fetchImpl.mock.calls[0]![1]!.body as string)).toContain('grant_type=refresh_token');
+    expect(t.refreshToken).toBe('rt-old');
+  });
+
+  it('ответ без токена — ошибка, а не «подключено»', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    await expect(pipedriveExchange({ code: 'c' }, APP, { fetchImpl }))
+      .rejects.toMatchObject({ code: 'no_token' });
+  });
+
+  it('чужие ключи приложения объясняются словами', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
+    await expect(pipedriveExchange({ code: 'c' }, APP, { fetchImpl }))
+      .rejects.toMatchObject({ code: 'bad_app' });
+  });
+
+  it('адрес разрешения содержит ключ и адрес возврата', () => {
+    const url = pipedriveAuthorizeUrl('cid', 'https://app.rozmovio.com/pipedrive/callback', 'st');
+    expect(url.startsWith('https://oauth.pipedrive.com/oauth/authorize?')).toBe(true);
+    expect(url).toContain('client_id=cid');
+    expect(url).toContain('redirect_uri=https%3A%2F%2Fapp.rozmovio.com%2Fpipedrive%2Fcallback');
+  });
+
+  it('токен приложения представляется как Bearer, а не как x-api-token', async () => {
+    const fetchImpl = vi.fn(async () => ok({ data: { phone: [{ value: '+380671112233', primary: true }] } }));
+    const phone = await pipedrivePhone('kl.pipedrive.com', 'Bearer at-1', '31', { fetchImpl });
+
+    expect(phone).toBe('+380671112233');
+    const headers = (fetchImpl.mock.calls[0]![1] as Record<string, unknown>).headers as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer at-1');
+    expect(headers['x-api-token']).toBeUndefined();
   });
 });

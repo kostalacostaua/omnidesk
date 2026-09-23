@@ -2734,6 +2734,9 @@ function wireAi(ai){
  * отдельно. Разный размер читается как разная важность, и человек
  * ищет глазами, где же тут остальные.
  */
+/** Адрес панели для карточки Pipedrive. */
+function PANEL_URL(){ return location.origin + '/widget/pipedrive' }
+
 function crmCard(opts){
   return '<div class="card int">' +
     '<div class="int-h">' +
@@ -2800,12 +2803,16 @@ function pageIntegrations(){
         L('<input id="bxUrl" placeholder="https://компанія.bitrix24.ua/rest/1/ключ/">') +
         L('<button id="bxAdd">Підключити</button></div>');
 
+    var bxSoon = '<div class="hint" style="margin-top:10px">' +
+      L('Переписка в «Відкритих лініях» Бітрікса — скоро. Зараз листування живе в Rozmovio, ') +
+      L('а в Бітрікс їде картка клієнта і лід.') + '</div>';
+
     var bitrix = crmCard({
       icon:'bitrix', mark:'B24', title:L('Бітрікс24'), sub:L('Хмара і коробка'),
       pill: bx ? (bx.status === 'active' ? L('<span class="pill good">підключений</span>')
                                          : L('<span class="pill warn">потрібно перепідключити</span>'))
                : L('<span class="pill">не підключений</span>'),
-      body: bxBody,
+      body: bxBody + bxSoon,
       acts: '<span class="err" id="bxErr"></span><span class="ok" id="bxOk"></span>'
     });
 
@@ -2824,12 +2831,25 @@ function pageIntegrations(){
         L('<input id="pdTok" type="password" autocomplete="new-password" placeholder="токен API">') +
         L('<button id="pdAdd">Підключити</button></div>');
 
+    // Панель живёт только у установленного приложения — подключение по
+    // токену для неё не годится, это разные вещи.
+    var pdPanel = pd
+      ? '<div class="hint" style="margin-top:10px">' +
+        L('Панель Rozmovio в картці клієнта: створіть застосунок у Pipedrive Developer Hub, ') +
+        L('у розділі App extensions додайте Custom panel з адресою ') +
+        '<code id="pdurl">' + esc(PANEL_URL()) + '</code> ' +
+        '<button class="ghost mini" id="pdcopy">' + L('Скопіювати') + '</button>' +
+        L(', а потім натисніть «Встановити застосунок».') + '</div>' +
+        '<div class="acts" style="margin-top:8px">' +
+        '<button class="ghost" id="pdInstall">' + L('Встановити застосунок') + '</button></div>'
+      : '';
+
     var pipedrive = crmCard({
       icon:'pipedrive', mark:'PD', title:'Pipedrive', sub:L('Клієнт і угода у воронці'),
       pill: pd ? (pd.status === 'active' ? L('<span class="pill good">підключений</span>')
                                          : L('<span class="pill warn">потрібно перепідключити</span>'))
                : L('<span class="pill">не підключений</span>'),
-      body: pdBody,
+      body: pdBody + pdPanel,
       acts: '<span class="err" id="pdErr"></span><span class="ok" id="pdOk"></span>'
     });
 
@@ -2926,6 +2946,21 @@ function pageIntegrations(){
         });
     };
 
+    if (el('pdcopy')) el('pdcopy').onclick = function(){ copyText(el('pdurl').textContent) };
+
+    if (el('pdInstall')) el('pdInstall').onclick = function(){
+      busy(el('pdInstall'), true);
+      api('/settings/pipedrive/start')
+        .then(function(r){ location.href = r.url })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('pdErr').textContent = p.error === 'app_not_configured'
+            ? L('Застосунок Pipedrive ще не налаштований на сервері')
+            : L('Не вдалося почати встановлення');
+          busy(el('pdInstall'), false);
+        });
+    };
+
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-crmcheck]'), function(b){
       b.onclick = function(){
         busy(b, true);
@@ -2969,6 +3004,28 @@ var META_ERRORS = {
   exchange:L('Facebook не підтвердив вхід. Спробуйте ще раз.'),
   unavailable:L('Підключення Facebook ще не увімкнено на сервері.')
 };
+
+/**
+ * Возврат из Pipedrive после разрешения.
+ *
+ * Их страница возвращает нас с одноразовым номером установки: токены
+ * лежат на сервере, в адресе только номер. Привязываем к компании и
+ * сразу чистим адресную строку, чтобы обновление страницы не пыталось
+ * установить то же самое второй раз.
+ */
+function readPipedriveHash(){
+  var h = location.hash || '';
+  var ok = h.match(/pipedrive=([a-z0-9-]+)/i);
+  var err = h.indexOf('pipedrive-error=') >= 0;
+  if (!ok && !err) return;
+  history.replaceState(null, '', location.pathname + location.search);
+
+  if (err){ S.zohoError = L('Pipedrive не підтвердив встановлення'); setView('integrations'); return }
+
+  api('/settings/pipedrive/attach', { method:'POST', body:{ installId: ok[1] } })
+    .then(function(){ S.zohoNote = L('Застосунок Pipedrive встановлено'); setView('integrations') })
+    .catch(function(){ S.zohoError = L('Встановлення застаріло — почніть заново'); setView('integrations') });
+}
 
 var ZOHO_ERRORS = {
   cancelled:L('Підключення Zoho скасовано.'),
@@ -3772,6 +3829,7 @@ function start(){
 
   refresh();
   readMetaHash();
+  readPipedriveHash();
   // Три секунды — компромисс: живо ощущается и не создаёт заметной
   // нагрузки. Позже сюда встанут вебсокеты, и опрос уйдёт.
   timer = setInterval(refresh, 3000);

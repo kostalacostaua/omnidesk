@@ -38,7 +38,7 @@ import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
-import { registerCrm } from './crm.js';
+import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_SVG } from './brand.js';
@@ -295,11 +295,36 @@ registerSettings(app, {
     : {}),
 });
 
-registerWidget(app, { pool, requireAuth: (req) => requireAuth(req as never) });
+registerWidget(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+  crmPhone: crmPhoneReader({
+    pool,
+    masterKey,
+    requireAuth: (req) => requireAuth(req as never),
+    pipedrive: {
+      clientId: process.env['PIPEDRIVE_CLIENT_ID'] ?? '',
+      clientSecret: process.env['PIPEDRIVE_CLIENT_SECRET'] ?? '',
+      appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+    },
+  }),
+});
 
 registerAi(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
 
-registerCrm(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
+registerCrm(app, {
+  pool,
+  masterKey,
+  requireAuth: (req) => requireAuth(req as never),
+  // Ключи приложения Pipedrive нужны только для панели в карточке.
+  // Без них подключение по токену работает как прежде.
+  pipedrive: {
+    clientId: process.env['PIPEDRIVE_CLIENT_ID'] ?? '',
+    clientSecret: process.env['PIPEDRIVE_CLIENT_SECRET'] ?? '',
+    appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+  },
+  redis,
+});
 
 registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));
 

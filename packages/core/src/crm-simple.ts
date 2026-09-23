@@ -179,6 +179,20 @@ export function pipedriveRoot(domain: string): string {
   return `https://${clean}/api/v1`;
 }
 
+/**
+ * Как представляться Pipedrive.
+ *
+ * Токен из личных настроек — это `x-api-token`, а токен приложения —
+ * обычный Bearer. Различать их по виду строки нельзя, поэтому способ
+ * выбирается явно: токен, начинающийся с «Bearer », считается токеном
+ * приложения. Так вызывающему коду не нужно знать про два формата.
+ */
+function pipedriveAuth(token: string): Record<string, string> {
+  return token.startsWith('Bearer ')
+    ? { authorization: token }
+    : { 'x-api-token': token };
+}
+
 async function pipedriveCall(
   domain: string,
   token: string,
@@ -191,7 +205,7 @@ async function pipedriveCall(
   // попадает в журналы прокси, а ключ в журнале считается утёкшим.
   const res = await fetchImpl(`${pipedriveRoot(domain)}${path}`, {
     method: init.method ?? 'GET',
-    headers: { 'content-type': 'application/json', 'x-api-token': token },
+    headers: { 'content-type': 'application/json', ...pipedriveAuth(token) },
     ...(init.body ? { body: JSON.stringify(init.body) } : {}),
   });
 
@@ -255,6 +269,100 @@ export async function pipedriveFindOrCreate(
   }, doFetch).catch(() => undefined);
 
   return { module: 'person', recordId: String(id), url: `${site}/person/${id}` };
+}
+
+/**
+ * Телефон карточки.
+ *
+ * Нужен панели внутри Pipedrive: рамке достаётся только номер записи,
+ * а диалог ищется по номеру телефона, если связь с карточкой ещё не
+ * проставлена.
+ */
+export async function pipedrivePhone(
+  domain: string,
+  token: string,
+  personId: string,
+  opts: { fetchImpl?: FetchLike } = {},
+): Promise<string | null> {
+  const data = (await pipedriveCall(
+    domain, token, `/persons/${encodeURIComponent(personId)}`, {}, opts.fetchImpl,
+  )) as { phone?: Array<{ value?: string; primary?: boolean }> } | null;
+
+  const list = data?.phone ?? [];
+  const primary = list.find((x) => x.primary) ?? list[0];
+  return primary?.value ?? null;
+}
+
+/* ── Приложение Pipedrive ───────────────────────────────────────── */
+
+export interface PipedriveTokens {
+  accessToken: string;
+  refreshToken: string;
+  /** Время в миллисекундах, когда токен перестанет работать. */
+  expiresAt: number;
+  /** Адрес API компании, который Pipedrive вернул вместе с токеном. */
+  apiDomain: string;
+}
+
+/**
+ * Обменять код на токены. Ключи приложения идут в заголовке Basic,
+ * как того требует Pipedrive: в теле запроса их не принимают.
+ */
+export async function pipedriveExchange(
+  params: { code?: string; refreshToken?: string; redirectUri?: string },
+  app: { clientId: string; clientSecret: string },
+  opts: { fetchImpl?: FetchLike } = {},
+): Promise<PipedriveTokens> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const basic = Buffer.from(`${app.clientId}:${app.clientSecret}`).toString('base64');
+
+  const body = new URLSearchParams(
+    params.refreshToken
+      ? { grant_type: 'refresh_token', refresh_token: params.refreshToken }
+      : {
+          grant_type: 'authorization_code',
+          code: params.code ?? '',
+          redirect_uri: params.redirectUri ?? '',
+        },
+  ).toString();
+
+  const res = await fetchImpl('https://oauth.pipedrive.com/oauth/token', {
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${basic}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    throw new CrmError(
+      res.status === 401 ? 'Pipedrive не принял ключи приложения' : `Pipedrive отказал (${res.status})`,
+      res.status === 401 ? 'bad_app' : 'refused',
+    );
+  }
+
+  const data = (await res.json()) as {
+    access_token?: string; refresh_token?: string; expires_in?: number; api_domain?: string;
+  };
+  if (!data.access_token || !data.api_domain) {
+    throw new CrmError('Pipedrive вернул ответ без токена', 'no_token');
+  }
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? params.refreshToken ?? '',
+    // Минута в запасе: токен, истекающий во время запроса, выглядит
+    // как случайный сбой и ищется дольше, чем стоит эта минута.
+    expiresAt: Date.now() + Math.max(60, (data.expires_in ?? 3600) - 60) * 1000,
+    apiDomain: data.api_domain,
+  };
+}
+
+/** Адрес, куда отправлять человека за разрешением. */
+export function pipedriveAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state });
+  return `https://oauth.pipedrive.com/oauth/authorize?${q.toString()}`;
 }
 
 /** Проверка связи при подключении — чтобы опечатку видеть сразу. */

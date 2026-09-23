@@ -26,6 +26,26 @@ import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
  * ⚠️ Внутри шаблонной строки НЕЛЬЗЯ использовать обратные слэши.
  */
 
+/**
+ * Одна и та же страница живёт в двух CRM, и различий между ними ровно
+ * два: чей набор функций подключён и как спросить «чья карточка
+ * открыта». Всё остальное — переписка, поле ответа, шаблоны, смайлы —
+ * общее, поэтому страница собирается один раз с подстановкой этих двух
+ * кусков. Две почти одинаковые страницы разъехались бы к третьему
+ * исправлению.
+ */
+function widgetPage(platform: 'zoho' | 'pipedrive'): string {
+  return WIDGET_HTML
+    .replace('__SDK__', platform === 'zoho' ? ZOHO_SDK : PIPEDRIVE_SDK)
+    .replace('__PLATFORM__', platform);
+}
+
+const ZOHO_SDK =
+  '<script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>';
+
+const PIPEDRIVE_SDK =
+  '<script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>';
+
 export const WIDGET_HTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -36,7 +56,7 @@ export const WIDGET_HTML = `<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
 <script data-theme-boot>${THEME_JS}${EMOJI_JS}</script>
-<script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
+__SDK__
 <style>
   ${BRAND_CSS}
   html,body{height:100%}
@@ -266,6 +286,7 @@ function lookup(){
   if (record.module) q.push('module=' + encodeURIComponent(record.module));
   if (record.phone) q.push('phone=' + encodeURIComponent(record.phone));
   if (record.email) q.push('email=' + encodeURIComponent(record.email));
+  if (record.crm) q.push('crm=' + encodeURIComponent(record.crm));
 
   api('/crm/lookup?' + q.join('&')).then(function(d){
     if (!d.conversationId){
@@ -550,19 +571,16 @@ el('txt').onkeydown = function(e){
   if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); el('send').click() }
 };
 
-/* ── Связь с Zoho ─────────────────────────────────────────────────
-   Виджет живёт в рамке внутри карточки. Zoho сообщает, какая запись
-   открыта; телефон и почту читаем из неё же — по ним ищется диалог. */
-function start(){
-  if (!window.ZOHO || !ZOHO.embeddedApp){
-    // Открыли страницу напрямую, не из CRM: показываем, зачем она, и
-    // убираем вход — вводить почту здесь незачем, диалог всё равно
-    // ищется по открытой карточке.
-    el('gate').style.display = 'none';
-    el('empty').style.display = 'block';
-    el('emptyText').textContent = 'Эта страница открывается внутри карточки клиента в Zoho CRM.';
-    return;
-  }
+/* ── Связь с CRM ──────────────────────────────────────────────────
+   Виджет живёт в рамке внутри карточки, и от CRM ему нужно одно:
+   какая запись открыта. Zoho сообщает это событием и отдаёт поля
+   записи; Pipedrive кладёт номер записи прямо в адрес рамки, а
+   телефон карточки дочитывает наш сервер — у рамки доступа к API
+   нет, и просить его ради телефона незачем. */
+var PLATFORM = '__PLATFORM__';
+
+function startZoho(){
+  if (!window.ZOHO || !ZOHO.embeddedApp) return false;
   ZOHO.embeddedApp.on('PageLoad', function(data){
     var id = data && (data.EntityId || data.entityId);
     if (Array.isArray(id)) id = id[0];
@@ -576,6 +594,41 @@ function start(){
     }).catch(function(){ if (TOKEN) lookup() });
   });
   ZOHO.embeddedApp.init();
+  return true;
+}
+
+function startPipedrive(){
+  var p = new URLSearchParams(location.search);
+  var id = p.get('selectedIds') || p.get('id') || '';
+  if (id.indexOf(',') > 0) id = id.split(',')[0];
+  if (!id) return false;
+
+  record = { module: p.get('resource') || 'person', id: id, phone: null, email: null,
+    crm: 'pipedrive' };
+
+  // Панель обязана поздороваться с Pipedrive, иначе рамка останется
+  // пустой: их страница ждёт ответа десять секунд и закрывает её.
+  if (window.AppExtensionsSDK){
+    try {
+      new AppExtensionsSDK().initialize({ size: { height: 600 } }).catch(function(){});
+    } catch(e){}
+  }
+  if (TOKEN){ el('gate').style.display = 'none'; lookup() }
+  return true;
+}
+
+function start(){
+  var ok = PLATFORM === 'pipedrive' ? startPipedrive() : startZoho();
+  if (ok) return;
+
+  // Открыли страницу напрямую, не из CRM: показываем, зачем она, и
+  // убираем вход — вводить почту здесь незачем, диалог всё равно
+  // ищется по открытой карточке.
+  el('gate').style.display = 'none';
+  el('empty').style.display = 'block';
+  el('emptyText').textContent = PLATFORM === 'pipedrive'
+    ? 'Эта страница открывается внутри карточки клиента в Pipedrive.'
+    : 'Эта страница открывается внутри карточки клиента в Zoho CRM.';
 }
 
 if (!TOKEN) showGate('');
@@ -588,9 +641,14 @@ start();
 export interface WidgetDeps {
   pool: Pool;
   requireAuth: (req: unknown) => { tenantId: string; userId: string } | null;
+  /** Спросить телефон карточки у CRM. Нужен панели Pipedrive. */
+  crmPhone?: (tenantId: string, recordId: string) => Promise<string | null>;
 }
 
 export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
+  const ZOHO_PAGE = widgetPage('zoho');
+  const PIPEDRIVE_PAGE = widgetPage('pipedrive');
+
   app.get('/widget', async (_req, reply: FastifyReply) =>
     reply
       .type('text/html; charset=utf-8')
@@ -603,7 +661,23 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
           'https://*.zoho.sa',
       )
       .header('cache-control', 'no-store, must-revalidate')
-      .send(WIDGET_HTML),
+      .send(ZOHO_PAGE),
+  );
+
+  /**
+   * Та же панель внутри карточки Pipedrive.
+   *
+   * Отдельный адрес, а не параметр в запросе: у рамки свой список
+   * разрешённых родителей, и смешивать их в одном ответе — значит
+   * разрешить Zoho показывать страницу, предназначенную Pipedrive,
+   * и наоборот.
+   */
+  app.get('/widget/pipedrive', async (_req, reply: FastifyReply) =>
+    reply
+      .type('text/html; charset=utf-8')
+      .header('content-security-policy', 'frame-ancestors https://*.pipedrive.com')
+      .header('cache-control', 'no-store, must-revalidate')
+      .send(PIPEDRIVE_PAGE),
   );
 
   /**
@@ -616,7 +690,7 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
    * означало бы, что мы нашли не того человека.
    */
   app.get<{
-    Querystring: { recordId?: string; module?: string; phone?: string; email?: string };
+    Querystring: { recordId?: string; module?: string; phone?: string; email?: string; crm?: string };
   }>('/crm/lookup', async (req, reply) => {
     const auth = opts.requireAuth(req);
     if (!auth) return reply.code(401).send({ error: 'unauthorized' });
@@ -647,6 +721,29 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
       return null;
     });
 
+    /**
+     * Телефон из карточки Pipedrive.
+     *
+     * Рамка панели его не знает: Pipedrive кладёт в адрес только номер
+     * записи. Спрашиваем сами — и только если по номеру записи ничего
+     * не нашлось: карточка в CRM могла появиться раньше переписки.
+     */
+    if (!found && req.query.crm === 'pipedrive' && recordId && opts.crmPhone) {
+      const phone = await opts.crmPhone(auth.tenantId, recordId);
+      const pd = (phone ?? '').replace(/[^0-9]/g, '');
+      if (pd.length >= 9) {
+        const byPhone = await withTenant(opts.pool, auth.tenantId, async (db) => {
+          const { rows } = await db.query<Row>(
+            `${BASE_QUERY} WHERE right(regexp_replace(ct.phone_e164, '[^0-9]', '', 'g'), 9) = $1
+              ORDER BY cv.last_message_at DESC NULLS LAST LIMIT 1`,
+            [pd.slice(-9)],
+          );
+          return rows[0] ?? null;
+        });
+        if (byPhone) return answer(byPhone);
+      }
+    }
+
     if (!found) {
       return {
         conversationId: null,
@@ -656,13 +753,18 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
       };
     }
 
-    return {
-      conversationId: found.id,
-      name: found.display_name,
-      channel: CHANNEL_NAMES[found.channel_type] ?? found.channel_type,
-      canReply: found.window_expires_at ? new Date(found.window_expires_at) > new Date() : true,
-    };
+    return answer(found);
   });
+}
+
+/** Ответ панели: кто клиент, в каком канале и можно ли писать. */
+function answer(found: Row) {
+  return {
+    conversationId: found.id,
+    name: found.display_name,
+    channel: CHANNEL_NAMES[found.channel_type] ?? found.channel_type,
+    canReply: found.window_expires_at ? new Date(found.window_expires_at) > new Date() : true,
+  };
 }
 
 interface Row {
