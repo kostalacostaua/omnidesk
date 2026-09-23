@@ -38,6 +38,7 @@ import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
+import { registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_SVG } from './brand.js';
@@ -296,6 +297,8 @@ registerSettings(app, {
 registerWidget(app, { pool, requireAuth: (req) => requireAuth(req as never) });
 
 registerAi(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
+
+registerCrm(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
 
 registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));
 

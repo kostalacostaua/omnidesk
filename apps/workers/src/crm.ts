@@ -1,5 +1,14 @@
 import type { Redis } from 'ioredis';
-import { decryptJson, withTenant, type CrmSyncJob, type Pool } from '@omnidesk/core';
+import {
+  CrmError,
+  bitrixFindOrCreate,
+  decryptJson,
+  pipedriveFindOrCreate,
+  withTenant,
+  type CrmKind,
+  type CrmSyncJob,
+  type Pool,
+} from '@omnidesk/core';
 
 /**
  * Связка контакта с Zoho CRM.
@@ -168,14 +177,71 @@ export function createCrmSync(deps: CrmDeps) {
     return { module: 'Leads', id: first.details.id };
   }
 
-  return async function handleCrmSync(job: CrmSyncJob): Promise<void> {
-    const inst = await installationFor(job.tenantId);
-    if (!inst) {
-      log('debug', 'CRM не подключена, связывать не с чем', { tenantId: job.tenantId });
-      return;
-    }
+  /**
+   * Битрикс24 и Pipedrive.
+   *
+   * Обе делают одно и то же: ищут клиента по телефону и заводят
+   * карточку, если его нет. Ключ лежит зашифрованным и расшифровывается
+   * ровно на время запроса — в памяти воркера он не живёт.
+   *
+   * Ошибку CRM записываем в подключение: «лиды не создаются» без
+   * причины ищут по логам сервера, куда клиент не заглянет.
+   */
+  async function syncSimpleCrm(
+    job: CrmSyncJob,
+    contact: { display_name: string | null; phone_e164: string | null },
+  ): Promise<boolean> {
+    const conn = await withTenant(pool, job.tenantId, async (db) => {
+      const { rows } = await db.query<{ id: string; kind: string; creds_enc: Buffer }>(
+        `SELECT id, kind, creds_enc FROM crm_connections
+          WHERE status = 'active' ORDER BY created_at ASC LIMIT 1`,
+      );
+      return rows[0] ?? null;
+    });
+    if (!conn) return false;
 
-    const contact = await withTenant(pool, job.tenantId, async (db) => {
+    const source = SOURCE[job.channelType] ?? job.channelType;
+    const person = {
+      name: contact.display_name ?? '',
+      phone: contact.phone_e164,
+      source,
+    };
+
+    try {
+      const creds = decryptJson<{ webhook?: string; domain?: string; token?: string }>(
+        masterKey, job.tenantId, conn.creds_enc,
+      );
+      const match = conn.kind === 'bitrix24'
+        ? await bitrixFindOrCreate(creds.webhook ?? '', person)
+        : await pipedriveFindOrCreate(creds.domain ?? '', creds.token ?? '', person);
+
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE contacts SET crm_kind = $2, crm_module = $3, crm_record_id = $4
+            WHERE id = $1 AND crm_record_id IS NULL`,
+          [job.contactId, conn.kind, match.module, match.recordId],
+        );
+      });
+
+      log('info', 'Контакт связан с CRM', {
+        contactId: job.contactId, crm: conn.kind, module: match.module, recordId: match.recordId,
+      });
+      return true;
+    } catch (err) {
+      const message = err instanceof CrmError ? err.message : 'CRM не ответила';
+      log('warn', 'CRM не приняла контакт', { crm: conn.kind, reason: message });
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE crm_connections SET status = 'degraded', last_error = $2 WHERE id = $1`,
+          [conn.id, message],
+        );
+      });
+      return true; // подключение есть, просто сейчас не вышло
+    }
+  }
+
+  return async function handleCrmSync(job: CrmSyncJob): Promise<void> {
+    const contactRow = await withTenant(pool, job.tenantId, async (db) => {
       const { rows } = await db.query<{
         display_name: string | null;
         phone_e164: string | null;
@@ -186,9 +252,22 @@ export function createCrmSync(deps: CrmDeps) {
       return rows[0] ?? null;
     });
 
-    if (!contact) return;
+    if (!contactRow) return;
     // Связь уже есть — второй раз не ищем и лид не плодим.
-    if (contact.crm_record_id) return;
+    if (contactRow.crm_record_id) return;
+
+    const contact = contactRow;
+
+    // Zoho идёт первой: у неё в карточке живёт наш виджет, и связь с
+    // ней ценнее. Нет Zoho — пробуем Битрикс или Pipedrive.
+    const inst = await installationFor(job.tenantId);
+    if (!inst) {
+      const handled = await syncSimpleCrm(job, contact);
+      if (!handled) {
+        log('debug', 'CRM не подключена, связывать не с чем', { tenantId: job.tenantId });
+      }
+      return;
+    }
 
     const token = await accessToken(job.tenantId, inst);
     if (!token) return;

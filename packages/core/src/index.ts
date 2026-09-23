@@ -9,3 +9,4 @@ export * from './meta.js';
 export * from './scenario.js';
 export * from './zoho-links.js';
 export * from './ai.js';
+export * from './crm-simple.js';

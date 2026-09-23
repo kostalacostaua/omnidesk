@@ -337,6 +337,21 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Профиль: шапка, строки данных и числа. Не таблица и не карточки
      в ряд — обычное представление, в котором правится то, что можно
      править, и видно, что править нельзя. */
+  /* Карточка интеграции. Одинаковая для всех CRM: разный размер
+     читается как разная важность. */
+  .int{margin-bottom:12px}
+  .int-h{display:flex;align-items:center;gap:12px}
+  .int-t{font-size:15px;font-weight:600;letter-spacing:-.015em}
+  .int-s{font-size:12.5px;color:var(--t3);line-height:1.55}
+  .int-b{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+  .int-a{margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .int-a .err,.int-a .ok{margin-top:0}
+  .int-row{display:flex;align-items:center;gap:12px;padding:6px 0}
+  .int-n{font-size:13.5px;font-weight:600}
+  .int-rb{display:flex;gap:6px;margin-left:auto;flex:none}
+  .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
+  .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
+  .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
   .aclbox{padding:2px 0 14px}
   .aclgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px}
   .aclrow{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r1);
@@ -2547,74 +2562,137 @@ function wireAi(ai){
   });
 }
 
+/**
+ * Интеграции.
+ *
+ * Все CRM на этой странице выглядят одинаково: значок, название,
+ * состояние и действия. Раньше Zoho занимала блок втрое больше
+ * остальных — не потому что важнее, а потому что её карточка собиралась
+ * отдельно. Разный размер читается как разная важность, и человек
+ * ищет глазами, где же тут остальные.
+ */
+function crmCard(opts){
+  return '<div class="card int">' +
+    '<div class="int-h">' +
+    '<div class="chico ' + opts.icon + '">' + opts.mark + '</div>' +
+    '<div style="min-width:0"><div class="int-t">' + esc(opts.title) + '</div>' +
+    '<div class="int-s">' + esc(opts.sub) + '</div></div>' +
+    '<div class="grow"></div>' + (opts.pill || '') + '</div>' +
+    (opts.body ? '<div class="int-b">' + opts.body + '</div>' : '') +
+    (opts.acts ? '<div class="int-a">' + opts.acts + '</div>' : '') +
+    '</div>';
+}
+
 function pageIntegrations(){
-  // Две настройки на одной странице, значит и данные нужны обе сразу:
-  // рисовать страницу дважды — это мигание на ровном месте.
   Promise.all([
     api('/settings/zoho'),
-    api('/settings/ai').catch(function(){ return null })
+    api('/settings/ai').catch(function(){ return null }),
+    api('/settings/crm').catch(function(){ return null })
   ]).then(function(res){
-    var d = res[0], ai = res[1] || {};
+    var d = res[0], ai = res[1] || {}, crm = (res[2] && res[2].connections) || [];
     var list = d.installations || [];
+    var bx = null, pd = null;
+    crm.forEach(function(c){ if (c.kind === 'bitrix24') bx = c; if (c.kind === 'pipedrive') pd = c });
 
-    var body = !d.configured
-      ? '<div class="sub" style="white-space:normal">Подключение ещё не настроено на сервере: ' +
-        'не заданы ключи приложения Zoho. Это делается один раз для всего сервиса.</div>'
+    // ── Zoho ──────────────────────────────────────────────────────
+    var zohoBody = !d.configured
+      ? '<div class="int-s" style="white-space:normal">Подключение ещё не настроено на сервере: ' +
+        'не заданы ключи приложения Zoho.</div>'
       : list.length
         ? list.map(function(z){
-            return '<div class="item"><div style="min-width:0">' +
-              '<div class="t">' + esc(z.org_name || 'Организация Zoho') +
-                (z.status === 'active'
-                  ? '<span class="pill good">подключена</span>'
-                  : '<span class="pill warn">нужно переподключить</span>') + '</div>' +
-              '<div class="s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div>' +
-              '</div><div class="row" style="gap:6px;flex:none">' +
+            return '<div class="int-row"><div style="min-width:0">' +
+              '<div class="int-n">' + esc(z.org_name || 'Организация Zoho') + '</div>' +
+              '<div class="int-s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div></div>' +
+              '<div class="int-rb">' +
               '<button class="ghost mini" data-zcheck="' + z.id + '">Проверить</button>' +
-              '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button>' +
-              '</div></div>';
+              '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button></div></div>';
           }).join('')
-        : '<div class="sub" style="white-space:normal">Войдите под аккаунтом Zoho той организации, ' +
-          'с которой работаете. Мы попросим доступ к контактам и лидам — ровно столько, сколько нужно, ' +
-          'чтобы найти клиента по номеру и завести нового.</div>';
+        : '<div class="int-s" style="white-space:normal">Войдите под аккаунтом Zoho той ' +
+          'организации, с которой работаете: мы попросим доступ к контактам и лидам — ровно ' +
+          'столько, чтобы найти клиента по номеру и завести нового.</div>';
+
+    var zoho = crmCard({
+      icon:'zoho', mark:'Z', title:'Zoho CRM', sub:'Переписка прямо в карточке клиента',
+      pill: list.length ? '<span class="pill good">подключена</span>'
+                        : '<span class="pill">не подключена</span>',
+      body: zohoBody,
+      acts: d.configured
+        ? '<button id="zGo">' + (list.length ? 'Подключить ещё организацию' : 'Войти через Zoho') +
+          '</button><span class="err" id="zErr"></span><span class="ok" id="zOk"></span>'
+        : ''
+    });
+
+    // ── Битрикс24 ─────────────────────────────────────────────────
+    var bxBody = bx
+      ? '<div class="int-row"><div style="min-width:0">' +
+        '<div class="int-n">' + esc(bx.title) + '</div>' +
+        '<div class="int-s">' + (bx.lastError ? esc(bx.lastError) : 'лиды уходят сюда') + '</div>' +
+        '</div><div class="int-rb">' +
+        '<button class="ghost mini" data-crmcheck="' + bx.id + '">Проверить</button>' +
+        '<button class="ghost mini" data-crmdel="' + bx.id + '">Отключить</button></div></div>'
+      : '<div class="int-s" style="white-space:normal">Подходит и облако, и коробка на своём ' +
+        'сервере — отличается только адрес. В Битриксе: <b>Разработчикам → Другое → ' +
+        'Входящий вебхук</b>, права <b>crm</b>. Скопируйте адрес вебхука сюда.</div>' +
+        '<div class="row2" style="margin-top:9px">' +
+        '<input id="bxUrl" placeholder="https://компания.bitrix24.ua/rest/1/ключ/">' +
+        '<button id="bxAdd">Подключить</button></div>';
+
+    var bitrix = crmCard({
+      icon:'bitrix', mark:'B24', title:'Битрикс24', sub:'Облако и коробка',
+      pill: bx ? (bx.status === 'active' ? '<span class="pill good">подключён</span>'
+                                         : '<span class="pill warn">нужно переподключить</span>')
+               : '<span class="pill">не подключён</span>',
+      body: bxBody,
+      acts: '<span class="err" id="bxErr"></span><span class="ok" id="bxOk"></span>'
+    });
+
+    // ── Pipedrive ─────────────────────────────────────────────────
+    var pdBody = pd
+      ? '<div class="int-row"><div style="min-width:0">' +
+        '<div class="int-n">' + esc(pd.title) + '</div>' +
+        '<div class="int-s">' + (pd.lastError ? esc(pd.lastError) : 'лиды уходят сюда') + '</div>' +
+        '</div><div class="int-rb">' +
+        '<button class="ghost mini" data-crmcheck="' + pd.id + '">Проверить</button>' +
+        '<button class="ghost mini" data-crmdel="' + pd.id + '">Отключить</button></div></div>'
+      : '<div class="int-s" style="white-space:normal">Токен — в Pipedrive: ' +
+        '<b>Личные настройки → API</b>. Домен компании виден в адресной строке.</div>' +
+        '<div class="row2" style="margin-top:9px">' +
+        '<input id="pdDom" placeholder="компания.pipedrive.com">' +
+        '<input id="pdTok" type="password" autocomplete="new-password" placeholder="токен API">' +
+        '<button id="pdAdd">Подключить</button></div>';
+
+    var pipedrive = crmCard({
+      icon:'pipedrive', mark:'PD', title:'Pipedrive', sub:'Клиент и сделка в воронке',
+      pill: pd ? (pd.status === 'active' ? '<span class="pill good">подключён</span>'
+                                         : '<span class="pill warn">нужно переподключить</span>')
+               : '<span class="pill">не подключён</span>',
+      body: pdBody,
+      acts: '<span class="err" id="pdErr"></span><span class="ok" id="pdOk"></span>'
+    });
 
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке клиента, ' +
-        'а новые обращения превращаются в лиды.') +
-      '<div class="pg-sec"><h3>CRM</h3><div>' +
-      '<div class="tile" style="cursor:default"><div class="t1"><div class="chico messenger">Z</div>' +
-      '<div><div class="ttl">Zoho CRM</div><div class="sub">Переписка в карточке клиента</div></div></div>' +
-      body +
-      (d.configured
-        ? '<div class="acts"><button id="zGo">' +
-          (list.length ? 'Подключить ещё организацию' : 'Войти через Zoho') + '</button></div>'
-        : '') +
-      '<div class="err" id="zErr"></div><div class="ok" id="zOk"></div>' +
-      '</div></div></div>' +
+      pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке ' +
+        'клиента, а новые обращения превращаются в лиды.') +
+
+      '<div class="pg-sec"><h3>CRM</h3>' + zoho + bitrix + pipedrive + '</div>' +
 
       (list.length
         ? '<div class="pg-sec"><h3>Виджет в карточке клиента</h3><div class="card">' +
-          '<div class="s" style="color:var(--t2);line-height:1.7">Zoho заводит виджеты только ' +
-          'из своих настроек — программно их создать нельзя. Это делается один раз и занимает минуту.</div>' +
+          '<div class="int-s" style="white-space:normal;line-height:1.7">Zoho заводит виджеты ' +
+          'только из своих настроек — программно их создать нельзя. Это делается один раз и ' +
+          'занимает минуту.</div>' +
           '<ol class="steps" style="margin-top:10px">' +
-          '<li>В Zoho CRM: <b>Настройки</b> (шестерёнка) → <b>Developer Space</b> → <b>Widgets</b> → ' +
-          '<b>Create Widget</b>.</li>' +
+          '<li>В Zoho CRM: <b>Настройки</b> (шестерёнка) → <b>Developer Space</b> → ' +
+          '<b>Widgets</b> → <b>Create Widget</b>.</li>' +
           '<li>Имя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>' +
           '<li>Base URL — вот этот адрес: <code id="wurl">' + esc(WIDGET_URL()) + '</code> ' +
           '<button class="ghost mini" id="wcopy">Скопировать</button></li>' +
           '<li>Сохранить. Затем <b>Настройки → Модули и поля → Контакты → Связанные списки</b> ' +
           'и добавить <b>Rozmovio</b>. То же для модуля <b>Лиды</b>.</li>' +
-          '</ol>' +
-          '<div class="hint">В карточке появится блок с перепиской. Первый раз он попросит вашу ' +
-          'почту и код — один раз на браузер.</div></div></div>'
+          '</ol></div></div>'
         : '') +
 
       aiSection(ai) +
-
-      '<div class="pg-sec"><h3>Что дальше</h3>' +
-      '<div class="card"><div class="s" style="color:var(--t2);line-height:1.7">' +
-      'После подключения: входящее сообщение ищет контакт по номеру телефона и создаёт лид, ' +
-      'если такого нет; переписка показывается прямо в карточке Zoho виджетом; ответ из виджета ' +
-      'уходит в тот канал, откуда написал клиент.</div></div></div>' +
       '</div>';
 
     wireAi(ai);
@@ -2632,16 +2710,7 @@ function pageIntegrations(){
     };
 
     if (el('wcopy')) el('wcopy').onclick = function(){
-      var text = el('wurl').textContent;
-      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function(){ toast('Адрес скопирован') });
-      else {
-        // Старый способ на случай, если буфер обмена недоступен
-        // (например, страница открыта не по https).
-        var t = document.createElement('textarea');
-        t.value = text; document.body.appendChild(t); t.select();
-        document.execCommand('copy'); document.body.removeChild(t);
-        toast('Адрес скопирован');
-      }
+      copyText(el('wurl').textContent);
     };
 
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zcheck]'), function(b){
@@ -2666,9 +2735,64 @@ function pageIntegrations(){
     armDelete(pageBox().querySelectorAll('[data-zdel]'), function(b){
       return api('/settings/zoho/' + b.dataset.zdel, { method:'DELETE' }).then(pageIntegrations);
     });
+
+    // ── Битрикс и Pipedrive: подключение, проверка, отключение ────
+    if (el('bxAdd')) el('bxAdd').onclick = function(){
+      el('bxErr').textContent = '';
+      busy(el('bxAdd'), true);
+      api('/settings/crm', { method:'POST', body:{ kind:'bitrix24', webhook: el('bxUrl').value } })
+        .then(function(r){ toast('Битрикс подключён' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('bxErr').textContent = p.detail || 'Не удалось подключить';
+          busy(el('bxAdd'), false);
+        });
+    };
+
+    if (el('pdAdd')) el('pdAdd').onclick = function(){
+      el('pdErr').textContent = '';
+      busy(el('pdAdd'), true);
+      api('/settings/crm', { method:'POST', body:{
+        kind:'pipedrive', domain: el('pdDom').value, token: el('pdTok').value
+      }})
+        .then(function(r){ toast('Pipedrive подключён' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('pdErr').textContent = p.detail || 'Не удалось подключить';
+          busy(el('pdAdd'), false);
+        });
+    };
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-crmcheck]'), function(b){
+      b.onclick = function(){
+        busy(b, true);
+        api('/settings/crm/' + b.dataset.crmcheck + '/check', { method:'POST' })
+          .then(function(r){ toast('Связь есть' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+          .catch(function(e){
+            var p = e.payload || {};
+            alertLine(p.detail || 'CRM не ответила');
+            busy(b, false);
+          });
+      };
+    });
+
+    armDelete(pageBox().querySelectorAll('[data-crmdel]'), function(b){
+      return api('/settings/crm/' + b.dataset.crmdel, { method:'DELETE' }).then(pageIntegrations);
+    });
   }).catch(sErr);
 }
 
+/** Копирование с запасным способом: буфер недоступен без https. */
+function copyText(text){
+  if (navigator.clipboard){
+    navigator.clipboard.writeText(text).then(function(){ toast('Скопировано') });
+    return;
+  }
+  var t = document.createElement('textarea');
+  t.value = text; document.body.appendChild(t); t.select();
+  document.execCommand('copy'); document.body.removeChild(t);
+  toast('Скопировано');
+}
 
 /* ── Подключение Facebook: Messenger и Instagram ──────────────────
    Возврат из Facebook приходит на адрес приложения с меткой в хвосте
