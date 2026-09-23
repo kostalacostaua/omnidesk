@@ -271,6 +271,22 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
           }
         }
 
+        /**
+         * Введённое руками число может оказаться не тем.
+         *
+         * В адресе кабинета Meta рядом стоят два идентификатора —
+         * business_id и asset_id, — и первый бросается в глаза раньше.
+         * Разница видна только по ответу Graph, и звучит он как
+         * «объект не существует», что человека окончательно запутывает.
+         *
+         * Поэтому не придираемся: если число оказалось портфолио,
+         * спрашиваем у него аккаунты и выбираем тот, к которому
+         * действительно привязан подключаемый номер. Заодно это решает
+         * случай нескольких аккаунтов с похожими названиями — угадывать
+         * по имени было бы гаданием.
+         */
+        if (waba) waba = await resolveWaba(waba, token, phoneNumberId);
+
         if (waba) {
           await graphPost(`${waba}/subscribed_apps`, { access_token: token }, undefined);
         } else {
@@ -1557,4 +1573,57 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     return { results };
   });
 
+}
+
+/**
+ * Довести введённый идентификатор до настоящего аккаунта WhatsApp.
+ *
+ * Принимаем и идентификатор аккаунта, и идентификатор бизнес-портфолио:
+ * человек берёт их из одного адреса, и путает их закономерно.
+ * Принадлежность проверяем по номеру — он тут единственное, что мы знаем
+ * наверняка.
+ */
+async function resolveWaba(
+  id: string,
+  token: string,
+  phoneNumberId: string,
+): Promise<string | null> {
+  const numbersOf = async (waba: string): Promise<string[]> => {
+    const res = await graphGet<{ data?: Array<{ id?: string }> }>(`${waba}/phone_numbers`, {
+      access_token: token,
+      fields: 'id',
+    });
+    return (res.data ?? []).map((n) => String(n.id ?? ''));
+  };
+
+  // Сам аккаунт: у него есть номера, и среди них должен быть наш.
+  try {
+    const nums = await numbersOf(id);
+    if (nums.includes(phoneNumberId)) return id;
+    // Аккаунт настоящий, но номер в другом — значит выбран не тот.
+    if (nums.length) return null;
+  } catch {
+    /* не аккаунт — пробуем как портфолио */
+  }
+
+  for (const edge of ['owned_whatsapp_business_accounts', 'client_whatsapp_business_accounts']) {
+    try {
+      const res = await graphGet<{ data?: Array<{ id?: string }> }>(`${id}/${edge}`, {
+        access_token: token,
+      });
+      for (const row of res.data ?? []) {
+        const candidate = String(row.id ?? '');
+        if (!candidate) continue;
+        try {
+          if ((await numbersOf(candidate)).includes(phoneNumberId)) return candidate;
+        } catch {
+          /* к этому аккаунту доступа нет — смотрим следующий */
+        }
+      }
+    } catch {
+      /* портфолио тоже не подошло — остаётся следующая связь */
+    }
+  }
+
+  return null;
 }

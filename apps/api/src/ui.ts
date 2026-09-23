@@ -2749,7 +2749,7 @@ function tabChannels(){
       '<div class="row2"><input id="waTok" type="password" placeholder="EAAG..." autocomplete="off">' +
       '<input id="waNum" placeholder="Phone number ID" autocomplete="off"></div>' +
       '<div class="row2"><input id="waWaba" placeholder="' +
-        L('ID акаунта WhatsApp Business (якщо попросимо)') + '" autocomplete="off"></div>' +
+        L('ID акаунта WhatsApp: asset_id з адреси WhatsApp Manager') + '" autocomplete="off"></div>' +
       L('<div class="acts"><button id="waGo">Підключити</button></div>') +
       L('<div class="hint">Поза вікном 24 годин WhatsApp дозволяє лише погоджені шаблони — ') +
       L('вони підтягнуться з вашого акаунта самі.</div>') +
