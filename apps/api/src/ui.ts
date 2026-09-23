@@ -828,7 +828,8 @@ function fmtDate(iso){
 var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
-  messenger:'Messenger', viber_business:L('Viber для бізнесу') };
+  messenger:'Messenger', viber_business:L('Viber для бізнесу'),
+  viber_user:L('Viber номерний') };
 
 var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
 
@@ -2327,7 +2328,7 @@ function editRow(id, value, save, errId){
    автоответы и расписание, и в списке им места нет. */
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
-  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB' };
+  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB' };
 
 function chPill(c){
   return c.status === 'active' ? L('<span class="pill ok">працює</span>')
@@ -2393,9 +2394,8 @@ function tabChannels(){
 
       '<div class="tile"><div class="t1"><div class="chico viber_business">VB</div>' +
       L('<div><div class="ttl">Viber для бізнесу</div><div class="sub">Імʼя відправника замість номера</div></div></div>') +
-      L('<div class="sub" style="white-space:normal">Особистий Viber за номером ми не підключаємо: офіційного способу ') +
-      L('у Viber немає, а обхідний — це емуляція застосунку, за яку номер блокують. Працює інше: Viber для бізнесу ') +
-      L('через офіційного партнера <b>TurboSMS</b>: клієнт бачить назву компанії, а не номер.</div>') +
+      L('<div class="sub" style="white-space:normal">Клієнти пишуть у Viber на назву вашої компанії, ') +
+      L('листування зʼявляється тут. Підключення — через офіційного партнера <b>TurboSMS</b>.</div>') +
       L('<div class="hint">Ключ API і погоджене імʼя відправника — у кабінеті партнера, розділ Viber. ') +
       L('Відповідати можна добу після повідомлення клієнта: далі Viber закриває сесію.</div>') +
       '<div class="row2"><input id="vbToken" type="password" placeholder="API key" autocomplete="off">' +
@@ -2403,7 +2403,7 @@ function tabChannels(){
       L('<div class="acts"><button id="vbGo">Підключити</button></div>') +
       '<div class="err" id="vbErr"></div></div>' +
 
-      ['whatsapp_cloud','whatsapp_user'].map(function(t){
+      ['whatsapp_cloud','whatsapp_user','viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
           L('<div class="sub">Готується</div></div></div>') +

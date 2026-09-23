@@ -378,7 +378,8 @@ export const LANDING_HTML = `<!DOCTYPE html>
       ${chCard(ICON_IG, 'ch.ig')}
       ${chCard(ICON_MS, 'ch.ms')}
       ${chCard(ICON_MS, 'ch.wa', true)}
-      ${chCard(ICON_MS, 'ch.vb', true)}
+      ${chCard(ICON_MS, 'ch.vb')}
+      ${chCard(ICON_MS, 'ch.vbn', true)}
     </div>
   </div>
 </section>
@@ -554,7 +555,8 @@ var T = {
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Повідомлення бізнес-акаунту, відповіді з імені акаунта, історії та реакції.',
     'ch.ms.t':'Facebook Messenger','ch.ms.s':'Повідомлення сторінці. Відповідь оператора доходить і через добу.',
     'ch.wa.t':'WhatsApp Business','ch.wa.s':'У роботі: підключення через Cloud API.',
-    'ch.vb.t':'Viber','ch.vb.s':'У планах після WhatsApp.',
+    'ch.vb.t':'Viber для бізнесу','ch.vb.s':'Клієнти пишуть на назву компанії. Підключення через офіційного партнера.',
+    'ch.vbn.t':'Viber номерний','ch.vbn.s':'У роботі.',
     'ready':'працює','soon':'скоро',
     'how.h':'Три кроки до першого повідомлення','how.lead':'Нічого встановлювати не треба: сервіс працює у браузері та всередині Zoho CRM.',
     'how.s1t':'Реєстрація','how.s1p':'Вводите робочу пошту й код із листа. Пароль вигадувати не потрібно.',
@@ -608,7 +610,8 @@ var T = {
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Messages to the business account, replies as the account, story replies and reactions.',
     'ch.ms.t':'Facebook Messenger','ch.ms.s':'Messages to the Page. An agent reply is delivered even after 24 hours.',
     'ch.wa.t':'WhatsApp Business','ch.wa.s':'In progress: Cloud API connection.',
-    'ch.vb.t':'Viber','ch.vb.s':'Planned after WhatsApp.',
+    'ch.vb.t':'Viber for Business','ch.vb.s':'Customers write to your company name. Connected through an official partner.',
+    'ch.vbn.t':'Viber by number','ch.vbn.s':'In progress.',
     'ready':'live','soon':'soon',
     'how.h':'Three steps to the first message','how.lead':'Nothing to install: it runs in the browser and inside Zoho CRM.',
     'how.s1t':'Sign up','how.s1p':'Enter your work email and the code from the letter. No password to invent.',
