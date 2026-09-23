@@ -64,6 +64,7 @@ export function buildOpenApi(appUrl: string): Record<string, unknown> {
       { name: 'Шаблоны', description: 'Заготовки ответов и файлы к ним' },
       { name: 'Сценарии', description: 'Цепочки автоматических шагов' },
       { name: 'Свой бот', description: 'Приём обновлений от самописного бота' },
+      { name: 'ИИ', description: 'Своя модель: настройка, проверка и черновик ответа' },
     ],
     components: {
       securitySchemes: {
@@ -473,6 +474,62 @@ export function buildOpenApi(appUrl: string): Record<string, unknown> {
             content: { 'application/json': { schema: { type: 'object', description: 'Update от Telegram' } } },
           },
           responses: { 200: json({ type: 'object' }, 'Принято'), 401: ERR },
+        },
+      },
+      '/settings/ai': {
+        get: {
+          tags: ['ИИ'],
+          summary: 'Настройки ИИ (ключ не возвращается — только его хвост)',
+          security: BEARER,
+          responses: { 200: json({ type: 'object' }), 401: ERR },
+        },
+        put: {
+          tags: ['ИИ'],
+          summary: 'Подключить модель или изменить настройки',
+          security: BEARER,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    baseUrl: { type: 'string', description: 'Корень совместимого с OpenAI API' },
+                    model: { type: 'string' },
+                    apiKey: { type: 'string', description: 'Пусто — оставить прежний ключ' },
+                    systemPrompt: { type: 'string', description: 'Что модель должна знать о компании' },
+                    mode: { type: 'string', enum: ['off', 'draft', 'auto'] },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 200: json({ type: 'object' }), 400: ERR, 401: ERR },
+        },
+        delete: {
+          tags: ['ИИ'],
+          summary: 'Отключить модель и стереть ключ',
+          security: BEARER,
+          responses: { 200: json({ type: 'object' }), 401: ERR },
+        },
+      },
+      '/settings/ai/check': {
+        post: {
+          tags: ['ИИ'],
+          summary: 'Проверить связь с провайдером',
+          security: BEARER,
+          responses: { 200: json({ type: 'object' }), 400: ERR, 401: ERR },
+        },
+      },
+      '/conversations/{id}/ai-draft': {
+        post: {
+          tags: ['ИИ'],
+          summary: 'Черновик ответа по переписке (ничего не отправляет)',
+          security: BEARER,
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: { 200: json({ type: 'object' }), 400: ERR, 401: ERR, 502: ERR },
         },
       },
       '/quick-replies': {

@@ -298,6 +298,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .card h3{margin:0 0 10px;font-size:12.5px;letter-spacing:-.01em;font-weight:700}
   .row2{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .row2>input,.row2>select,.row2>textarea{flex:1;min-width:150px}
+  /* Подпись слева от поля: в узкой колонке настроек она переносится
+     вниз вместе с полем, потому и фиксированная ширина, а не таблица. */
+  .lbl{font-size:11.5px;color:var(--t3);width:104px;flex:none;align-self:center}
   .item{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;
     padding:10px 0;border-bottom:1px solid var(--line)}
   .item:last-child{border-bottom:0;padding-bottom:0}
@@ -684,6 +687,8 @@ var TOKEN = tokenRead();
 var NL = String.fromCharCode(10);
 var current = null, convs = [], timer = null;
 var QR = [], CHANNELS = [], USERS = [], ME = null, COUNTS = {};
+// Подключён ли ИИ: от этого зависит, показывать ли кнопку черновика.
+var AI = { ready:false };
 var F = { status:'open', assignee:'all', channelId:'', q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
@@ -1132,6 +1137,10 @@ function renderComposer(force){
     '<button class="icob" id="clip" title="Прикрепить файл">' + icon('clip') + '</button>' +
     '<button class="icob" id="emo" title="Смайлы">' + icon('smile') + '</button>' +
     '<button class="icob" id="tpl" title="Шаблоны ответов">' + icon('bolt') + '</button>' +
+    // Кнопка черновика появляется, только когда ИИ подключён: пустая
+    // кнопка, которая на нажатие отвечает «не настроено», — это
+    // обещание, которого интерфейс не держит.
+    (AI.ready ? '<button class="icob" id="ai" title="Черновик ответа от ИИ">✨</button>' : '') +
     '<textarea id="txt" rows="1" placeholder="Ответ клиенту. Enter — отправить, Shift+Enter — перенос"></textarea>' +
     '<button id="send">Отправить</button></div><div class="err" id="sendErr"></div>';
 
@@ -1164,7 +1173,38 @@ function renderComposer(force){
   el('send').onclick = send;
   el('emo').onclick = toggleEmoji;
   el('tpl').onclick = toggleTemplates;
+  if (el('ai')) el('ai').onclick = aiDraft;
   ta.focus();
+}
+
+/**
+ * Черновик от ИИ.
+ *
+ * Текст подставляется в поле ответа и не уходит клиенту: последнее
+ * слово за оператором. Уже набранное не затирается — дописываем ниже,
+ * иначе одно нажатие стёрло бы готовую фразу.
+ */
+function aiDraft(){
+  var b = el('ai'), ta = el('txt');
+  if (!b || !current) return;
+  busy(b, true);
+  api('/conversations/' + current + '/ai-draft', { method:'POST' })
+    .then(function(r){
+      var text = (r && r.text) || '';
+      if (!text) return;
+      ta.value = ta.value.trim() ? ta.value.trim() + NL + text : text;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+      ta.focus();
+    })
+    .catch(function(e){
+      var p = e.payload || {};
+      alertLine(p.error === 'not_connected'
+        ? 'ИИ не подключён — включите его в разделе «Интеграции»'
+        : p.error === 'nothing_to_answer' ? 'В диалоге ещё нет текста, на который отвечать'
+        : (p.detail || 'ИИ не ответил'));
+    })
+    .then(function(){ busy(b, false) });
 }
 
 function expand(ta){
@@ -2200,8 +2240,113 @@ function openChannel(id){
 /** Адрес виджета: тот же сервер, на котором открыто приложение. */
 function WIDGET_URL(){ return location.origin + '/widget' }
 
+/**
+ * Раздел «ИИ» на странице интеграций.
+ *
+ * Ключ вводится один раз и больше не показывается — в поле остаётся
+ * хвост, чтобы человек понимал, тот ли ключ записан. Режим по
+ * умолчанию «черновик»: модель пишет подсказку оператору и ничего не
+ * отправляет сама. Автоответ включается осознанно.
+ */
+function aiSection(ai){
+  var modes = [
+    ['off', 'Выключен'],
+    ['draft', 'Черновик оператору'],
+    ['auto', 'Отвечает клиенту сам']
+  ];
+  var mode = ai.mode || 'draft';
+
+  return '<div class="pg-sec"><h3>ИИ-ответы</h3><div class="card">' +
+    '<div class="t" style="display:flex;align-items:center;gap:8px">Своя модель' +
+    (ai.connected ? '<span class="pill good">подключена</span>'
+                  : '<span class="pill">не подключена</span>') + '</div>' +
+    '<div class="s" style="color:var(--t2);line-height:1.7;margin-top:6px">' +
+    'Ключ ваш: вы платите провайдеру напрямую и видите расход у себя. Подходит любой сервис ' +
+    'с совместимым с OpenAI адресом — сам OpenAI, OpenRouter, Groq, локальная модель.</div>' +
+
+    '<div class="row2" style="margin-top:10px"><label class="lbl">Адрес API</label>' +
+    '<input id="aiUrl" placeholder="https://api.openai.com/v1" value="' +
+      esc(ai.baseUrl || 'https://api.openai.com/v1') + '"></div>' +
+
+    '<div class="row2" style="margin-top:9px"><label class="lbl">Модель</label>' +
+    '<input id="aiModel" placeholder="gpt-4o-mini" value="' + esc(ai.model || 'gpt-4o-mini') + '"></div>' +
+
+    '<div class="row2" style="margin-top:9px"><label class="lbl">Ключ</label>' +
+    '<input id="aiKey" type="password" autocomplete="new-password" placeholder="' +
+      (ai.keyHint ? 'записан ' + esc(ai.keyHint) + ' — оставьте пустым, чтобы не менять' : 'sk-…') +
+      '"></div>' +
+
+    '<div class="row2" style="margin-top:9px"><label class="lbl">О компании</label>' +
+    '<textarea id="aiPrompt" rows="5" placeholder="Что продаёте, цены, доставка, часы работы, ' +
+      'чего говорить нельзя. Чем конкретнее — тем меньше выдумок.">' +
+      esc(ai.systemPrompt || '') + '</textarea></div>' +
+
+    '<div class="row2" style="margin-top:9px"><label class="lbl">Режим</label><select id="aiMode">' +
+    modes.map(function(m){
+      return '<option value="' + m[0] + '"' + (m[0] === mode ? ' selected' : '') + '>' + m[1] + '</option>';
+    }).join('') + '</select></div>' +
+
+    '<div class="hint">В режиме «отвечает сам» ИИ включается только там, где не сработал ни один ' +
+    'сценарий, и молчит, если за диалог взялся оператор или разговор пошёл про деньги, возврат ' +
+    'или жалобу — такое всегда остаётся человеку.</div>' +
+
+    '<div class="acts" style="margin-top:10px">' +
+    '<button id="aiSave">Сохранить</button>' +
+    (ai.connected ? '<button class="ghost" id="aiCheck">Проверить связь</button>' +
+                    '<button class="ghost" id="aiOff">Отключить</button>' : '') +
+    '</div>' +
+    '<div class="err" id="aiErr">' + esc(ai.lastError || '') + '</div>' +
+    '<div class="ok" id="aiOk"></div>' +
+    '</div></div>';
+}
+
+function wireAi(ai){
+  el('aiSave').onclick = function(){
+    el('aiErr').textContent = ''; el('aiOk').textContent = '';
+    busy(el('aiSave'), true);
+    api('/settings/ai', { method:'PUT', body:{
+      baseUrl: el('aiUrl').value,
+      model: el('aiModel').value,
+      apiKey: el('aiKey').value,
+      systemPrompt: el('aiPrompt').value,
+      mode: el('aiMode').value
+    }}).then(function(){ toast('ИИ сохранён'); pageIntegrations() })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('aiErr').textContent =
+          p.error === 'key_required' ? 'Введите ключ — без него модель не ответит' :
+          p.error === 'model_required' ? 'Укажите модель, например gpt-4o-mini' :
+          p.error === 'bad_url' ? 'Адрес должен начинаться с https://' :
+          'Не удалось сохранить';
+        busy(el('aiSave'), false);
+      });
+  };
+
+  if (el('aiCheck')) el('aiCheck').onclick = function(){
+    el('aiErr').textContent = ''; el('aiOk').textContent = '';
+    busy(el('aiCheck'), true);
+    api('/settings/ai/check', { method:'POST' })
+      .then(function(r){ el('aiOk').textContent = 'Модель ответила: ' + (r.sample || 'ок') })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('aiErr').textContent = p.detail || 'Провайдер не ответил';
+      })
+      .then(function(){ busy(el('aiCheck'), false) });
+  };
+
+  if (el('aiOff')) armDelete([el('aiOff')], function(){
+    return api('/settings/ai', { method:'DELETE' }).then(pageIntegrations);
+  });
+}
+
 function pageIntegrations(){
-  api('/settings/zoho').then(function(d){
+  // Две настройки на одной странице, значит и данные нужны обе сразу:
+  // рисовать страницу дважды — это мигание на ровном месте.
+  Promise.all([
+    api('/settings/zoho'),
+    api('/settings/ai').catch(function(){ return null })
+  ]).then(function(res){
+    var d = res[0], ai = res[1] || {};
     var list = d.installations || [];
 
     var body = !d.configured
@@ -2255,12 +2400,16 @@ function pageIntegrations(){
           'почту и код — один раз на браузер.</div></div></div>'
         : '') +
 
+      aiSection(ai) +
+
       '<div class="pg-sec"><h3>Что дальше</h3>' +
       '<div class="card"><div class="s" style="color:var(--t2);line-height:1.7">' +
       'После подключения: входящее сообщение ищет контакт по номеру телефона и создаёт лид, ' +
       'если такого нет; переписка показывается прямо в карточке Zoho виджетом; ответ из виджета ' +
       'уходит в тот канал, откуда написал клиент.</div></div></div>' +
       '</div>';
+
+    wireAi(ai);
 
     if (S.zohoNote){ el('zOk').textContent = S.zohoNote; S.zohoNote = null }
     if (S.zohoError){ el('zErr').textContent = S.zohoError; S.zohoError = null }
@@ -3009,6 +3158,10 @@ function start(){
   api('/me').then(function(d){ ME = d }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
+  api('/settings/ai').then(function(d){
+    AI.ready = Boolean(d && d.connected && d.mode !== 'off');
+    if (AI.ready && current) renderComposer(true);
+  }).catch(function(){});
 
   refresh();
   readMetaHash();

@@ -34,6 +34,10 @@ import {
   withTenant,
   answerMatches,
   pickScenario,
+  AiError,
+  askModel,
+  needsHuman,
+  type AiTurn,
   type CrmSyncJob,
   type ScenarioJob,
   type ScenarioLike,
@@ -1289,6 +1293,98 @@ async function advanceRun(tenantId: string, runId: string): Promise<number> {
 }
 
 /**
+ * Ответ ИИ, когда ни один сценарий не подошёл.
+ *
+ * Сценарии закрывают известные случаи — приветствие, часы работы,
+ * прайс. Всё остальное раньше оставалось без ответа до прихода
+ * оператора. Если компания подключила модель и выбрала режим «auto»,
+ * отвечает она.
+ *
+ * Два запрета жёстче любой модели: разговор про деньги, возврат и
+ * жалобу, а также прямая просьба позвать человека, оставляются
+ * человеку. Ошибка модели в этих местах стоит клиента.
+ */
+interface AiRow {
+  base_url: string;
+  model: string;
+  api_key_enc: Buffer | null;
+  system_prompt: string;
+  mode: string;
+  history_size: number;
+  max_tokens: number;
+  is_active: boolean;
+}
+
+async function aiAnswer(
+  msg: UnifiedMessage,
+  conversationId: string,
+  text: string,
+): Promise<number> {
+  const row = await withTenant(pool, msg.tenantId, async (db) => {
+    const { rows } = await db.query<AiRow>(
+      `SELECT base_url, model, api_key_enc, system_prompt, mode,
+              history_size, max_tokens, is_active
+         FROM ai_settings WHERE tenant_id = $1`,
+      [msg.tenantId],
+    );
+    return rows[0] ?? null;
+  });
+
+  if (!row || !row.is_active || row.mode !== 'auto' || !row.api_key_enc) return 0;
+
+  if (needsHuman(text)) {
+    log('info', 'ИИ промолчал: разговор для человека', { conversationId });
+    return 0;
+  }
+
+  let key = '';
+  try {
+    key = decryptJson<{ key: string }>(masterKey, msg.tenantId, row.api_key_enc).key;
+  } catch {
+    log('warn', 'Ключ ИИ не расшифровался', { tenantId: msg.tenantId });
+    return 0;
+  }
+
+  const turns = await withTenant(pool, msg.tenantId, async (db) => {
+    const { rows } = await db.query<{ direction: string; body: string | null }>(
+      `SELECT direction, body FROM messages
+        WHERE conversation_id = $1 AND body IS NOT NULL AND body <> ''
+        ORDER BY created_at DESC
+        LIMIT $2`,
+      [conversationId, row.history_size],
+    );
+    return rows.reverse().map<AiTurn>((m) => ({
+      fromClient: m.direction === 'in',
+      text: m.body ?? '',
+    }));
+  });
+  if (!turns.length) return 0;
+
+  try {
+    const answer = await askModel({
+      baseUrl: row.base_url,
+      apiKey: key,
+      model: row.model,
+      systemPrompt: row.system_prompt,
+      maxTokens: row.max_tokens,
+    }, turns);
+    await botSay(msg.tenantId, conversationId, msg.channelId, answer);
+    log('info', 'ИИ ответил клиенту', { conversationId });
+    return 1;
+  } catch (err) {
+    // Молчание лучше отговорки: оператор увидит непрочитанный диалог,
+    // а причина ляжет в настройки, где её ищут.
+    const message = err instanceof AiError ? err.message : 'Не удалось обратиться к провайдеру';
+    log('warn', 'ИИ не ответил', { conversationId, reason: message });
+    await withTenant(pool, msg.tenantId, async (db) => {
+      await db.query(`UPDATE ai_settings SET last_error = $2 WHERE tenant_id = $1`,
+        [msg.tenantId, message]);
+    });
+    return 0;
+  }
+}
+
+/**
  * Реакция на входящее сообщение.
  *
  * Сначала смотрим, не ждёт ли ответа уже запущенный сценарий: клиент
@@ -1381,6 +1477,13 @@ async function runBot(msg: UnifiedMessage, conversationId: string): Promise<numb
   // неотличимо от «бот сломан», и проверять приходится наугад.
   if ('silent' in decision) {
     log('info', 'Бот промолчал', { conversationId, reason: decision.silent });
+    // Сценария на этот случай нет — но может быть подключён ИИ. Другие
+    // причины молчания (взял человек, бот выключен) для него тоже
+    // причины молчать, поэтому список явный.
+    if (decision.silent === 'нет включённых сценариев' ||
+        decision.silent === 'ни один сценарий не подошёл') {
+      return aiAnswer(msg, conversationId, text);
+    }
     return 0;
   }
 

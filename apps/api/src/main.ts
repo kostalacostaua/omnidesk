@@ -37,6 +37,7 @@ import { registerLanding, LANDING_HTML } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
+import { registerAi } from './ai.js';
 import { APP_ICON_SVG } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
@@ -238,6 +239,8 @@ registerSettings(app, {
 });
 
 registerWidget(app, { pool, requireAuth: (req) => requireAuth(req as never) });
+
+registerAi(app, { pool, masterKey, requireAuth: (req) => requireAuth(req as never) });
 
 registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));
 
