@@ -15,6 +15,8 @@ import {
   decryptJson,
   graphGet,
   parseTemplates,
+  wabaFromDebug,
+  type DebugTokenReply,
   WEBCHAT_CHANNEL,
   WEBCHAT_DEFAULTS,
   embedSnippet,
@@ -213,6 +215,40 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         });
       }
 
+      /**
+       * Подписка аккаунта WhatsApp Business на наше приложение.
+       *
+       * Без неё канал выглядит рабочим и даже умеет отправлять, но
+       * входящие не приходят никогда: подписки приложения на события
+       * мало, Meta шлёт вебхуки только тем приложениям, которые
+       * подписаны на конкретный аккаунт. Найти это глазами почти
+       * невозможно — «отправка работает, входящих нет» ни на что не
+       * указывает, — поэтому делаем сами при подключении.
+       *
+       * Идентификатор аккаунта спрашиваем у самого токена: у номера
+       * такого поля нет, а проверка токена возвращает список объектов,
+       * на которые выданы права.
+       */
+      let waba: string | null = null;
+      let subscribe: string | null = null;
+      try {
+        const debug = await graphGet<DebugTokenReply>('debug_token', {
+          input_token: token,
+          access_token: token,
+        });
+        waba = wabaFromDebug(debug);
+        if (waba) {
+          await graphPost(`${waba}/subscribed_apps`, { access_token: token }, undefined);
+        } else {
+          subscribe = 'no_waba';
+        }
+      } catch (err) {
+        // Не роняем подключение: номер проверен, отправка будет
+        // работать. Но причину сохраняем и показываем — иначе человек
+        // останется с тишиной вместо объяснения.
+        subscribe = err instanceof Error ? err.message : 'subscribe_failed';
+      }
+
       const owner = await withSystem(pool, 'владелец номера WhatsApp', async (db) => {
         const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
           `SELECT channel_id, tenant_id FROM channel_routes
@@ -256,12 +292,22 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
             JSON.stringify({
               phone: number.display_phone_number ?? null,
               verifiedName: number.verified_name ?? null,
+              wabaId: waba,
             }),
           ],
         );
       });
 
-      return { channelId, phone: number.display_phone_number ?? null };
+      if (subscribe) {
+        app.log.warn({ channelId, reason: subscribe }, 'Аккаунт WhatsApp не подписан на приложение');
+      }
+
+      return {
+        channelId,
+        phone: number.display_phone_number ?? null,
+        /** Пусто — всё в порядке. Иначе входящие не придут, и это надо сказать. */
+        subscribeError: subscribe,
+      };
     },
   );
 

@@ -180,3 +180,30 @@ export function fillTemplate(body: string, params: string[]): string {
 export function waNumber(raw: string): string {
   return (raw ?? '').replace(/[^0-9]/g, '');
 }
+
+/**
+ * Идентификатор аккаунта WhatsApp Business, к которому привязан номер.
+ *
+ * Спросить его напрямую у номера нельзя: Graph такого поля не отдаёт.
+ * Зато его отдаёт проверка самого токена — в granular_scopes лежат права
+ * и список объектов, на которые они выданы. Для системного пользователя
+ * с доступом к аккаунту это и есть нужный идентификатор.
+ */
+export interface DebugTokenReply {
+  data?: {
+    granular_scopes?: Array<{ scope?: string; target_ids?: string[] }>;
+  };
+}
+
+export function wabaFromDebug(reply: DebugTokenReply): string | null {
+  const scopes = reply?.data?.granular_scopes ?? [];
+  // Управление аккаунтом выдаётся именно на аккаунты, поэтому список
+  // целей у него и есть перечень доступных WABA. Права на отправку
+  // выдаются шире и для поиска аккаунта не годятся.
+  const wanted = ['whatsapp_business_management', 'whatsapp_business_messaging'];
+  for (const name of wanted) {
+    const hit = scopes.find((s) => s.scope === name && (s.target_ids?.length ?? 0) > 0);
+    if (hit?.target_ids?.[0]) return hit.target_ids[0];
+  }
+  return null;
+}

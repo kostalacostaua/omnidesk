@@ -2787,7 +2787,19 @@ function tabChannels(){
       api('/settings/channels/whatsapp', { method:'POST', body:{
         token: el('waTok').value.trim(), phoneNumberId: el('waNum').value.trim()
       }})
-        .then(function(){ toast(L('WhatsApp підключено')); tabChannels() })
+        .then(function(d){
+          /* Номер подключён, но аккаунт не подписан на приложение —
+             отправка будет работать, а входящие не придут никогда.
+             Молчать об этом нельзя: снаружи это выглядит как «канал
+             работает», и причину потом ищут неделю. */
+          if (d && d.subscribeError){
+            el('waErr').textContent = L('Номер підключено, але акаунт WhatsApp не підписався на застосунок: вхідні не надходитимуть. Перевірте, що системному користувачу видано доступ до акаунта WhatsApp Business, і натисніть «Підключити» ще раз.');
+            busy(el('waGo'), false);
+            return;
+          }
+          toast(L('WhatsApp підключено'));
+          tabChannels();
+        })
         .catch(function(e){
           el('waErr').textContent = ((e.payload||{}).detail) || L('Не вдалося підключити');
           busy(el('waGo'), false);
