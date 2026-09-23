@@ -40,9 +40,60 @@ export interface WebchatSettings {
   logo: string;
   /** С какой стороны экрана кнопка. */
   position: 'right' | 'left';
+  /**
+   * Цвет свёрнутой кнопки. Пусто — тот же, что у чата.
+   *
+   * Отдельно от color потому, что это разные задачи. Цвет чата —
+   * оформление, его подбирают под сайт. Цвет кнопки — заметность: на
+   * тёмной странице фирменный синий сливается с фоном, и кнопку
+   * приходится делать контрастной, а не «правильной».
+   */
+  launcher: string;
+  /**
+   * Появление кнопки. Не украшение: кнопка, возникшая из ниоткуда,
+   * взгляд не ловит — страница уже прочитана глазами до конца.
+   */
+  anim: WebchatAnim;
+  /** Когда показывать кнопку. */
+  showMode: WebchatShow;
+  /**
+   * Через сколько: секунды при delay, проценты прокрутки при scroll.
+   * При now не используется.
+   */
+  showAfter: number;
   /** Домены, где виджету разрешено работать. Пусто — где угодно. */
   domains: string[];
 }
+
+/**
+ * Способы появления.
+ *
+ * Четыре, и намеренно без «настройте свою»: кнопка чата — не место
+ * для самовыражения, а всё, что сложнее, начинает мешать читать.
+ */
+export type WebchatAnim = 'none' | 'fade' | 'slide' | 'pulse';
+
+/**
+ * Когда показывать кнопку.
+ *
+ * Сразу — как было. Через n секунд — человек успевает понять, куда
+ * попал. После прокрутки — он уже читает, а не отскочил с первого
+ * экрана; такому и написать есть о чём.
+ */
+export type WebchatShow = 'now' | 'delay' | 'scroll';
+
+export const ANIM_TITLES: Record<WebchatAnim, string> = {
+  none: 'Без анімації',
+  fade: 'Плавна поява',
+  slide: 'Виїзд знизу',
+  pulse: 'Поява з пульсацією',
+};
+
+export const SHOW_TITLES: Record<WebchatShow, string> = {
+  now: 'Одразу',
+  delay: 'Через n секунд',
+  scroll: 'Після прокручування сторінки',
+};
 
 export const WEBCHAT_DEFAULTS: WebchatSettings = {
   title: 'Чат з нами',
@@ -51,8 +102,26 @@ export const WEBCHAT_DEFAULTS: WebchatSettings = {
   color: '#2F6BFF',
   logo: '',
   position: 'right',
+  launcher: '',
+  anim: 'fade',
+  showMode: 'now',
+  showAfter: 0,
   domains: [],
 };
+
+/** Сколько ждать или сколько прокрутить: за пределами этого — опечатка. */
+const SHOW_LIMITS: Record<WebchatShow, { min: number; max: number; def: number }> = {
+  now: { min: 0, max: 0, def: 0 },
+  // Больше десяти минут — это «никогда»: столько на странице не сидят.
+  delay: { min: 1, max: 600, def: 5 },
+  // Сто процентов — это самый низ, докуда доходят единицы.
+  scroll: { min: 1, max: 100, def: 30 },
+};
+
+/** Цвет свёрнутой кнопки с учётом «как у чата». */
+export function launcherColor(s: Pick<WebchatSettings, 'color' | 'launcher'>): string {
+  return s.launcher || s.color;
+}
 
 /**
  * Логотип попадает в страницу, которую видит посторонний, поэтому
@@ -74,6 +143,7 @@ export function webchatSettings(meta: unknown): WebchatSettings {
   const domains = Array.isArray(m['domains'])
     ? (m['domains'] as unknown[]).map((d) => normalizeDomain(String(d))).filter(Boolean)
     : [];
+  const showMode = safeShow(m['showMode']);
 
   return {
     title: String(m['title'] ?? WEBCHAT_DEFAULTS.title).slice(0, 60),
@@ -82,8 +152,42 @@ export function webchatSettings(meta: unknown): WebchatSettings {
     color: safeColor(String(m['color'] ?? WEBCHAT_DEFAULTS.color)),
     logo: safeLogo(String(m['logo'] ?? '')),
     position: m['position'] === 'left' ? 'left' : 'right',
+    launcher: optionalColor(String(m['launcher'] ?? '')),
+    anim: safeAnim(m['anim']),
+    showMode: showMode,
+    showAfter: safeShowAfter(showMode, m['showAfter']),
     domains,
   };
+}
+
+function safeAnim(raw: unknown): WebchatAnim {
+  return raw === 'none' || raw === 'slide' || raw === 'pulse' || raw === 'fade'
+    ? raw
+    : WEBCHAT_DEFAULTS.anim;
+}
+
+function safeShow(raw: unknown): WebchatShow {
+  return raw === 'delay' || raw === 'scroll' ? raw : 'now';
+}
+
+/**
+ * Число берётся только осмысленное, и подставляется разумное вместо
+ * пустого. Ноль секунд задержки — это «сразу», но записанное так, что
+ * в настройках выбрано «через n секунд»: человек получает не то, что
+ * выбрал, и ищет причину в другом месте.
+ */
+function safeShowAfter(mode: WebchatShow, raw: unknown): number {
+  const lim = SHOW_LIMITS[mode];
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n < lim.min) return lim.def;
+  return Math.min(n, lim.max);
+}
+
+/** Цвет, который разрешено не указывать: пусто означает «как у чата». */
+function optionalColor(value: string): string {
+  const s = value.trim();
+  if (!s) return '';
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : '';
 }
 
 /**

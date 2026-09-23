@@ -613,6 +613,22 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .wcphone{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel);
     height:420px;box-shadow:var(--shadow)}
   .wcphone iframe{width:100%;height:100%;border:0;display:block}
+  /* Показ самой кнопки: цвет и способ появления иначе подбираются
+     вслепую — на чужом сайте, куда ещё надо доехать. */
+  .wcdemo{border:1px solid var(--line);border-radius:14px;background:var(--panel2);
+    height:110px;display:flex;align-items:center;justify-content:center;position:relative}
+  .wcbtn{width:56px;height:56px;border:0;border-radius:50%;cursor:pointer;padding:0;
+    display:flex;align-items:center;justify-content:center;color:#fff;
+    box-shadow:0 10px 30px rgba(11,16,34,.28)}
+  .wcbtn.left{margin-right:auto;margin-left:16px}
+  .wcbtn.right{margin-left:auto;margin-right:16px}
+  .wcbtn.fade{animation:wcfade .35s ease}
+  .wcbtn.slide{animation:wcslide .35s ease}
+  .wcbtn.pulse{animation:wcpulse 1.8s ease-out 3}
+  @keyframes wcfade{from{opacity:0}to{opacity:1}}
+  @keyframes wcslide{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+  @keyframes wcpulse{0%{box-shadow:0 0 0 0 rgba(47,107,255,.5)}
+    70%{box-shadow:0 0 0 18px rgba(47,107,255,0)}100%{box-shadow:0 0 0 0 rgba(47,107,255,0)}}
   .wclogo{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .wclogo img{width:40px;height:40px;border-radius:10px;object-fit:contain;
     background:var(--panel2);border:1px solid var(--line);padding:3px}
@@ -3003,13 +3019,38 @@ function wcPanel(id){
         L('кнопка праворуч') + '</option>' +
       '<option value="left"' + (WC.st.position === 'left' ? ' selected' : '') + '>' +
         L('кнопка ліворуч') + '</option></select></div>' +
+
+      L('<div class="row2"><div class="lbl" style="width:140px">Колір кнопки</div>') +
+      '<input id="wcLnc" type="color" value="' +
+        esc(WC.st.launcher || WC.st.color || '#2F6BFF') + '" style="max-width:70px">' +
+      '<label class="ntev"><input type="checkbox" id="wcLncSame"' +
+        (WC.st.launcher ? '' : ' checked') + '> ' + L('такий самий, як у чата') + '</label></div>' +
+      L('<div class="hint">На темній сторінці фірмовий колір зливається з фоном, і кнопку ') +
+      L('доводиться робити помітною, а не «правильною».</div>') +
+
+      L('<div class="row2"><div class="lbl" style="width:140px">Поява</div>') +
+      '<select id="wcAnim" style="max-width:220px">' + wcOpts(ANIMS, WC.st.anim || 'fade') +
+      '</select></div>' +
+
+      L('<div class="row2"><div class="lbl" style="width:140px">Показувати</div>') +
+      '<select id="wcShow" style="max-width:240px">' +
+        wcOpts(SHOWS, WC.st.showMode || 'now') + '</select>' +
+      '<input id="wcAfter" type="number" min="1" max="600" style="max-width:90px" value="' +
+        esc(String(WC.st.showAfter || '')) + '">' +
+      '<span class="lbl" id="wcAfterU"></span></div>' +
+      L('<div class="hint">Кнопка одразу — це звично. Через кілька секунд або після прокручування ') +
+      L('вона потрапляє на очі тому, хто вже читає, а не тому, хто зараз піде.</div>') +
+
       L('<div class="acts"><button id="wcSave">Зберегти</button></div>') +
       '<div class="ok" id="wcOk2"></div></div>' +
 
       /* Превью — не украшение: подобрать цвет и длину подписи иначе
          можно только так — сохранить, открыть сайт, вернуться. */
       '<div class="wcprev"><div class="wcphone"><iframe id="wcFrameView" title="preview"></iframe></div>' +
-      L('<div class="hint" style="text-align:center">Так чат побачить відвідувач</div></div>') +
+      L('<div class="hint" style="text-align:center">Так чат побачить відвідувач</div>') +
+      '<div class="wcdemo"><button class="wcbtn" id="wcBtnDemo">' + ICON_WCBTN + '</button></div>' +
+      L('<div class="hint" style="text-align:center">Згорнута кнопка. Натисніть, щоб побачити появу ') +
+      L('ще раз</div></div>') +
 
       '</div></div>' +
 
@@ -3035,8 +3076,16 @@ function wcPanel(id){
     };
 
     ['wcTitle','wcSub','wcGreet'].forEach(function(f){ el(f).oninput = wcPreview });
-    el('wcColor').oninput = wcPreview;
+    el('wcColor').oninput = function(){ wcPreview(); wcDemo() };
     el('wcPos').onchange = wcPreview;
+
+    el('wcLnc').oninput = function(){ el('wcLncSame').checked = false; wcDemo() };
+    el('wcLncSame').onchange = wcDemo;
+    el('wcAnim').onchange = wcDemo;
+    el('wcBtnDemo').onclick = wcDemo;
+    el('wcShow').onchange = wcAfterUnits;
+    wcAfterUnits();
+    wcDemo();
 
     el('wcSave').onclick = function(){ wcSave('wcOk2') };
     el('wcSaveDom').onclick = function(){ wcSave('wcOk3') };
@@ -3048,6 +3097,62 @@ function wcPanel(id){
 }
 
 var WC = { id:null, key:null, st:{}, timer:null };
+
+var ICON_WCBTN = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l1.9-4.6a8.4 8.4 0 0 1-.9-3.9 ' +
+  '8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"/></svg>';
+
+var ANIMS = [
+  ['none', 'Без анімації'],
+  ['fade', 'Плавна поява'],
+  ['slide', 'Виїзд знизу'],
+  ['pulse', 'Поява з пульсацією']
+];
+var SHOWS = [
+  ['now', 'Одразу'],
+  ['delay', 'Через n секунд'],
+  ['scroll', 'Після прокручування сторінки']
+];
+
+function wcOpts(list, cur){
+  var out = '';
+  for (var i = 0; i < list.length; i++){
+    out += '<option value="' + list[i][0] + '"' + (list[i][0] === cur ? ' selected' : '') + '>' +
+      L(list[i][1]) + '</option>';
+  }
+  return out;
+}
+
+/* Поле «через сколько» меняет смысл вместе с выбором рядом: секунды или
+   проценты прокрутки. Без подписи это просто число неизвестно чего. */
+function wcAfterUnits(){
+  var mode = el('wcShow').value;
+  var box = el('wcAfter');
+  var unit = el('wcAfterU');
+  box.style.display = mode === 'now' ? 'none' : '';
+  unit.textContent = mode === 'delay' ? L('секунд') : (mode === 'scroll' ? L('% сторінки') : '');
+  if (mode === 'delay'){ box.max = 600; if (!box.value) box.value = 5 }
+  if (mode === 'scroll'){ box.max = 100; if (!box.value || box.value > 100) box.value = 30 }
+}
+
+/* Кнопку показываем настоящую: тот же круг, тот же значок, та же
+   анимация. Подобрать появление, глядя на название в списке, нельзя. */
+function wcDemo(){
+  var b = el('wcBtnDemo');
+  if (!b) return;
+  b.style.background = wcLauncher();
+  b.className = 'wcbtn';
+  // Перезапуск анимации: без чтения offsetWidth браузер не замечает,
+  // что класс сняли и вернули в том же кадре.
+  void b.offsetWidth;
+  var a = el('wcAnim').value;
+  if (a !== 'none') b.className = 'wcbtn ' + a;
+}
+
+function wcLauncher(){
+  return el('wcLncSame').checked ? el('wcColor').value : el('wcLnc').value;
+}
 
 /* Картинку ужимаем в браузере, а не на сервере. Причина простая: логотип
    лежит прямо в настройках, и лишние сотни килобайт поедут потом в
@@ -3105,6 +3210,10 @@ function wcSave(okId){
     color: el('wcColor').value,
     logo: WC.st.logo || '',
     position: el('wcPos').value,
+    launcher: el('wcLncSame').checked ? '' : el('wcLnc').value,
+    anim: el('wcAnim').value,
+    showMode: el('wcShow').value,
+    showAfter: Number(el('wcAfter').value) || 0,
     domains: el('wcDom').value
   }})
     .then(function(){

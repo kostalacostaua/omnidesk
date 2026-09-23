@@ -5,6 +5,7 @@ import {
   WEBCHAT_CHANNEL,
   domainAllowed,
   jobKey,
+  launcherColor,
   normalizeWebchat,
   safeColor,
   safeLogo,
@@ -103,9 +104,9 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
   /**
    * Загрузчик для чужого сайта.
    *
-   * Всё, что он делает, — рисует кнопку и открывает рамку. Ни одного
-   * запроса к нашему API отсюда не уходит: сама переписка живёт внутри
-   * рамки, на нашем домене.
+   * Всё, что он делает, — рисует кнопку и открывает рамку. Сама
+   * переписка живёт внутри рамки, на нашем домене; наружу уходит один
+   * запрос — за видом кнопки.
    */
   app.get('/chat.js', async (_req, reply) =>
     reply
@@ -114,6 +115,36 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
       .header('access-control-allow-origin', '*')
       .send(loaderScript(appUrl)),
   );
+
+  /**
+   * Вид свёрнутой кнопки.
+   *
+   * Отдельный ответ, а не атрибуты в строке подключения: строку клиент
+   * один раз вставил к себе на сайт и больше не трогает. Если бы цвет и
+   * задержка жили в ней, каждая правка настроек требовала бы от него
+   * лезть в вёрстку — то есть не делалась бы никогда.
+   *
+   * Здесь нет ничего личного: цвет, способ появления и задержка. Всё
+   * это и так видно любому, кто откроет сайт.
+   */
+  app.get<{ Params: { key: string } }>('/chat/:key/style', async (req, reply) => {
+    const row = await channelByKey(req.params.key);
+    if (!row || row.status !== 'active') return reply.code(404).send({ error: 'not_found' });
+
+    const s = await settingsOf(row);
+    return reply
+      .header('access-control-allow-origin', '*')
+      // Минута: правка настроек должна доезжать до сайта за время
+      // разговора с клиентом, а не за время обеда.
+      .header('cache-control', 'public, max-age=60')
+      .send({
+        launcher: launcherColor(s),
+        anim: s.anim,
+        showMode: s.showMode,
+        showAfter: s.showAfter,
+        side: s.position,
+      });
+  });
 
   /**
    * Страница чата: она же содержимое рамки.
@@ -328,10 +359,13 @@ export function loaderScript(appUrl: string): string {
 
   var btn = document.createElement('button');
   btn.setAttribute('aria-label', 'Chat');
+  /* Кнопка создаётся невидимой и ждёт своего момента: показать её сразу,
+     а потом спрятать — значит мигнуть на глазах у человека. */
   btn.style.cssText = 'position:fixed;' + side + ':20px;bottom:20px;width:56px;height:56px;border:0;' +
     'border-radius:50%;background:#2F6BFF;color:#fff;cursor:pointer;z-index:2147483000;' +
     'box-shadow:0 10px 30px rgba(11,16,34,.28);display:flex;align-items:center;' +
-    'justify-content:center;padding:0;transition:transform .15s ease';
+    'justify-content:center;padding:0;opacity:0;pointer-events:none;' +
+    'transition:transform .15s ease, opacity .35s ease';
   btn.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" ' +
     'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l1.9-4.6a8.4 8.4 0 0 1-.9-3.9 ' +
@@ -388,10 +422,116 @@ export function loaderScript(appUrl: string): string {
     }
   });
 
+  /* Вид кнопки приходит с сервера: строку подключения клиент вставил на
+     сайт один раз, и настройки, зашитые в неё, менять было бы некому. */
+  var shown = false;
+
+  function rgba(hex, a){
+    if (!hex || hex.length !== 7) return 'rgba(47,107,255,' + a + ')';
+    var r = parseInt(hex.substr(1, 2), 16);
+    var g = parseInt(hex.substr(3, 2), 16);
+    var b = parseInt(hex.substr(5, 2), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  function reveal(anim, color){
+    if (shown) return;
+    shown = true;
+    btn.style.pointerEvents = 'auto';
+
+    if (anim === 'slide'){
+      btn.style.transform = 'translateY(24px)';
+      setTimeout(function(){
+        btn.style.opacity = '1';
+        btn.style.transform = 'none';
+      }, 20);
+      return;
+    }
+
+    btn.style.opacity = '1';
+
+    if (anim === 'pulse'){
+      var css = document.createElement('style');
+      /* Пульсация идёт три круга и останавливается. Бесконечная —
+         это мигающий баннер: его перестают видеть через минуту, а
+         раздражать он не перестаёт. */
+      css.textContent = '@keyframes rzpulse{0%{box-shadow:0 0 0 0 ' + rgba(color, 0.5) +
+        '}70%{box-shadow:0 0 0 18px ' + rgba(color, 0) +
+        '}100%{box-shadow:0 0 0 0 ' + rgba(color, 0) + '}}';
+      document.head.appendChild(css);
+      btn.style.animation = 'rzpulse 1.8s ease-out 3';
+    }
+  }
+
+  /* Сторона экрана тоже приходит с сервера. В строке подключения она
+     есть, но строка вставлена на сайт однажды: если человек потом
+     передвинул кнопку в настройках, менять вёрстку он не побежит. */
+  function relayout(){
+    btn.style.left = side === 'left' ? '20px' : 'auto';
+    btn.style.right = side === 'left' ? 'auto' : '20px';
+    DESK = 'position:fixed;' + side + ':20px;bottom:88px;width:380px;height:min(560px,70vh);' +
+      'border:0;border-radius:16px;z-index:2147483000;' +
+      'box-shadow:0 24px 60px -20px rgba(11,16,34,.45);background:#fff';
+    place();
+  }
+
+  function arm(st){
+    var anim = st.anim || 'fade';
+    var color = st.launcher || '#2F6BFF';
+    btn.style.background = color;
+    if ((st.side === 'left' || st.side === 'right') && st.side !== side){
+      side = st.side;
+      relayout();
+    }
+    if (anim === 'none'){ btn.style.transition = 'transform .15s ease' }
+
+    if (st.showMode === 'delay'){
+      setTimeout(function(){ reveal(anim, color) }, (Number(st.showAfter) || 0) * 1000);
+      return;
+    }
+
+    if (st.showMode === 'scroll'){
+      var need = Number(st.showAfter) || 0;
+      var check = function(){
+        var doc = document.documentElement;
+        var full = (doc.scrollHeight || 0) - (window.innerHeight || 0);
+        /* Короткая страница прокрутиться не может, и ждать от неё
+           прокрутки — значит не показать кнопку никогда. */
+        var pct = full > 0 ? ((window.pageYOffset || doc.scrollTop || 0) / full) * 100 : 100;
+        if (pct >= need){
+          window.removeEventListener('scroll', check);
+          reveal(anim, color);
+        }
+      };
+      window.addEventListener('scroll', check, { passive: true });
+      check();
+      return;
+    }
+
+    reveal(anim, color);
+  }
+
+  function style(){
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', base + '/chat/' + encodeURIComponent(key) + '/style', true);
+      x.onreadystatechange = function(){
+        if (x.readyState !== 4) return;
+        var st = {};
+        try { if (x.status === 200) st = JSON.parse(x.responseText) } catch(e){}
+        /* Ответа нет — кнопку всё равно показываем. Молчащий чат из-за
+           одного неудачного запроса хуже, чем чат не того цвета. */
+        arm(st.showMode ? st : { anim: 'fade', showMode: 'now' });
+      };
+      x.send();
+    } catch(e){ arm({ anim: 'fade', showMode: 'now' }) }
+  }
+
   function mount(){
     document.body.appendChild(frame);
     document.body.appendChild(btn);
     place();
+    style();
   }
   if (document.body) mount();
   else document.addEventListener('DOMContentLoaded', mount);

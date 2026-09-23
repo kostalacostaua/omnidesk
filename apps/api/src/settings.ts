@@ -22,8 +22,6 @@ import {
   normalizeDomain,
   parseRouting,
   ROUTING_DEFAULT,
-  safeColor,
-  safeLogo,
   webchatSettings,
   graphPost,
   safeEqual,
@@ -417,6 +415,10 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       color?: string;
       logo?: string;
       position?: string;
+      launcher?: string;
+      anim?: string;
+      showMode?: string;
+      showAfter?: number;
       domains?: string;
     };
     // Логотип едет внутри JSON как data:image, поэтому тело крупнее
@@ -433,17 +435,28 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       .slice(0, 20);
 
     const logo = String(req.body?.logo ?? '');
-    const patch = {
-      title: String(req.body?.title ?? WEBCHAT_DEFAULTS.title).trim().slice(0, 60),
-      subtitle: String(req.body?.subtitle ?? '').trim().slice(0, 120),
-      greeting: String(req.body?.greeting ?? '').trim().slice(0, 300),
-      color: safeColor(String(req.body?.color ?? WEBCHAT_DEFAULTS.color)),
-      // Пустая строка — это «убрать логотип», а не «не трогать»:
-      // убрать его иначе было бы нечем.
-      logo: safeLogo(logo),
-      position: req.body?.position === 'left' ? 'left' : 'right',
+    /**
+     * Настройки прогоняются через тот же разбор, которым их потом
+     * читает виджет. Переписывать здесь проверки заново — значит рано
+     * или поздно разойтись с ним в мелочи: поле, добавленное в одном
+     * месте, молча теряется в другом.
+     *
+     * Пустая строка в логотипе — это «убрать», а не «не трогать»:
+     * убрать его иначе было бы нечем.
+     */
+    const patch = webchatSettings({
+      title: String(req.body?.title ?? WEBCHAT_DEFAULTS.title).trim(),
+      subtitle: String(req.body?.subtitle ?? '').trim(),
+      greeting: String(req.body?.greeting ?? '').trim(),
+      color: req.body?.color,
+      logo,
+      position: req.body?.position,
+      launcher: req.body?.launcher,
+      anim: req.body?.anim,
+      showMode: req.body?.showMode,
+      showAfter: req.body?.showAfter,
       domains,
-    };
+    });
 
     if (logo && !patch.logo) {
       return reply.code(400).send({

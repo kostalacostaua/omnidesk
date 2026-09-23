@@ -3,6 +3,7 @@ import {
   domainAllowed,
   embedSnippet,
   iframeSnippet,
+  launcherColor,
   normalizeDomain,
   normalizeWebchat,
   safeColor,
@@ -32,7 +33,8 @@ describe('настройки', () => {
     expect(s.title).toBe('Магазин');
     expect(s.domains).toEqual(['example.com']);
     expect(Object.keys(s).sort()).toEqual([
-      'color', 'domains', 'greeting', 'logo', 'position', 'subtitle', 'title',
+      'anim', 'color', 'domains', 'greeting', 'launcher', 'logo',
+      'position', 'showAfter', 'showMode', 'subtitle', 'title',
     ]);
   });
 
@@ -51,6 +53,52 @@ describe('настройки', () => {
   it('сторона кнопки — только левая или правая', () => {
     expect(webchatSettings({ position: 'left' }).position).toBe('left');
     expect(webchatSettings({ position: 'посередине' }).position).toBe('right');
+  });
+
+  it('цвет кнопки можно не указывать: тогда он тот же, что у чата', () => {
+    const s = webchatSettings({ color: '#1faa53' });
+    expect(s.launcher).toBe('');
+    expect(launcherColor(s)).toBe('#1faa53');
+
+    const own = webchatSettings({ color: '#1faa53', launcher: '#ff0000' });
+    expect(launcherColor(own)).toBe('#ff0000');
+  });
+
+  it('мусор в цвете кнопки не подменяет цвет чата на синий по умолчанию', () => {
+    // Здесь нельзя звать safeColor: он вернул бы #2F6BFF, и кнопка
+    // молча стала бы не того цвета, что чат.
+    const s = webchatSettings({ color: '#1faa53', launcher: 'красный' });
+    expect(s.launcher).toBe('');
+    expect(launcherColor(s)).toBe('#1faa53');
+  });
+
+  it('способ появления — только из списка', () => {
+    expect(webchatSettings({ anim: 'pulse' }).anim).toBe('pulse');
+    expect(webchatSettings({ anim: 'сальто' }).anim).toBe('fade');
+  });
+});
+
+describe('когда показывать кнопку', () => {
+  it('по умолчанию сразу', () => {
+    const s = webchatSettings({});
+    expect(s.showMode).toBe('now');
+    expect(s.showAfter).toBe(0);
+  });
+
+  it('пустое число не превращает «через n секунд» в «сразу»', () => {
+    // Иначе человек выбрал задержку, получил её отсутствие и ищет
+    // причину где угодно, только не в пустом поле.
+    expect(webchatSettings({ showMode: 'delay', showAfter: '' }).showAfter).toBe(5);
+    expect(webchatSettings({ showMode: 'scroll', showAfter: 0 }).showAfter).toBe(30);
+  });
+
+  it('слишком большие значения подрезаются, а не принимаются молча', () => {
+    expect(webchatSettings({ showMode: 'delay', showAfter: 99999 }).showAfter).toBe(600);
+    expect(webchatSettings({ showMode: 'scroll', showAfter: 900 }).showAfter).toBe(100);
+  });
+
+  it('при «одразу» число не хранится: иначе оно всплывёт при смене режима', () => {
+    expect(webchatSettings({ showMode: 'now', showAfter: 42 }).showAfter).toBe(0);
   });
 
   it('домен приводится к виду, в котором его можно сравнивать', () => {
