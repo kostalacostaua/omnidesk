@@ -59,10 +59,10 @@ export const LANDING_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rozmovio — всі переписки з клієнтами в одному вікні Zoho CRM</title>
-<meta name="description" content="Telegram, Instagram Direct і Messenger в одній скриньці, вбудованій у Zoho CRM. Історія листування поруч із карткою клієнта.">
-<meta property="og:title" content="Rozmovio — одна скринька для Telegram, Instagram і Messenger">
-<meta property="og:description" content="Всі переписки з клієнтами в одному вікні Zoho CRM. 14 днів безкоштовно.">
+<title>Rozmovio — всі переписки з клієнтами в одному вікні</title>
+<meta name="description" content="Telegram, Instagram Direct, Messenger, WhatsApp і чат на сайті в одній скриньці. Працює у браузері та вбудовується у Zoho CRM, Pipedrive чи Бітрікс24.">
+<meta property="og:title" content="Rozmovio — одна скринька для всіх переписок з клієнтами">
+<meta property="og:description" content="Месенджери і чат на сайті в одному вікні. У браузері або всередині вашої CRM. 14 днів безкоштовно.">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
