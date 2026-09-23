@@ -117,9 +117,15 @@ export const BASE_CSS = `
   /* Под стеклом должно что-то быть: на ровной заливке размытие не
      видно вовсе. Пятна неяркие и неподвижные — это подложка, а не
      украшение, и читаемость текста она не трогает. */
+  /* Кегль и трекинг подогнаны под системный шрифт Apple: у SF в
+     мелких кеглях буквы шире, а в крупных — плотнее, и Inter повторяет
+     это своими оптическими размерами. Отсюда отрицательный трекинг на
+     заголовках и почти нулевой в тексте. */
   body{margin:0;background:var(--bg);color:var(--t1);
-    font:13.5px/1.5 var(--font);-webkit-font-smoothing:antialiased;
-    letter-spacing:-.005em;text-rendering:optimizeLegibility}
+    font:13.5px/1.55 var(--font);-webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    letter-spacing:-.006em;font-feature-settings:'cv05' 1,'ss03' 1;
+    text-rendering:optimizeLegibility}
   body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:var(--mesh);background-attachment:fixed}
   a{color:var(--link);text-decoration:none}
@@ -175,8 +181,8 @@ export const BASE_CSS = `
      Ни одна кнопка не переносится: подпись в две строки ломает высоту
      строки и читается как поломка вёрстки. */
   button{background:var(--accent);color:var(--on-accent);border:1px solid transparent;
-    border-radius:var(--rf);padding:9px 16px;font:inherit;font-size:12.5px;font-weight:600;
-    letter-spacing:-.005em;
+    border-radius:var(--rf);padding:9px 16px;font:inherit;font-size:13px;font-weight:600;
+    letter-spacing:-.008em;
     cursor:pointer;white-space:nowrap;position:relative;
     box-shadow:var(--sheen),0 6px 18px -8px var(--glow);
     transition:background-color var(--quick) ease,border-color var(--quick) ease,
@@ -240,8 +246,8 @@ export const KIT_CSS = `
     letter-spacing:-.03em;font-weight:800;margin:0}
   .h2{font-family:var(--font-display);font-size:clamp(22px,2.6vw,32px);line-height:1.15;
     letter-spacing:-.025em;font-weight:700;margin:0}
-  .h3{font-size:17px;line-height:1.3;letter-spacing:-.02em;font-weight:700;margin:0}
-  .h4{font-size:14px;line-height:1.35;letter-spacing:-.015em;font-weight:700;margin:0}
+  .h3{font-size:17px;line-height:1.3;letter-spacing:-.021em;font-weight:600;margin:0}
+  .h4{font-size:14px;line-height:1.35;letter-spacing:-.014em;font-weight:600;margin:0}
   .lead{font-size:clamp(14px,1.5vw,17px);line-height:1.6;color:var(--t2);margin:0}
   .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;
     color:transparent}

@@ -26,6 +26,7 @@
  * Видна в исходнике страницы и в логе запуска api.
  */
 import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
+import { I18N_JS } from './i18n.js';
 
 export const UI_BUILD = '2026-09-22-5';
 
@@ -40,7 +41,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script data-theme-boot>${THEME_JS}${EMOJI_JS}</script>
+<script data-theme-boot>${THEME_JS}${EMOJI_JS}${I18N_JS}</script>
 <style>
   /* ═══ Оформление ═══
      Токены, теги и готовые блоки живут в theme.ts — одном месте на весь
@@ -363,7 +364,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .prof-av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;
     align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:20px;
     background-size:cover;background-position:center}
-  .prof-nm{font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .prof-nm{font-size:20px;font-weight:600;letter-spacing:-.02em}
   .prof-sub{font-size:12.5px;color:var(--t3);margin-top:2px}
   .prow{display:flex;align-items:flex-start;gap:14px;padding:11px 0;
     border-bottom:1px solid var(--line)}
@@ -432,7 +433,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #gate .mark{width:46px;height:46px;border-radius:0;background:none;margin:0 0 18px;
     display:block;box-shadow:none}
   #gate .mark svg{width:46px;height:46px;display:block}
-  #gate h1{font-size:25px;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
+  #gate h1{font-size:27px;font-weight:600;letter-spacing:-.03em;margin:0 0 6px}
   #gate p{font-size:13.5px;color:var(--t2);margin:0 0 18px;line-height:1.55}
   #gate input{height:46px;font-size:14px;border-radius:13px}
   #gate button{width:100%;height:46px;font-size:14px;border-radius:13px}
@@ -460,7 +461,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #list{background:var(--panel);border-right:1px solid var(--line);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
   .lhead{padding:16px 16px 0;border-bottom:1px solid var(--line)}
-  .lhead b{font-size:17px;font-weight:800;letter-spacing:-.025em}
+  .lhead b{font-size:18px;font-weight:600;letter-spacing:-.024em}
   .filters select,.search input{border-radius:10px;font-size:12.5px}
   .tabs{gap:6px;margin:12px 0 0}
   .tab{border-radius:10px 10px 0 0;padding:8px 10px;border-bottom:2px solid transparent}
@@ -482,7 +483,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #thread{background:transparent}
   .thead{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
-  .thead .nm{font-size:15px;font-weight:800;letter-spacing:-.02em}
+  .thead .nm{font-size:15px;font-weight:600;letter-spacing:-.018em}
   #msgs{padding:22px 18px;gap:9px}
   .m{border-radius:18px;padding:10px 14px;font-size:13.5px;line-height:1.52;
     box-shadow:var(--shadow)}
@@ -543,13 +544,15 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .pg{max-width:900px;margin:0 auto;padding:38px 28px 70px}
   .pg-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
     margin-bottom:22px;flex-wrap:wrap}
-  .pg-head h2{margin:0;font-size:29px;font-weight:700;letter-spacing:-.025em;
+  .pg-head h2{margin:0;font-size:30px;font-weight:600;letter-spacing:-.028em;line-height:1.15;
     font-family:var(--font-display,var(--font))}
-  .pg-head p{margin:6px 0 0;color:var(--t2);font-size:13px;max-width:62ch;line-height:1.55}
+  /* Строка описания короче колонки: длинная строка читается хуже, а
+     обрывок в две с половиной строки выглядел неряшливо. */
+  .pg-head p{margin:8px 0 0;color:var(--t2);font-size:13.5px;max-width:52ch;line-height:1.6}
   .pg-sec{margin-top:30px}
   /* Подпись раздела, а не ещё один заголовок: капслок мелким кеглем
      отделяет разделы, не перебивая название страницы. */
-  .pg-sec h3{margin:0 0 12px;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;
+  .pg-sec h3{margin:0 0 12px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
     color:var(--t3);font-weight:600}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
   .tile{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;
@@ -559,7 +562,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .tile.click{cursor:pointer}
   .tile.click:hover{box-shadow:var(--lift);transform:translateY(-2px);border-color:var(--line2)}
   .tile .t1{display:flex;gap:11px;align-items:center;min-width:0}
-  .tile .ttl{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;
+  .tile .ttl{font-weight:600;font-size:14.5px;letter-spacing:-.015em;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap}
   .tile .sub{color:var(--t3);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tile .acts{display:flex;gap:7px;margin-top:auto;padding-top:4px;flex-wrap:wrap}
@@ -595,104 +598,104 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
     <div id="stepEmail" class="step">
       <h1>Rozmovio</h1>
-      <p>Все переписки с клиентами — в одном окне. Введите рабочую почту, и мы пришлём код из шести цифр.</p>
+      <p>Усе листування з клієнтами — в одному вікні. Введіть робочу пошту, і ми надішлемо код із шести цифр.</p>
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <div class="err" id="gateErr"></div>
-      <div style="margin-top:14px"><button id="ask">Получить код</button></div>
-      <div class="alt"><a id="toSignup">Создать компанию</a> · <a id="toToken">Вход по токену</a></div>
+      <div style="margin-top:14px"><button id="ask" data-t>Отримати код</button></div>
+      <div class="alt"><a id="toSignup" data-t>Створити компанію</a> · <a id="toToken" data-t>Вхід за токеном</a></div>
     </div>
 
     <div id="stepSignup" class="step" style="display:none">
-      <h1>Новая компания</h1>
-      <p>Четырнадцать дней бесплатно. Пароль придумывать не нужно — вход по коду на почту.</p>
-      <input id="suCompany" placeholder="Название компании" autocomplete="organization">
+      <h1 data-t>Нова компанія</h1>
+      <p>Чотирнадцять днів безкоштовно. Пароль вигадувати не потрібно — вхід за кодом на пошту.</p>
+      <input id="suCompany" placeholder="Назва компанії" data-tp autocomplete="organization">
       <input id="suEmail" type="email" placeholder="you@company.com" autocomplete="email"
              style="margin-top:9px">
       <div class="err" id="suErr"></div>
       <div class="row2" style="margin-top:14px">
-        <button id="suGo">Создать</button>
-        <button class="ghost" id="suBack">Назад</button>
+        <button id="suGo" data-t>Створити</button>
+        <button class="ghost" id="suBack" data-t>Назад</button>
       </div>
     </div>
 
     <div id="stepCode" class="step" style="display:none">
-      <h1>Код отправлен</h1>
-      <p>Проверьте почту <b id="sentTo"></b>. Код действует 10 минут.</p>
+      <h1 data-t>Код надіслано</h1>
+      <p>Перевірте пошту <b id="sentTo"></b>. Код діє 10 хвилин.</p>
       <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
       <div class="err" id="codeErr"></div>
       <div class="row2" style="margin-top:14px">
-        <button id="verify">Войти</button>
-        <button class="ghost" id="again">Другая почта</button>
+        <button id="verify" data-t>Увійти</button>
+        <button class="ghost" id="again" data-t>Інша пошта</button>
       </div>
     </div>
 
     <div id="stepWs" class="step" style="display:none">
-      <h1>Куда входим?</h1>
-      <p>Эта почта заведена в нескольких организациях.</p>
+      <h1 data-t>Куди входимо?</h1>
+      <p>Ця пошта заведена в кількох організаціях.</p>
       <div id="wsList"></div>
     </div>
 
     <div id="stepToken" class="step" style="display:none">
-      <h1>Вход по токену</h1>
-      <p>Токен выдаёт команда на сервере:
+      <h1 data-t>Вхід за токеном</h1>
+      <p>Токен видає команда на сервері:
         <code>docker compose exec api node apps/api/dist/seed.js --name "Компания" --email you@example.com</code>
       </p>
       <input id="tok" type="password" placeholder="eyJhbGciOi..." autocomplete="off">
       <div class="err" id="tokErr"></div>
       <div class="row2" style="margin-top:14px">
-        <button id="enter">Войти</button>
-        <button class="ghost" id="toEmail">Назад к почте</button>
+        <button id="enter" data-t>Увійти</button>
+        <button class="ghost" id="toEmail" data-t>Назад до пошти</button>
       </div>
     </div>
 
-    <div class="foot">Telegram, Instagram и Messenger в одном окне — и в карточке клиента в Zoho CRM.</div>
+    <div class="foot">Telegram, Instagram і Messenger в одному вікні — і в картці клієнта в Zoho CRM.</div>
   </div>
 </div>
 
 <div id="app" data-view="chats">
   <nav id="rail">
-    <div class="logo" id="logo" title="К чатам" style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
-    <button class="rbtn on" data-view="chats" data-icon="chat">Чаты<span class="cnt" id="railCnt" style="display:none"></span></button>
-    <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1">Каналы</button>
-    <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1">Сценарии</button>
-    <button class="rbtn" data-view="replies" data-icon="bolt">Шаблоны</button>
-    <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1">Интеграции</button>
-    <button class="rbtn" data-view="users" data-icon="team" data-admin="1">Команда</button>
+    <div class="logo" id="logo" title="До чатів" data-tt style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
+    <button class="rbtn on" data-view="chats" data-icon="chat" data-t>Чати<span class="cnt" id="railCnt" style="display:none"></span></button>
+    <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1" data-t>Канали</button>
+    <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1" data-t>Сценарії</button>
+    <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
+    <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
+    <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
     <div class="grow"></div>
-    <button class="rbtn" id="themeTitle" data-icon="sun">Тема</button>
-    <button class="rbtn" id="bell" data-icon="bell">Звук</button>
-    <button class="rbtn" data-view="profile" data-icon="gear">Профиль</button>
-    <button class="rbtn" id="out" data-icon="exit">Выйти</button>
+    <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
+    <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
+    <button class="rbtn" data-view="profile" data-icon="gear" data-t>Профіль</button>
+    <button class="rbtn" id="out" data-icon="exit" data-t>Вийти</button>
   </nav>
 
   <div id="list">
     <div class="lhead">
-      <div class="top"><b>Чаты</b><button class="ghost mini" id="cardBtn">Клиент</button></div>
+      <div class="top"><b data-t>Чати</b><button class="ghost mini" id="cardBtn" data-t>Клієнт</button></div>
       <div class="filters">
-        <select id="fCh"><option value="">Все каналы</option></select>
+        <select id="fCh"><option value="" data-t>Усі канали</option></select>
         <select id="fAs">
-          <option value="all">Все ответственные</option>
-          <option value="me">Мои</option>
-          <option value="none">Без ответственного</option>
+          <option value="all" data-t>Усі відповідальні</option>
+          <option value="me" data-t>Мої</option>
+          <option value="none" data-t>Без відповідального</option>
         </select>
       </div>
-      <div class="search"><input id="fQ" placeholder="Поиск по имени или телефону" autocomplete="off"></div>
+      <div class="search"><input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off"></div>
       <div class="tabs">
-        <button class="tab on" data-status="open">Открытые<span class="n" id="nOpen"></span></button>
-        <button class="tab" data-status="closed">Закрытые<span class="n" id="nClosed"></span></button>
-        <button class="tab" data-status="all">Все</button>
+        <button class="tab on" data-status="open" data-t>Відкриті<span class="n" id="nOpen"></span></button>
+        <button class="tab" data-status="closed" data-t>Закриті<span class="n" id="nClosed"></span></button>
+        <button class="tab" data-status="all" data-t>Усі</button>
       </div>
     </div>
     <div id="convs"></div>
   </div>
 
   <div id="thread">
-    <div class="thead" id="thead"><div class="dim">Выберите диалог слева</div></div>
+    <div class="thead" id="thead"><div class="dim" data-t>Оберіть діалог зліва</div></div>
     <div id="msgs"></div>
     <div class="composer" id="composer" style="display:none"></div>
   </div>
 
-  <aside id="card"><div class="empty">Карточка клиента появится, когда откроете диалог</div></aside>
+  <aside id="card"><div class="empty" data-t>Картка клієнта зʼявиться, коли відкриєте діалог</div></aside>
 
   <main id="page"></main>
 </div>
@@ -786,29 +789,37 @@ function esc(s){
   });
 }
 
+/**
+ * Локаль для дат. Берётся из выбранного языка: интерфейс по-польски с
+ * датой «14 августа» выглядит как недоделка, и это она и есть.
+ */
+function locale(){
+  return LANG === 'en' ? 'en-GB' : LANG === 'pl' ? 'pl-PL' : 'uk-UA';
+}
+
 function fmtTime(iso){
   if (!iso) return '';
   var d = new Date(iso), now = new Date();
   return d.toDateString() === now.toDateString()
-    ? d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})
-    : d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+    ? d.toLocaleTimeString(locale(),{hour:'2-digit',minute:'2-digit'})
+    : d.toLocaleDateString(locale(),{day:'2-digit',month:'2-digit'});
 }
 
 function fmtDate(iso){
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('ru-RU',{day:'2-digit',month:'long',year:'numeric'});
+  return new Date(iso).toLocaleDateString(locale(),{day:'2-digit',month:'long',year:'numeric'});
 }
 
 var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
-  telegram_user:'Telegram номерной', whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
-  whatsapp_user:'WhatsApp номерной', instagram:'Instagram',
-  messenger:'Messenger', viber_bot:'Viber', viber_user:'Viber номерной' };
+  telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
+  whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
+  messenger:'Messenger', viber_bot:'Viber', viber_user:L('Viber номерний') };
 
-var ROLES = { owner:'Владелец', admin:'Администратор', agent:'Оператор', viewer:'Наблюдатель' };
+var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
 
 function statusLabel(s){
-  return { pending:'отправляется', sent:'отправлено', delivered:'доставлено',
-           read:'прочитано', failed:'не доставлено' }[s] || s;
+  return { pending:L('надсилається'), sent:L('надіслано'), delivered:L('доставлено'),
+           read:L('прочитано'), failed:L('не доставлено') }[s] || s;
 }
 
 /** Окно ответа считаем на клиенте — лишний запрос ради этого не нужен. */
@@ -817,7 +828,7 @@ function windowState(c){
   var left = new Date(c.window_expires_at) - new Date();
   if (left <= 0) return { open:false };
   var h = Math.floor(left/3600000), m = Math.floor(left%3600000/60000);
-  return { open:true, left: h > 0 ? h + ' ч ' + m + ' мин' : m + ' мин' };
+  return { open:true, left: h > 0 ? h + L(' год ') + m + L(' хв') : m + L(' хв') };
 }
 
 function initials(name){
@@ -850,7 +861,7 @@ function renderList(){
   if (!convs.length){
     lastList = null;
     el('convs').innerHTML = '<div class="empty">' +
-      (F.q ? 'Ничего не найдено.' : 'Пока пусто.<br>Напишите своему боту — диалог появится здесь.') +
+      (F.q ? L('Нічого не знайдено.') : L('Поки порожньо.<br>Напишіть своєму боту — діалог зʼявиться тут.')) +
       '</div>';
     return;
   }
@@ -863,7 +874,7 @@ function renderList(){
       '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
       '<div class="body">' +
-        '<div class="r1"><span class="nm">' + esc(c.display_name || 'Без имени') + '</span>' +
+        '<div class="r1"><span class="nm">' + esc(c.display_name || L('Без імені')) + '</span>' +
         '<span class="tm">' + esc(fmtTime(c.last_message_at)) + '</span></div>' +
         '<div class="pv">' + esc(c.preview || '') + '</div>' +
         '<div class="r3">' +
@@ -922,29 +933,29 @@ function openConv(id){
 
 function renderHead(){
   var c = currentConv();
-  if (!c){ el('thead').innerHTML = '<div class="dim">Выберите диалог слева</div>'; return }
+  if (!c){ el('thead').innerHTML = L('<div class="dim">Виберіть діалог ліворуч</div>'); return }
 
   var w = windowState(c);
   var closed = c.status === 'resolved';
   var mine = ME && ME.user && c.assignee_id === ME.user.id;
 
   el('thead').innerHTML =
-    '<button class="ghost mini back" id="aBack" title="К списку чатов">← Чаты</button>' +
+    L('<button class="ghost mini back" id="aBack" title="До списку чатів">← Чати</button>') +
     '<div class="who">' +
       '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
-      '<div style="min-width:0"><div class="nm">' + esc(c.display_name || 'Без имени') + '</div>' +
+      '<div style="min-width:0"><div class="nm">' + esc(c.display_name || L('Без імені')) + '</div>' +
       '<div class="sub">' + esc(CH[c.channel_type] || c.channel_type) +
-        (w.open && w.left ? ' · окно ответа ещё ' + w.left : (w.open ? '' : ' · окно закрыто')) +
-        ' · ' + esc(c.assignee_name || 'без ответственного') +
+        (w.open && w.left ? L(' · вікно відповіді ще ') + w.left : (w.open ? '' : L(' · вікно закрито'))) +
+        ' · ' + esc(c.assignee_name || L('без відповідального')) +
       '</div></div>' +
     '</div>' +
     '<div class="acts">' +
-      (mine ? '' : '<button class="ghost mini" id="aTake">Взять себе</button>') +
-      '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + '">Бот: ' +
+      (mine ? '' : L('<button class="ghost mini" id="aTake">Взяти собі</button>')) +
+      '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
         esc(botState(c).label) + '</button>' +
       '<button class="' + (closed ? '' : 'ghost ') + 'mini" id="aClose">' +
-        (closed ? 'Открыть заново' : 'Закрыть чат') + '</button>' +
+        (closed ? L('Відкрити заново') : L('Закрити чат')) + '</button>' +
     '</div>';
 
   if (el('aTake')) el('aTake').onclick = function(){
@@ -957,7 +968,7 @@ function renderHead(){
     patchConv({ status: closing ? 'resolved' : 'open' }).then(function(){
       // Закрытый чат исчезает из «Открытых» — это правильно, но без
       // подсказки выглядит как потеря переписки. Говорим, где он теперь.
-      if (closing) toast('Чат закрыт. Он во вкладке «Закрытые» и вернётся в «Открытые», как только клиент напишет.');
+      if (closing) toast(L('Чат закрито. Він у вкладці «Закриті» і повернеться у «Відкриті», як тільки клієнт напише.'));
     });
   };
   el('aBack').onclick = backToList;
@@ -986,12 +997,12 @@ function toast(text){
  * молчащий бот выглядит сломанным.
  */
 function botState(c){
-  if (!c.bot_enabled) return { label:'выкл', why:'Автоответы выключены для этого диалога' };
-  if (c.assignee_id) return { label:'пауза', why:'У диалога есть ответственный — бот не вмешивается' };
+  if (!c.bot_enabled) return { label:L('вимк'), why:L('Автовідповіді вимкнені для цього діалогу') };
+  if (c.assignee_id) return { label:L('пауза'), why:L('У діалогу є відповідальний — бот не втручається') };
   if (c.human_replied_at && (new Date() - new Date(c.human_replied_at)) < 30*60*1000) {
-    return { label:'пауза', why:'Оператор отвечал менее 30 минут назад. Бот включится сам' };
+    return { label:L('пауза'), why:L('Оператор відповідав менше 30 хвилин тому. Бот увімкнеться сам') };
   }
-  return { label:'вкл', why:'Бот отвечает на подходящие сообщения' };
+  return { label:L('увімк'), why:L('Бот відповідає на відповідні повідомлення') };
 }
 
 function patchConv(body){
@@ -1013,7 +1024,7 @@ function loadThread(){
         (m.sender_type === 'bot' ? ' bot' : '') +
         (m.status === 'failed' ? ' failed' : '');
       var meta = fmtTime(m.sent_at) +
-        (m.sender_type === 'bot' ? ' · бот' : '') +
+        (m.sender_type === 'bot' ? L(' · бот') : '') +
         (isOut ? ' · ' + statusLabel(m.status) : '');
 
       // Цитата. Текст берём с сервера, если исходное сообщение нашлось,
@@ -1022,8 +1033,8 @@ function loadThread(){
       var qText = m.reply_to_text || c.replyToText;
       var quote = (qText || c.replyToExternalId)
         ? '<div class="quote"><b>' +
-            esc(m.reply_to_direction === 'out' ? 'Вы' : (c.replyToName || 'Клиент')) + '</b>' +
-            esc(qText || 'сообщение') + '</div>'
+            esc(m.reply_to_direction === 'out' ? L('Ви') : (c.replyToName || L('Клієнт'))) + '</b>' +
+            esc(qText || L('повідомлення')) + '</div>'
         : '';
 
       var rx = (m.reactions || []).map(function(r){
@@ -1038,8 +1049,8 @@ function loadThread(){
           '<div class="meta">' + esc(meta) + '</div></div>' +
         (rx ? '<div class="rx">' + rx + '</div>' : '') +
         '<div class="mtools">' +
-          '<button data-reply="' + m.id + '">Ответить</button>' +
-          (m.external_id ? '<button data-react="' + m.id + '">Реакция</button>' : '') +
+          '<button data-reply="' + m.id + L('">Відповісти</button>') +
+          (m.external_id ? '<button data-react="' + m.id + L('">Реакція</button>') : '') +
         '</div>' +
       '</div>';
     }).join('');
@@ -1077,8 +1088,8 @@ function renderAttachments(messageId, list){
   return list.map(function(a, i){
     if (a.ready === false) {
       var why = a.failure && a.failure.error === 'too_large'
-        ? 'Файл больше 20 МБ — Telegram не отдаёт его боту'
-        : 'Вложение недоступно';
+        ? L('Файл більший за 20 МБ — Telegram не віддає його боту')
+        : L('Вкладення недоступне');
       return '<div class="att"><div class="wait">' + esc(why) + '</div></div>';
     }
     if (!a.storageKey) {
@@ -1086,9 +1097,9 @@ function renderAttachments(messageId, list){
       // не создалась (воркер лежал, не было сети), файл не подтянется
       // никогда — состояние «загружается» будет вечным.
       return '<div class="att"><div class="wait">' +
-        esc(labelFor(a.type)) + ' загружается... ' +
+        esc(labelFor(a.type)) + L(' завантажується... ') +
         '<span class="x" data-retry="' + messageId + '" data-i="' + i +
-        '" style="cursor:pointer;text-decoration:underline">повторить</span></div></div>';
+        L('" style="cursor:pointer;text-decoration:underline">повторити</span></div></div>');
     }
 
     // Токен нельзя положить в src: браузер не отправит заголовок
@@ -1111,8 +1122,8 @@ function renderAttachments(messageId, list){
 }
 
 function labelFor(t){
-  return { image:'Изображение', video:'Видео', voice:'Голосовое сообщение',
-           audio:'Аудио', document:'Документ', sticker:'Стикер' }[t] || 'Вложение';
+  return { image:L('Зображення'), video:L('Відео'), voice:L('Голосове повідомлення'),
+           audio:L('Аудіо'), document:L('Документ'), sticker:L('Стікер') }[t] || L('Вкладення');
 }
 
 var mediaCache = {};
@@ -1170,35 +1181,35 @@ function renderComposer(force){
   if (!w.open){
     // Не прячем поле молча — объясняем, почему нельзя. Иначе оператор
     // решит, что сломался интерфейс, и пойдёт писать в поддержку.
-    box.innerHTML = '<div class="blocked"><b>Окно ответа закрыто.</b> ' +
-      'Свободный текст отправить нельзя — так устроены правила канала, ' +
-      'а не наше приложение. Доступны только одобренные шаблоны.</div>';
+    box.innerHTML = L('<div class="blocked"><b>Вікно відповіді закрито.</b> ') +
+      L('Вільний текст надіслати не можна — так влаштовані правила каналу, ') +
+      L('а не наш застосунок. Доступні тільки схвалені шаблони.</div>');
     return;
   }
 
   box.innerHTML =
     (replyTo
-      ? '<div class="replybar"><div class="t"><b>Ответ ' +
-        (replyTo.mine ? 'на своё сообщение' : 'клиенту') + ':</b> ' +
-        esc(replyTo.text || 'сообщение') + '</div><div class="c" id="rCancel">×</div></div>'
+      ? L('<div class="replybar"><div class="t"><b>Відповідь ') +
+        (replyTo.mine ? L('на своє повідомлення') : L('клієнту')) + ':</b> ' +
+        esc(replyTo.text || L('повідомлення')) + '</div><div class="c" id="rCancel">×</div></div>'
       : '') +
     (pendingFile
       ? '<div class="fileprev"><div class="t">' + esc(pendingFile.name) + ' · ' +
-        Math.round(pendingFile.size / 1024) + ' КБ</div><div class="c" id="fCancel">×</div></div>'
+        Math.round(pendingFile.size / 1024) + L(' КБ</div><div class="c" id="fCancel">×</div></div>')
       : '') +
     '<div class="tplbox" id="tplBox" style="display:none"></div>' +
     '<div class="emobox" id="emoBox" style="display:none"></div>' +
     '<div class="row">' +
     '<input type="file" id="file" style="display:none">' +
-    '<button class="icob" id="clip" title="Прикрепить файл">' + icon('clip') + '</button>' +
-    '<button class="icob" id="emo" title="Смайлы">' + icon('smile') + '</button>' +
-    '<button class="icob" id="tpl" title="Шаблоны ответов">' + icon('bolt') + '</button>' +
+    L('<button class="icob" id="clip" title="Прикріпити файл">') + icon('clip') + '</button>' +
+    L('<button class="icob" id="emo" title="Смайли">') + icon('smile') + '</button>' +
+    L('<button class="icob" id="tpl" title="Шаблони відповідей">') + icon('bolt') + '</button>' +
     // Кнопка черновика появляется, только когда ИИ подключён: пустая
     // кнопка, которая на нажатие отвечает «не настроено», — это
     // обещание, которого интерфейс не держит.
-    (AI.ready ? '<button class="icob" id="ai" title="Черновик ответа от ИИ">✨</button>' : '') +
-    '<textarea id="txt" rows="1" placeholder="Ответ клиенту. Enter — отправить, Shift+Enter — перенос"></textarea>' +
-    '<button id="send">Отправить</button></div><div class="err" id="sendErr"></div>';
+    (AI.ready ? L('<button class="icob" id="ai" title="Чернетка відповіді від ШІ">✨</button>') : '') +
+    L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту. Enter — надіслати, Shift+Enter — перенос"></textarea>') +
+    L('<button id="send">Надіслати</button></div><div class="err" id="sendErr"></div>');
 
   var ta = el('txt');
   if (keep) ta.value = keep;
@@ -1212,7 +1223,7 @@ function renderComposer(force){
     if (!f) return;
     // Двадцать мегабайт — предел Telegram для бота. Проверяем здесь,
     // чтобы человек узнал об этом до долгой загрузки, а не после.
-    if (f.size > 20 * 1024 * 1024){ alertLine('Файл больше 20 МБ — Telegram не пропустит'); return }
+    if (f.size > 20 * 1024 * 1024){ alertLine(L('Файл більший за 20 МБ — Telegram не пропустить')); return }
     pendingFile = f;
     renderComposer(true);
   };
@@ -1256,9 +1267,9 @@ function aiDraft(){
     .catch(function(e){
       var p = e.payload || {};
       alertLine(p.error === 'not_connected'
-        ? 'ИИ не подключён — включите его в разделе «Интеграции»'
-        : p.error === 'nothing_to_answer' ? 'В диалоге ещё нет текста, на который отвечать'
-        : (p.detail || 'ИИ не ответил'));
+        ? L('ШІ не підключений — увімкніть його в розділі «Інтеграції»')
+        : p.error === 'nothing_to_answer' ? L('У діалозі ще немає тексту, на який відповідати')
+        : (p.detail || L('ШІ не відповів')));
     })
     .then(function(){ busy(b, false) });
 }
@@ -1287,7 +1298,7 @@ function useTemplate(q){
   ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
   var f = (q.attachments || [])[0];
   pendingFile = f
-    ? { qr: { id: q.id, index: 0 }, name: f.filename || 'файл', size: f.size || 0, type: f.mime }
+    ? { qr: { id: q.id, index: 0 }, name: f.filename || L('файл'), size: f.size || 0, type: f.mime }
     : null;
   renderComposer(true);
   var t2 = el('txt');
@@ -1298,9 +1309,9 @@ function toggleTemplates(){
   var b = el('tplBox');
   if (b.style.display !== 'none'){ b.style.display='none'; return }
   if (!QR.length){
-    b.innerHTML = '<div class="qr" style="cursor:default"><b>Шаблонов пока нет.</b> ' +
-      '<span class="x">Заведите их в разделе «Шаблоны» — потом вставляются командой /имя ' +
-      'или отсюда, вместе с файлом.</span></div>';
+    b.innerHTML = L('<div class="qr" style="cursor:default"><b>Шаблонів поки немає.</b> ') +
+      L('<span class="x">Створіть їх у розділі «Шаблони» — потім вставляються командою /імʼя ') +
+      L('або звідси, разом з файлом.</span></div>');
     b.style.display = 'block';
     return;
   }
@@ -1346,10 +1357,10 @@ var EMOJI = ['👍','👎','❤','🔥','🎉','😁','😢','🙏','👌','🤔
 function bindMessageTools(){
   Array.prototype.forEach.call(el('msgs').querySelectorAll('[data-retry]'), function(x){
     x.onclick = function(){
-      x.textContent = 'ставлю в очередь...';
+      x.textContent = L('ставлю в чергу...');
       api('/media/' + x.dataset.retry + '/' + x.dataset.i + '/retry', { method:'POST' })
         .then(function(){
-          x.textContent = 'скачиваю...';
+          x.textContent = L('завантажую...');
           setTimeout(function(){ lastThread = null; loadThread() }, 2500);
         })
         .catch(function(e){
@@ -1358,10 +1369,10 @@ function bindMessageTools(){
           // между двумя совершенно разными поломками.
           var p = e.payload || {};
           x.textContent =
-            p.error === 'no_file_reference' ? 'нет ссылки на файл у Telegram'
-            : p.error === 'not_found' ? 'сообщение не найдено'
-            : p.error === 'unauthorized' ? 'нет доступа'
-            : 'ошибка ' + (e.status || '');
+            p.error === 'no_file_reference' ? L('немає посилання на файл у Telegram')
+            : p.error === 'not_found' ? L('повідомлення не знайдено')
+            : p.error === 'unauthorized' ? L('немає доступу')
+            : L('помилка ') + (e.status || '');
         });
     };
   });
@@ -1414,7 +1425,7 @@ function showPicker(anchor, messageId){
         setTimeout(function(){ lastThread = null; loadThread() }, 900);
       }).catch(function(e){
         var p = e.payload || {};
-        if (p.error === 'message_not_delivered_yet') alertLine('Сообщение ещё не доставлено');
+        if (p.error === 'message_not_delivered_yet') alertLine(L('Повідомлення ще не доставлено'));
       });
     };
   });
@@ -1496,9 +1507,9 @@ function send(){
       // а не «ошибка 409».
       var p = e.payload || {};
       el('sendErr').textContent =
-        p.error === 'file_too_large' ? 'Файл больше 20 МБ'
+        p.error === 'file_too_large' ? L('Файл більший за 20 МБ')
         : p.error === 'storage_write_failed' ? p.detail
-        : p.reason || p.error || 'Не удалось отправить';
+        : p.reason || p.error || L('Не вдалося надіслати');
     })
     .then(function(){ busy(el('send'), false) });
 }
@@ -1517,7 +1528,7 @@ function loadCard(){
 
 function renderCard(){
   var d = cardData;
-  if (!d || !d.contact){ el('card').innerHTML = '<div class="empty">Нет данных</div>'; return }
+  if (!d || !d.contact){ el('card').innerHTML = L('<div class="empty">Немає даних</div>'); return }
   var ct = d.contact, c = currentConv();
 
   el('card').innerHTML =
@@ -1526,60 +1537,60 @@ function renderCard(){
         'style="width:44px;height:44px;font-size:15px;background-color:' +
         avatarColor(ct.display_name || ct.id) + '">' + esc(initials(ct.display_name)) + '</div>' +
       '<div style="min-width:0"><div style="font-weight:700;font-size:14.5px">' +
-        esc(ct.display_name || 'Без имени') + '</div>' +
-      '<div class="dim" style="font-size:12px">клиент с ' + esc(fmtDate(ct.created_at)) + '</div></div>' +
+        esc(ct.display_name || L('Без імені')) + '</div>' +
+      L('<div class="dim" style="font-size:12px">клієнт з ') + esc(fmtDate(ct.created_at)) + '</div></div>' +
     '</div>' +
 
-    '<h4>Контакт</h4>' +
-    '<div class="fld"><label>Имя</label><input id="cNm" value="' + esc(ct.display_name || '') + '"></div>' +
-    '<div class="fld"><label>Телефон</label><input id="cPh" value="' + esc(ct.phone_e164 || '') + '"></div>' +
-    '<div class="fld"><label>Почта</label><input id="cEm" value="' + esc(ct.email || '') + '"></div>' +
-    '<button class="ghost mini" id="cSave">Сохранить</button>' +
+    L('<h4>Контакт</h4>') +
+    L('<div class="fld"><label>Імʼя</label><input id="cNm" value="') + esc(ct.display_name || '') + '"></div>' +
+    L('<div class="fld"><label>Телефон</label><input id="cPh" value="') + esc(ct.phone_e164 || '') + '"></div>' +
+    L('<div class="fld"><label>Пошта</label><input id="cEm" value="') + esc(ct.email || '') + '"></div>' +
+    L('<button class="ghost mini" id="cSave">Зберегти</button>') +
     '<span class="ok" id="cOk" style="margin-left:8px"></span>' +
 
-    '<h4>Каналы клиента</h4>' +
+    L('<h4>Канали клієнта</h4>') +
     '<div class="kv2">' + (d.identities || []).map(function(i){
       var p = i.raw_profile || {};
       return '<div class="k">' + esc(CH[i.channel_type] || i.channel_type) + '</div>' +
         '<div>' + esc(p.username ? '@' + p.username : i.external_id) + '</div>';
     }).join('') + '</div>' +
 
-    '<h4>Метки</h4>' +
+    L('<h4>Мітки</h4>') +
     '<div class="tags" id="cTags">' +
       ((c && c.tags) || []).map(function(t){
         return '<span class="tag">' + esc(t) + '<span class="x" data-tag="' + esc(t) + '">×</span></span>';
       }).join('') +
     '</div>' +
     '<div class="row2" style="margin-top:8px">' +
-      '<input id="cTag" placeholder="новая метка" style="font-size:12.5px;padding:6px 9px">' +
-      '<button class="ghost mini" id="cTagAdd">Добавить</button>' +
+      L('<input id="cTag" placeholder="нова мітка" style="font-size:12.5px;padding:6px 9px">') +
+      L('<button class="ghost mini" id="cTagAdd">Додати</button>') +
     '</div>' +
 
-    '<h4>Заметки</h4>' +
-    '<textarea id="cNote" rows="2" placeholder="Видно только вашей команде"></textarea>' +
-    '<button class="ghost mini" id="cNoteAdd" style="margin-top:7px">Добавить</button>' +
+    L('<h4>Нотатки</h4>') +
+    L('<textarea id="cNote" rows="2" placeholder="Видно тільки вашій команді"></textarea>') +
+    L('<button class="ghost mini" id="cNoteAdd" style="margin-top:7px">Додати</button>') +
     '<div style="margin-top:12px">' +
       ((d.notes || []).length ? d.notes.map(function(n){
         return '<div class="note">' + esc(n.body) +
-          '<div class="who">' + esc(n.author_name || 'кто-то') + ' · ' + esc(fmtTime(n.created_at)) +
-          ' <span class="x" data-note="' + n.id + '" style="cursor:pointer">удалить</span></div></div>';
-      }).join('') : '<div class="dim" style="font-size:12.5px">Пока нет.</div>') +
+          '<div class="who">' + esc(n.author_name || L('хтось')) + ' · ' + esc(fmtTime(n.created_at)) +
+          ' <span class="x" data-note="' + n.id + L('" style="cursor:pointer">видалити</span></div></div>');
+      }).join('') : L('<div class="dim" style="font-size:12.5px">Поки немає.</div>')) +
     '</div>' +
 
     '<h4>CRM</h4>' +
     (d.crmUrl
-      ? '<div class="kv2"><div class="k">Карточка</div>' +
-        '<div><a href="' + esc(d.crmUrl) + '" target="_blank" rel="noopener">открыть в Zoho</a></div></div>'
-      : '<div class="row2"><button class="ghost mini" id="cCrm">Отправить в Zoho</button></div>' +
-        '<div class="hint" style="margin-top:6px">Найдём по номеру и привяжем карточку, ' +
-        'а если такого клиента ещё нет — заведём лид.</div>' +
+      ? L('<div class="kv2"><div class="k">Картка</div>') +
+        '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Zoho</a></div></div>')
+      : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
+        L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
+        L('а якщо такого клієнта ще немає — створимо лід.</div>') +
         '<div class="err" id="cCrmErr"></div>') +
 
-    '<h4>Диалог</h4>' +
+    L('<h4>Діалог</h4>') +
     '<div class="kv2">' +
-      '<div class="k">Сообщений</div><div>' + esc((d.stats && d.stats.messages) || 0) + '</div>' +
-      '<div class="k">Первое</div><div>' + esc(fmtDate(d.stats && d.stats.first_at)) + '</div>' +
-      '<div class="k">Последнее</div><div>' + esc(fmtDate(d.stats && d.stats.last_at)) + '</div>' +
+      L('<div class="k">Повідомлень</div><div>') + esc((d.stats && d.stats.messages) || 0) + '</div>' +
+      L('<div class="k">Перше</div><div>') + esc(fmtDate(d.stats && d.stats.first_at)) + '</div>' +
+      L('<div class="k">Останнє</div><div>') + esc(fmtDate(d.stats && d.stats.last_at)) + '</div>' +
     '</div>';
 
   paintAvatars();
@@ -1591,7 +1602,7 @@ function renderCard(){
       phone: el('cPh').value.trim(),
       email: el('cEm').value.trim()
     }}).then(function(){
-      el('cOk').textContent = 'сохранено';
+      el('cOk').textContent = L('збережено');
       setTimeout(function(){ if (el('cOk')) el('cOk').textContent = '' }, 2000);
       refresh();
     }).catch(showErr).then(function(){ busy(el('cSave'), false) });
@@ -1602,7 +1613,7 @@ function renderCard(){
     el('cCrmErr').textContent = '';
     api('/contacts/' + ct.id + '/crm', { method:'POST' })
       .then(function(){
-        toast('Отправляю в Zoho...');
+        toast(L('Надсилаю в Zoho...'));
         // Связка идёт задачей: ответ приходит не мгновенно, и карточку
         // имеет смысл перечитать через пару секунд, а не сразу.
         setTimeout(loadCard, 2500);
@@ -1611,8 +1622,8 @@ function renderCard(){
       .catch(function(e){
         var p = e.payload || {};
         el('cCrmErr').textContent = p.error === 'crm_not_connected'
-          ? 'Zoho не подключена — сделайте это на странице «Интеграции»'
-          : p.error === 'already_linked' ? 'Карточка уже связана' : 'Не удалось отправить';
+          ? L('Zoho не підключена — зробіть це на сторінці «Інтеграції»')
+          : p.error === 'already_linked' ? L('Картка вже звʼязана') : L('Не вдалося надіслати');
         busy(el('cCrm'), false);
       });
   };
@@ -1652,21 +1663,21 @@ function renderCard(){
  */
 
 var TRIG = {
-  welcome:{ t:'Приветствие', h:'Первое сообщение в диалоге, один раз' },
-  keyword:{ t:'Содержит слово', h:'В сообщении встретилось одно из слов' },
-  exact:{ t:'Точное совпадение', h:'Сообщение целиком равно слову' },
-  off_hours:{ t:'Вне графика', h:'Сообщение пришло в нерабочее время' },
-  fallback:{ t:'Ничего не подошло', h:'Проверяется последним' }
+  welcome:{ t:L('Привітання'), h:L('Перше повідомлення в діалозі, один раз') },
+  keyword:{ t:L('Містить слово'), h:L('У повідомленні зустрілося одне зі слів') },
+  exact:{ t:L('Точний збіг'), h:L('Повідомлення цілком дорівнює слову') },
+  off_hours:{ t:L('Поза графіком'), h:L('Повідомлення надійшло в неробочий час') },
+  fallback:{ t:L('Нічого не підійшло'), h:L('Перевіряється останнім') }
 };
 
 var KINDS = {
-  message:{ t:'Сообщение', i:'💬' },
-  ask:{ t:'Вопрос и ожидание ответа', i:'❓' },
-  delay:{ t:'Пауза', i:'⏱' },
-  condition:{ t:'Развилка', i:'🔀' },
-  tag:{ t:'Метка на диалог', i:'🏷' },
-  handoff:{ t:'Передать оператору', i:'🙋' },
-  close:{ t:'Закрыть диалог', i:'✅' }
+  message:{ t:L('Повідомлення'), i:'💬' },
+  ask:{ t:L('Питання і очікування відповіді'), i:'❓' },
+  delay:{ t:L('Пауза'), i:'⏱' },
+  condition:{ t:L('Розгалуження'), i:'🔀' },
+  tag:{ t:L('Мітка на діалог'), i:'🏷' },
+  handoff:{ t:L('Передати оператору'), i:'🙋' },
+  close:{ t:L('Закрити діалог'), i:'✅' }
 };
 
 var SC = null;
@@ -1677,8 +1688,8 @@ function stepsSummary(steps){
   return (steps || []).map(function(st){
     var k = KINDS[st.kind] || { i:'•', t:st.kind };
     var extra = st.kind === 'delay'
-      ? ' ' + (st.seconds >= 3600 ? Math.round(st.seconds / 3600) + ' ч'
-          : st.seconds >= 60 ? Math.round(st.seconds / 60) + ' мин' : st.seconds + ' с')
+      ? ' ' + (st.seconds >= 3600 ? Math.round(st.seconds / 3600) + L(' год')
+          : st.seconds >= 60 ? Math.round(st.seconds / 60) + L(' хв') : st.seconds + L(' с'))
       : '';
     return '<span class="chip">' + k.i + ' ' + esc(k.t.split(' ')[0]) + extra + '</span>';
   }).join(' ');
@@ -1689,12 +1700,12 @@ function renderBots(){
   api('/scenarios').then(function(d){
     SCENARIOS = d.scenarios || [];
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Сценарии',
-        'Цепочка шагов, которая ведёт разговор за оператора: поздороваться, спросить, ' +
-        'подождать, поставить метку и позвать человека, когда дело дошло до дела. ' +
-        'Сценарий молчит, если у диалога есть ответственный или оператор писал менее ' +
-        '30 минут назад, и выключается кнопкой в самом диалоге.',
-        '<button id="scNew">Новый сценарий</button>') +
+      pageHead(L('Сценарії'),
+        L('Ланцюжок кроків, який веде розмову за оператора: привітатися, запитати, ') +
+        L('почекати, поставити мітку і покликати людину, коли справа дійшла до справи. ') +
+        L('Сценарій мовчить, якщо в діалогу є відповідальний або оператор писав менше ') +
+        L('30 хвилин тому, і вимикається кнопкою в самому діалозі.'),
+        L('<button id="scNew">Новий сценарій</button>')) +
 
       (SCENARIOS.length
         ? '<div class="grid">' + SCENARIOS.map(function(sc){
@@ -1705,28 +1716,28 @@ function renderBots(){
                 '<div style="min-width:0">' +
                   '<div class="h4">' + esc(sc.name) + '</div>' +
                   '<div class="s">' + esc(tr.t) + (kw ? ': ' + esc(kw) : '') +
-                    ' · ' + esc(sc.channel_name || 'все каналы') + '</div>' +
+                    ' · ' + esc(sc.channel_name || L('всі канали')) + '</div>' +
                 '</div>' +
                 '<span class="pill ' + (sc.is_active ? 'good' : '') + '">' +
-                  (sc.is_active ? 'работает' : 'выключен') + '</span>' +
+                  (sc.is_active ? L('працює') : L('вимкнений')) + '</span>' +
               '</div>' +
               '<div class="sc-steps">' + stepsSummary(sc.steps) + '</div>' +
               '<div class="sc-f">' +
-                '<span class="dim">запусков ' + esc(sc.runs_started) +
-                  ' · дошли до конца ' + esc(sc.runs_finished) +
-                  (Number(sc.live) ? ' · сейчас идёт ' + esc(sc.live) : '') + '</span>' +
+                L('<span class="dim">запусків ') + esc(sc.runs_started) +
+                  L(' · дійшли до кінця ') + esc(sc.runs_finished) +
+                  (Number(sc.live) ? L(' · зараз триває ') + esc(sc.live) : '') + '</span>' +
                 '<span class="row" style="gap:6px">' +
-                  '<button class="ghost mini" data-scedit="' + sc.id + '">Изменить</button>' +
+                  '<button class="ghost mini" data-scedit="' + sc.id + L('">Змінити</button>') +
                   '<button class="ghost mini" data-sctog="' + sc.id + '" data-on="' +
                     (sc.is_active ? 'false' : 'true') + '">' +
-                    (sc.is_active ? 'Выключить' : 'Включить') + '</button>' +
-                  '<button class="ghost mini" data-scdel="' + sc.id + '">Удалить</button>' +
+                    (sc.is_active ? L('Вимкнути') : L('Увімкнути')) + '</button>' +
+                  '<button class="ghost mini" data-scdel="' + sc.id + L('">Видалити</button>') +
                 '</span>' +
               '</div></div>';
           }).join('') + '</div>'
-        : '<div class="card"><div class="empty"><div class="ttl">Сценариев пока нет</div>' +
-          'Начните с приветствия: клиент пишет впервые — бот здоровается и обещает, ' +
-          'что оператор ответит. Это одна минута и сразу видимый эффект.</div></div>') +
+        : L('<div class="card"><div class="empty"><div class="ttl">Сценаріїв поки немає</div>') +
+          L('Почніть з привітання: клієнт пише вперше — бот вітається і обіцяє, ') +
+          L('що оператор відповість. Це одна хвилина і відразу видимий ефект.</div></div>')) +
       '</div>';
 
     el('scNew').onclick = function(){
@@ -1764,48 +1775,48 @@ function renderBots(){
 function stepFields(st, i){
   if (st.kind === 'message') {
     return '<textarea data-f="text" data-i="' + i + '" rows="2" ' +
-      'placeholder="Что отправить клиенту">' + esc(st.text || '') + '</textarea>';
+      L('placeholder="Що надіслати клієнту">') + esc(st.text || '') + '</textarea>';
   }
   if (st.kind === 'ask') {
     return '<textarea data-f="text" data-i="' + i + '" rows="2" ' +
-      'placeholder="О чём спросить">' + esc(st.text || '') + '</textarea>' +
+      L('placeholder="Про що запитати">') + esc(st.text || '') + '</textarea>' +
       '<div class="row2" style="margin-top:8px">' +
-      '<input data-f="save" data-i="' + i + '" placeholder="Запомнить ответ как (необязательно)" value="' +
+      '<input data-f="save" data-i="' + i + L('" placeholder="Запамʼятати відповідь як (необовʼязково)" value="') +
         esc(st.save || '') + '">' +
       '<input data-f="timeoutMinutes" data-i="' + i + '" type="number" min="0" ' +
-        'placeholder="Ждать, минут" value="' + esc(st.timeoutMinutes || '') + '">' +
+        L('placeholder="Чекати, хвилин" value="') + esc(st.timeoutMinutes || '') + '">' +
       '</div>';
   }
   if (st.kind === 'delay') {
     return '<div class="row2"><input data-f="minutes" data-i="' + i + '" type="number" min="1" ' +
-      'placeholder="Пауза в минутах" value="' + esc(Math.max(1, Math.round((st.seconds || 60) / 60))) +
-      '"><div class="hint" style="margin:0;align-self:center">Дольше суток — уже рассылка, а не разговор</div></div>';
+      L('placeholder="Пауза у хвилинах" value="') + esc(Math.max(1, Math.round((st.seconds || 60) / 60))) +
+      L('"><div class="hint" style="margin:0;align-self:center">Довше за добу — це вже розсилка, а не розмова</div></div>');
   }
   if (st.kind === 'condition') {
     return '<div class="row2">' +
-      '<input data-f="contains" data-i="' + i + '" placeholder="Слова через запятую: да, хочу, беру" value="' +
+      '<input data-f="contains" data-i="' + i + L('" placeholder="Слова через кому: так, хочу, беру" value="') +
         esc((st.contains || []).join(', ')) + '">' +
       '<input data-f="goto" data-i="' + i + '" type="number" min="1" ' +
-        'placeholder="Если да — на шаг" value="' + esc(st.goto !== undefined ? st.goto + 1 : '') + '">' +
+        L('placeholder="Якщо так — на крок" value="') + esc(st.goto !== undefined ? st.goto + 1 : '') + '">' +
       '<input data-f="elseGoto" data-i="' + i + '" type="number" min="1" ' +
-        'placeholder="Если нет — на шаг" value="' +
+        L('placeholder="Якщо ні — на крок" value="') +
         esc(st.elseGoto !== undefined ? st.elseGoto + 1 : '') + '">' +
-      '</div><div class="hint">Смотрит на последний ответ клиента. Пусто в «если нет» — просто идём дальше.</div>';
+      L('</div><div class="hint">Дивиться на останню відповідь клієнта. Порожньо в «якщо ні» — просто йдемо далі.</div>');
   }
   if (st.kind === 'tag') {
-    return '<input data-f="tag" data-i="' + i + '" placeholder="Название метки, например «опт»" value="' +
+    return '<input data-f="tag" data-i="' + i + L('" placeholder="Назва мітки, наприклад «опт»" value="') +
       esc(st.tag || '') + '">';
   }
   if (st.kind === 'handoff') {
-    return '<input data-f="note" data-i="' + i + '" placeholder="Заметка оператору (необязательно)" value="' +
+    return '<input data-f="note" data-i="' + i + L('" placeholder="Нотатка оператору (необовʼязково)" value="') +
       esc(st.note || '') + '">' +
-      '<div class="hint">Бот замолкает в этом диалоге, дальше отвечает человек.</div>';
+      L('<div class="hint">Бот замовкає в цьому діалозі, далі відповідає людина.</div>');
   }
-  return '<div class="hint">Диалог уходит в «Закрытые». Вернётся сам, когда клиент напишет снова.</div>';
+  return L('<div class="hint">Діалог іде в «Закриті». Повернеться сам, коли клієнт напише знову.</div>');
 }
 
 function renderScEditor(){
-  var chOpts = '<option value="">Все каналы</option>' + CHANNELS.map(function(c){
+  var chOpts = L('<option value="">Всі канали</option>') + CHANNELS.map(function(c){
     return '<option value="' + c.id + '"' + (SC.channel_id === c.id ? ' selected' : '') + '>' +
       esc(c.display_name) + '</option>';
   }).join('');
@@ -1824,21 +1835,21 @@ function renderScEditor(){
       '<span class="ic">' + k.i + '</span>' +
       '<b>' + esc(k.t) + '</b>' +
       '<span class="grow"></span>' +
-      '<button class="quiet mini" data-up="' + i + '" title="Выше"' + (i ? '' : ' disabled') + '>↑</button>' +
-      '<button class="quiet mini" data-down="' + i + '" title="Ниже"' +
+      '<button class="quiet mini" data-up="' + i + L('" title="Вище"') + (i ? '' : ' disabled') + '>↑</button>' +
+      '<button class="quiet mini" data-down="' + i + L('" title="Нижче"') +
         (i === SC.steps.length - 1 ? ' disabled' : '') + '>↓</button>' +
-      '<button class="quiet mini" data-drop="' + i + '" title="Убрать">×</button>' +
+      '<button class="quiet mini" data-drop="' + i + L('" title="Прибрати">×</button>') +
       '</div><div class="st-b">' + stepFields(st, i) + '</div></div>';
   }).join('<div class="st-link"></div>');
 
   pageBox().innerHTML = '<div class="pg">' +
-    pageHead(SC.id ? 'Сценарий' : 'Новый сценарий',
-      'Шаги выполняются сверху вниз. Пауза и вопрос останавливают цепочку до срока ' +
-      'или до ответа клиента — всё это переживает перезапуск сервиса.',
-      '<button class="ghost" id="scBack">К списку</button>') +
+    pageHead(SC.id ? L('Сценарій') : L('Новий сценарій'),
+      L('Кроки виконуються зверху вниз. Пауза і питання зупиняють ланцюжок до строку ') +
+      L('або до відповіді клієнта — все це переживає перезапуск сервісу.'),
+      L('<button class="ghost" id="scBack">До списку</button>')) +
 
     '<div class="card">' +
-      '<div class="row2"><input id="scName" placeholder="Название, например «Приветствие»" value="' +
+      L('<div class="row2"><input id="scName" placeholder="Назва, наприклад «Привітання»" value="') +
         esc(SC.name) + '"></div>' +
       '<div class="row2" style="margin-top:9px">' +
         '<select id="scTr">' + trOpts + '</select>' +
@@ -1847,21 +1858,21 @@ function renderScEditor(){
       '<div class="hint">' + esc((TRIG[SC.trigger_type] || {}).h || '') + '</div>' +
       (needKw
         ? '<div class="row2" style="margin-top:9px"><input id="scKw" ' +
-          'placeholder="Слова через запятую: цена, прайс, стоимость" value="' +
+          L('placeholder="Слова через кому: ціна, прайс, вартість" value="') +
           esc((SC.keywords || []).join(', ')) + '"></div>'
         : '') +
       (needSchedule
         ? '<div class="row2" style="margin-top:9px">' +
-          '<input id="scFrom" placeholder="с 09:00" value="' + esc(sch.from || '09:00') + '">' +
-          '<input id="scTo" placeholder="до 19:00" value="' + esc(sch.to || '19:00') + '">' +
-          '<input id="scTz" type="number" placeholder="часовой пояс" value="' +
+          L('<input id="scFrom" placeholder="з 09:00" value="') + esc(sch.from || '09:00') + '">' +
+          L('<input id="scTo" placeholder="до 19:00" value="') + esc(sch.to || '19:00') + '">' +
+          L('<input id="scTz" type="number" placeholder="часовий пояс" value="') +
             esc(sch.tzOffset === undefined ? 3 : sch.tzOffset) + '">' +
-          '</div><div class="hint">Часовой пояс сдвигом от UTC: для Киева — 3. ' +
-          'Рабочие дни — с понедельника по пятницу.</div>'
+          L('</div><div class="hint">Часовий пояс зсувом від UTC: для Києва — 3. ') +
+          L('Робочі дні — з понеділка по пʼятницю.</div>')
         : '') +
     '</div>' +
 
-    '<div class="card"><h3>Шаги</h3><div class="chain">' + steps + '</div>' +
+    L('<div class="card"><h3>Кроки</h3><div class="chain">') + steps + '</div>' +
       '<div class="addrow">' + Object.keys(KINDS).map(function(k){
         return '<button class="ghost mini" data-add="' + k + '">' + KINDS[k].i + ' ' +
           esc(KINDS[k].t) + '</button>';
@@ -1869,12 +1880,12 @@ function renderScEditor(){
     '</div>' +
 
     '<div class="card"><div class="row" style="gap:8px">' +
-      '<button id="scSave">Сохранить</button>' +
-      '<button class="ghost" id="scCancel">Отмена</button>' +
+      L('<button id="scSave">Зберегти</button>') +
+      L('<button class="ghost" id="scCancel">Скасувати</button>') +
       '<span class="grow"></span>' +
       '<label class="row" style="gap:6px;font-size:12.5px;color:var(--t2)">' +
       '<input type="checkbox" id="scOn" style="width:auto"' + (SC.is_active ? ' checked' : '') +
-      '> включён</label>' +
+      L('> увімкнено</label>') +
       '</div><div class="err" id="scErr"></div></div>' +
     '</div>';
 
@@ -1960,10 +1971,10 @@ function renderScEditor(){
     var req = SC.id
       ? api('/scenarios/' + SC.id, { method:'PUT', body: body })
       : api('/scenarios', { method:'POST', body: body });
-    req.then(function(){ SC = null; renderBots(); toast('Сценарий сохранён') })
+    req.then(function(){ SC = null; renderBots(); toast(L('Сценарій збережено')) })
       .catch(function(e){
         var p = e.payload || {};
-        el('scErr').textContent = p.detail || 'Не удалось сохранить';
+        el('scErr').textContent = p.detail || L('Не вдалося зберегти');
         busy(el('scSave'), false);
       });
   };
@@ -1979,7 +1990,7 @@ function armDelete(nodes, action){
     var armed = false, label = b.textContent;
     b.onclick = function(){
       if (!armed){
-        armed = true; b.textContent = 'Точно?';
+        armed = true; b.textContent = L('Точно?');
         setTimeout(function(){ armed = false; b.textContent = label }, 4000);
         return;
       }
@@ -2001,8 +2012,8 @@ function pageHead(title, sub, right){
 function pageBox(){ return el('page') }
 
 function sErr(e){
-  pageBox().innerHTML = '<div class="pg"><div class="empty">Не удалось загрузить: ' +
-    esc((e && e.message) || 'ошибка') + '</div></div>';
+  pageBox().innerHTML = L('<div class="pg"><div class="empty">Не вдалося завантажити: ') +
+    esc((e && e.message) || L('помилка')) + '</div></div>';
 }
 
 /**
@@ -2028,53 +2039,61 @@ function tabProfile(){
     var admin = isAdmin();
 
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Профиль', 'Ваши данные и данные организации.') +
+      pageHead(L('Профіль'), L('Ваші дані і дані організації.')) +
 
       '<div class="prof">' +
       '<div class="prof-av" style="background-color:' + avatarColor(u.full_name || u.email || 'x') + '">' +
         esc(initials(u.full_name || u.email)) + '</div>' +
       '<div style="min-width:0">' +
-      '<div class="prof-nm" id="pfName">' + esc(u.full_name || 'Без имени') + '</div>' +
+      '<div class="prof-nm" id="pfName">' + esc(u.full_name || L('Без імені')) + '</div>' +
       '<div class="prof-sub">' + esc(u.email || '') + '</div>' +
       '</div>' +
       '<div class="grow"></div>' +
       '<span class="pill">' + esc(ROLES[u.role] || u.role || '') + '</span>' +
       '</div>' +
 
-      '<div class="pg-sec"><h3>Вы</h3><div class="card">' +
-      row('Имя', esc(u.full_name || '—'), 'nm', true) +
-      row('Почта', esc(u.email || '—'), 'em', false,
-        'Почта — это вход в аккаунт. Сменить её может администратор, выслав приглашение на новую.') +
-      row('Роль', esc(ROLES[u.role] || u.role || '—'), 'rl', false,
-        admin ? 'Роли раздаются в разделе «Команда».'
-              : 'Роль назначает владелец или администратор.') +
-      row('В системе с', esc(fmtDate(u.created_at)), 'sn', false) +
+      L('<div class="pg-sec"><h3>Ви</h3><div class="card">') +
+      row(L('Імʼя'), esc(u.full_name || '—'), 'nm', true) +
+      row(L('Пошта'), esc(u.email || '—'), 'em', false,
+        L('Пошта — це вхід в акаунт. Змінити її може адміністратор, надіславши запрошення на нову.')) +
+      langRow() +
+      row(L('Роль'), esc(ROLES[u.role] || u.role || '—'), 'rl', false,
+        admin ? L('Ролі роздаються в розділі «Команда».')
+              : L('Роль призначає власник або адміністратор.')) +
+      row(L('У системі з'), esc(fmtDate(u.created_at)), 'sn', false) +
       '<div class="err" id="pfErr"></div>' +
       '</div></div>' +
 
-      '<div class="pg-sec"><h3>Организация</h3><div class="card">' +
-      row('Название', esc(t.name || '—'), 'org', admin) +
-      row('Идентификатор', '<code>' + esc(t.slug || '') + '</code>', 'sl', false,
-        'По нему адрес вашей компании в сервисе. Он не меняется.') +
-      row('Тариф', esc(t.plan || 'trial') + ' · мест: ' + esc(t.seats_limit), 'pl', false) +
-      row('Регион данных', esc((t.region || 'eu').toUpperCase()), 'rg', false,
-        'Где физически лежат переписки и файлы.') +
-      row('Подключена', esc(fmtDate(t.created_at)), 'cr', false) +
+      L('<div class="pg-sec"><h3>Організація</h3><div class="card">') +
+      row(L('Назва'), esc(t.name || '—'), 'org', admin) +
+      row(L('Ідентифікатор'), '<code>' + esc(t.slug || '') + '</code>', 'sl', false,
+        L('За ним адреса вашої компанії в сервісі. Вона не змінюється.')) +
+      row(L('Тариф'), esc(t.plan || 'trial') + L(' · місць: ') + esc(t.seats_limit), 'pl', false) +
+      row(L('Регіон даних'), esc((t.region || 'eu').toUpperCase()), 'rg', false,
+        L('Де фізично лежать листування і файли.')) +
+      row(L('Підключена'), esc(fmtDate(t.created_at)), 'cr', false) +
       '<div class="err" id="orgErr"></div>' +
       '</div></div>' +
 
-      '<div class="pg-sec"><h3>Сейчас в аккаунте</h3>' +
+      L('<div class="pg-sec"><h3>Зараз в акаунті</h3>') +
       '<div class="nums">' +
-      num(c.channels, 'каналов') + num(c.users, 'сотрудников') +
-      num(c.conversations, 'диалогов') + num(c.messages, 'сообщений') +
+      num(c.channels, L('каналів')) + num(c.users, L('співробітників')) +
+      num(c.conversations, L('діалогів')) + num(c.messages, L('повідомлень')) +
       '</div></div>' +
       '</div>';
+
+    el('langSel').onchange = function(){
+      langSet(this.value);
+      // Страницу рисуем заново: подписи внутри уже нарисованных
+      // разделов переводятся при сборке, а не по месту.
+      tabProfile();
+    };
 
     // Правка имени человека.
     if (el('edit-nm')) el('edit-nm').onclick = function(){
       editRow('nm', u.full_name || '', function(value){
         return api('/me', { method:'PATCH', body:{ fullName: value } }).then(function(){
-          toast('Имя изменено');
+          toast(L('Імʼя змінено'));
           tabProfile();
         });
       }, 'pfErr');
@@ -2084,12 +2103,30 @@ function tabProfile(){
     if (el('edit-org')) el('edit-org').onclick = function(){
       editRow('org', t.name || '', function(value){
         return api('/tenant', { method:'PATCH', body:{ name: value } }).then(function(){
-          toast('Название изменено');
+          toast(L('Назву змінено'));
           tabProfile();
         });
       }, 'orgErr');
     };
   }).catch(sErr);
+}
+
+/**
+ * Язык интерфейса.
+ *
+ * Стоит в профиле, а не в общих настройках компании: язык — дело
+ * человека, а не организации. Оператор в Варшаве и владелец в Киеве
+ * работают в одном аккаунте и каждый читает на своём.
+ */
+function langRow(){
+  return '<div class="prow"><div class="pk">' + L('Мова') + '</div>' +
+    '<div class="pv"><div class="row2" style="max-width:280px">' +
+    '<select id="langSel">' + LANGS.map(function(l){
+      return '<option value="' + l.id + '"' + (l.id === LANG ? ' selected' : '') + '>' +
+        esc(l.title) + '</option>';
+    }).join('') + '</select></div>' +
+    '<div class="hint" style="margin-top:4px">' +
+    L('Вибір запамʼятовується в цьому браузері.') + '</div></div><span></span></div>';
 }
 
 /** Строка данных: подпись, значение, при необходимости — «Изменить». */
@@ -2098,7 +2135,7 @@ function row(label, value, id, editable, hint){
     '<div class="pk">' + esc(label) + '</div>' +
     '<div class="pv" id="val-' + id + '">' + value +
       (hint ? '<div class="hint" style="margin-top:2px">' + esc(hint) + '</div>' : '') + '</div>' +
-    (editable ? '<button class="ghost mini" id="edit-' + id + '">Изменить</button>'
+    (editable ? '<button class="ghost mini" id="edit-' + id + L('">Змінити</button>')
               : '<span></span>') +
     '</div>';
 }
@@ -2121,8 +2158,8 @@ function editRow(id, value, save, errId){
   btn.style.display = 'none';
   cell.innerHTML = '<div class="row2"><input id="in-' + id + '"></div>' +
     '<div class="row2" style="margin-top:6px">' +
-    '<button class="mini" id="ok-' + id + '">Сохранить</button>' +
-    '<button class="ghost mini" id="no-' + id + '">Отмена</button></div>';
+    '<button class="mini" id="ok-' + id + L('">Зберегти</button>') +
+    '<button class="ghost mini" id="no-' + id + L('">Скасувати</button></div>');
 
   var input = el('in-' + id);
   input.value = value;
@@ -2134,13 +2171,13 @@ function editRow(id, value, save, errId){
   el('no-' + id).onclick = done;
   el('ok-' + id).onclick = function(){
     var v = input.value.trim();
-    if (!v){ el(errId).textContent = 'Пустое значение не сохраняется'; return }
+    if (!v){ el(errId).textContent = L('Порожнє значення не зберігається'); return }
     busy(el('ok-' + id), true);
     save(v).catch(function(e){
       var p = e.payload || {};
-      el(errId).textContent = p.error === 'forbidden' ? (p.detail || 'Недостаточно прав')
-        : p.error === 'name_required' ? 'Пустое значение не сохраняется'
-        : 'Не удалось сохранить';
+      el(errId).textContent = p.error === 'forbidden' ? (p.detail || L('Недостатньо прав'))
+        : p.error === 'name_required' ? L('Порожнє значення не зберігається')
+        : L('Не вдалося зберегти');
       busy(el('ok-' + id), false);
     });
   };
@@ -2160,9 +2197,9 @@ var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger
   whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_bot:'VB', viber_user:'VB' };
 
 function chPill(c){
-  return c.status === 'active' ? '<span class="pill ok">работает</span>'
-    : c.status === 'degraded' ? '<span class="pill crit">нужно переподключить</span>'
-    : '<span class="pill warn">выключен</span>';
+  return c.status === 'active' ? L('<span class="pill ok">працює</span>')
+    : c.status === 'degraded' ? L('<span class="pill crit">потрібно перепідключити</span>')
+    : L('<span class="pill warn">вимкнений</span>');
 }
 
 function chSub(c){
@@ -2185,56 +2222,56 @@ function tabChannels(){
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + chPill(c) +
         (c.last_error ? '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>' : '') +
         '</div>' +
-        '<div class="stat"><div><b>' + esc(c.conversations) + '</b>диалогов</div></div>' +
-        '<div class="acts"><button class="ghost mini" data-open2="' + c.id + '">Настроить</button>' +
+        '<div class="stat"><div><b>' + esc(c.conversations) + L('</b>діалогів</div></div>') +
+        '<div class="acts"><button class="ghost mini" data-open2="' + c.id + L('">Налаштувати</button>') +
         '<button class="ghost mini" data-toggle="' + c.id + '" data-to="' +
           (c.status === 'active' ? 'disconnected' : 'active') + '">' +
-          (c.status === 'active' ? 'Выключить' : 'Включить') + '</button></div></div>';
+          (c.status === 'active' ? L('Вимкнути') : L('Увімкнути')) + '</button></div></div>';
     }).join('');
 
     var connect =
       '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
-      '<div><div class="ttl">Telegram-бот</div><div class="sub">Отдельный бот для поддержки</div></div></div>' +
-      '<div class="sub" style="white-space:normal">Токен выдаёт <b>@BotFather</b>: /newbot для нового бота ' +
-      'или /token для существующего.</div>' +
+      L('<div><div class="ttl">Telegram-бот</div><div class="sub">Окремий бот для підтримки</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Токен видає <b>@BotFather</b>: /newbot для нового бота ') +
+      L('або /token для наявного.</div>') +
       '<div class="row2"><input id="btok" type="password" placeholder="123456789:AAF..." autocomplete="off">' +
-      '<button id="badd">Подключить</button></div>' +
+      L('<button id="badd">Підключити</button></div>') +
       '<label class="row" style="gap:7px;margin-top:8px;font-size:12px;color:var(--t2);cursor:pointer">' +
-      '<input type="checkbox" id="bown" style="width:auto"> у меня свой бот со своим кодом</label>' +
-      '<div class="hint" id="bownHint" style="display:none">Мы не будем трогать его вебхук. ' +
-      'Ваш код продолжит получать обновления и будет присылать нам копию — адрес и секрет ' +
-      'покажем после подключения.</div>' +
+      L('<input type="checkbox" id="bown" style="width:auto"> у мене свій бот зі своїм кодом</label>') +
+      L('<div class="hint" id="bownHint" style="display:none">Ми не будемо торкатися його вебхука. ') +
+      L('Ваш код продовжить отримувати оновлення і надсилатиме нам копію — адресу і секрет ') +
+      L('покажемо після підключення.</div>') +
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div>' +
       '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
-      '<div><div class="ttl">Instagram и Messenger</div><div class="sub">Через страницу Facebook</div></div></div>' +
-      '<div id="metaBody"><div class="sub" style="white-space:normal">Войдите под аккаунтом, который управляет ' +
-      'страницей. Instagram должен быть профессиональным аккаунтом и привязан к этой странице.</div>' +
-      '<div class="acts"><button id="metaGo">Войти через Facebook</button></div>' +
+      L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +
+      L('<div id="metaBody"><div class="sub" style="white-space:normal">Увійдіть під акаунтом, який керує ') +
+      L('сторінкою. Instagram має бути професійним акаунтом і привʼязаний до цієї сторінки.</div>') +
+      L('<div class="acts"><button id="metaGo">Увійти через Facebook</button></div>') +
       '<div class="err" id="metaErr"></div></div></div>' +
 
       '<div class="tile"><div class="t1"><div class="chico telegram_user">TG</div>' +
-      '<div><div class="ttl">Telegram по номеру</div><div class="sub">Личный или рабочий аккаунт</div></div></div>' +
-      '<div class="sub" style="white-space:normal">Клиенты пишут на ваш номер как обычно, переписка появляется здесь, ' +
-      'ответы уходят от вашего имени.</div>' +
-      '<div class="row2"><input id="uname" placeholder="Название, например: Продажи" autocomplete="off">' +
-      '<button id="uqr">Показать QR-код</button></div><div id="uqrbox"></div></div>' +
+      L('<div><div class="ttl">Telegram за номером</div><div class="sub">Особистий або робочий акаунт</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Клієнти пишуть на ваш номер як завжди, листування зʼявляється тут, ') +
+      L('відповіді йдуть від вашого імені.</div>') +
+      L('<div class="row2"><input id="uname" placeholder="Назва, наприклад: Продажі" autocomplete="off">') +
+      L('<button id="uqr">Показати QR-код</button></div><div id="uqrbox"></div></div>') +
 
       ['whatsapp_cloud','whatsapp_user','viber_bot','viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
-          '<div class="sub">Готовится</div></div></div>' +
-          '<div class="acts"><button class="ghost mini" disabled>Скоро</button></div></div>';
+          L('<div class="sub">Готується</div></div></div>') +
+          L('<div class="acts"><button class="ghost mini" disabled>Скоро</button></div></div>');
       }).join('');
 
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Каналы', 'Мессенджеры, из которых приходят сообщения. У каждого канала свои настройки: ' +
-        'приветствие, автоответы и рабочие часы.') +
+      pageHead(L('Канали'), L('Месенджери, з яких надходять повідомлення. У кожного каналу свої налаштування: ') +
+        L('привітання, автовідповіді і робочі години.')) +
       (CHANNELS.length
-        ? '<div class="pg-sec"><h3>Подключено · ' + CHANNELS.length + '</h3><div class="grid">' + tiles + '</div></div>'
+        ? L('<div class="pg-sec"><h3>Підключено · ') + CHANNELS.length + '</h3><div class="grid">' + tiles + '</div></div>'
         : '') +
-      '<div class="pg-sec"><h3>Подключить канал</h3><div class="grid">' + connect + '</div></div>' +
+      L('<div class="pg-sec"><h3>Підключити канал</h3><div class="grid">') + connect + '</div></div>' +
       '</div>';
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
@@ -2255,9 +2292,9 @@ function tabChannels(){
       api('/settings/channels/telegram', { method:'POST',
         body: own ? { botToken: token, mode: 'forward' } : { botToken: token } })
         .then(function(r){
-          el('bok').textContent = 'Готово: @' + (r.username || 'бот') +
-            (r.mode === 'forward' ? ' (свой бот)'
-              : r.mode === 'polling' ? ' (режим опроса)' : ' (вебхук)');
+          el('bok').textContent = L('Готово: @') + (r.username || L('бот')) +
+            (r.mode === 'forward' ? L(' (свій бот)')
+              : r.mode === 'polling' ? L(' (режим опитування)') : L(' (вебхук)'));
           el('btok').value = '';
 
           // Свой бот: показываем, куда слать копию обновлений. Список
@@ -2266,28 +2303,28 @@ function tabChannels(){
           if (r.mode === 'forward' && r.forward) {
             el('bfwd').style.display = 'block';
             el('bfwd').innerHTML =
-              '<div class="hint" style="margin:0 0 6px">В своём боте на каждое обновление ' +
-              'отправьте его же телом на этот адрес, с заголовком секрета. Ответы можно слать ' +
-              'и из вашего кода, и из Rozmovio — токен один.</div>' +
+              L('<div class="hint" style="margin:0 0 6px">У своєму боті на кожне оновлення ') +
+              L('надішліть його ж тілом на цю адресу, із заголовком секрета. Відповіді можна надсилати ') +
+              L('і з вашого коду, і з Rozmovio — токен один.</div>') +
               '<div class="kv2">' +
-              '<div class="k">Адрес</div><div><code id="fwdUrl">' + esc(r.forward.url) + '</code></div>' +
-              '<div class="k">Заголовок</div><div><code>' + esc(r.forward.header) + '</code></div>' +
-              '<div class="k">Секрет</div><div><code id="fwdSec">' + esc(r.forward.secret) + '</code></div>' +
+              L('<div class="k">Адреса</div><div><code id="fwdUrl">') + esc(r.forward.url) + '</code></div>' +
+              L('<div class="k">Заголовок</div><div><code>') + esc(r.forward.header) + '</code></div>' +
+              L('<div class="k">Секрет</div><div><code id="fwdSec">') + esc(r.forward.secret) + '</code></div>' +
               '</div>' +
               '<div class="row2" style="margin-top:8px">' +
-              '<button class="ghost mini" id="fwdCopy">Скопировать адрес и секрет</button>' +
-              '<button class="ghost mini" id="fwdDone">Готово</button></div>';
+              L('<button class="ghost mini" id="fwdCopy">Скопіювати адресу і секрет</button>') +
+              L('<button class="ghost mini" id="fwdDone">Готово</button></div>');
 
             el('fwdCopy').onclick = function(){
               var text = 'URL: ' + r.forward.url + NL +
                 r.forward.header + ': ' + r.forward.secret;
               if (navigator.clipboard) navigator.clipboard.writeText(text)
-                .then(function(){ toast('Скопировано') });
+                .then(function(){ toast(L('Скопійовано')) });
               else {
                 var t = document.createElement('textarea');
                 t.value = text; document.body.appendChild(t); t.select();
                 document.execCommand('copy'); document.body.removeChild(t);
-                toast('Скопировано');
+                toast(L('Скопійовано'));
               }
             };
             el('fwdDone').onclick = tabChannels;
@@ -2299,9 +2336,9 @@ function tabChannels(){
           var p = e.payload || {};
           el('berr').textContent = p.detail ||
             (p.error === 'telegram_rejected_token'
-              ? 'Telegram не принял токен — проверьте, что скопирован целиком'
-              : p.error === 'invalid_bot_token' ? 'Не похоже на токен бота'
-              : 'Не удалось подключить');
+              ? L('Telegram не прийняв токен — перевірте, що скопійований цілком')
+              : p.error === 'invalid_bot_token' ? L('Не схоже на токен бота')
+              : L('Не вдалося підключити'));
           busy(el('badd'), false);
         });
     };
@@ -2332,41 +2369,41 @@ function openChannel(id){
 
   var meta = c.meta || {};
   var rows = [
-    ['Тип канала', esc(CH[c.type] || c.type)],
-    ['Состояние', chPill(c)],
-    ['Идентификатор у провайдера', '<code>' + esc(c.external_id) + '</code>'],
-    ['Диалогов', esc(c.conversations)],
-    ['Подключён', esc(fmtDate(c.created_at))]
+    [L('Тип каналу'), esc(CH[c.type] || c.type)],
+    [L('Стан'), chPill(c)],
+    [L('Ідентифікатор у провайдера'), '<code>' + esc(c.external_id) + '</code>'],
+    [L('Діалогів'), esc(c.conversations)],
+    [L('Підключений'), esc(fmtDate(c.created_at))]
   ];
-  if (meta.username) rows.splice(2, 0, ['Имя пользователя', '@' + esc(meta.username)]);
-  if (meta.phone) rows.splice(2, 0, ['Номер', esc(meta.phone)]);
-  if (meta.pageName) rows.splice(2, 0, ['Страница Facebook', esc(meta.pageName)]);
-  if (c.last_error) rows.push(['Последняя ошибка', '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>']);
+  if (meta.username) rows.splice(2, 0, [L('Імʼя користувача'), '@' + esc(meta.username)]);
+  if (meta.phone) rows.splice(2, 0, [L('Номер'), esc(meta.phone)]);
+  if (meta.pageName) rows.splice(2, 0, [L('Сторінка Facebook'), esc(meta.pageName)]);
+  if (c.last_error) rows.push([L('Остання помилка'), '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>']);
 
   pageBox().innerHTML = '<div class="pg">' +
-    '<button class="back-link" id="chBack">← Все каналы</button>' +
+    L('<button class="back-link" id="chBack">← Всі канали</button>') +
     pageHead(c.display_name, esc(chSub(c)),
       '<div class="row2"><button class="ghost mini" id="chToggle">' +
-      (c.status === 'active' ? 'Выключить' : 'Включить') + '</button>' +
-      '<button class="ghost mini" id="chDel">Удалить</button></div>') +
+      (c.status === 'active' ? L('Вимкнути') : L('Увімкнути')) + '</button>' +
+      L('<button class="ghost mini" id="chDel">Видалити</button></div>')) +
 
-    '<div class="pg-sec"><h3>Название в интерфейсе</h3>' +
+    L('<div class="pg-sec"><h3>Назва в інтерфейсі</h3>') +
     '<div class="tile"><div class="row2"><input id="chName" value="' + esc(c.display_name) + '">' +
-    '<button id="chSave">Сохранить</button></div>' +
-    '<div class="sub" style="white-space:normal">Так канал называется в списке чатов и в фильтрах. ' +
-    'У клиента название не видно.</div><div class="ok" id="chOk"></div></div></div>' +
+    L('<button id="chSave">Зберегти</button></div>') +
+    L('<div class="sub" style="white-space:normal">Так канал називається у списку чатів і у фільтрах. ') +
+    L('У клієнта назву не видно.</div><div class="ok" id="chOk"></div></div></div>') +
 
-    '<div class="pg-sec"><h3>О канале</h3><div class="tile"><div class="kv">' +
+    L('<div class="pg-sec"><h3>Про канал</h3><div class="tile"><div class="kv">') +
     rows.map(function(r){ return '<div class="k">' + r[0] + '</div><div>' + r[1] + '</div>' }).join('') +
     '</div></div></div>' +
 
-    '<div class="pg-sec"><h3>Автоматизация</h3><div class="grid">' +
+    L('<div class="pg-sec"><h3>Автоматизація</h3><div class="grid">') +
     '<div class="tile click" id="chFlows"><div class="t1"><div class="chico soon">⚡</div>' +
-    '<div><div class="ttl">Сценарии этого канала</div>' +
-    '<div class="sub">Приветствие, автоответы, цепочки</div></div></div>' +
-    '<div class="sub" style="white-space:normal">Правила и цепочки, которые срабатывают на сообщения ' +
-    'именно в этом канале.</div>' +
-    '<div class="acts"><button class="ghost mini">Открыть сценарии</button></div></div>' +
+    L('<div><div class="ttl">Сценарії цього каналу</div>') +
+    L('<div class="sub">Привітання, автовідповіді, ланцюжки</div></div></div>') +
+    L('<div class="sub" style="white-space:normal">Правила і ланцюжки, які спрацьовують на повідомлення ') +
+    L('саме в цьому каналі.</div>') +
+    L('<div class="acts"><button class="ghost mini">Відкрити сценарії</button></div></div>') +
     '</div></div></div>';
 
   el('chBack').onclick = tabChannels;
@@ -2375,7 +2412,7 @@ function openChannel(id){
     busy(el('chSave'), true);
     api('/channels/' + id, { method:'PATCH', body:{ displayName: el('chName').value.trim() } })
       .then(function(){
-        el('chOk').textContent = 'Сохранено';
+        el('chOk').textContent = L('Збережено');
         return api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() });
       })
       .catch(function(){ el('chOk').textContent = '' })
@@ -2418,14 +2455,14 @@ function WIDGET_URL(){ return location.origin + '/widget' }
  * взять ключ и что вписать в поля, если он не знает.
  */
 var AI_PROVIDERS = [
-  { id:'openai', title:'OpenAI и совместимые (OpenRouter, Groq, своя модель)',
+  { id:'openai', title:L('OpenAI і сумісні (OpenRouter, Groq, своя модель)'),
     baseUrl:'https://api.openai.com/v1', model:'gpt-4o-mini', keyHint:'sk-…',
-    where:'Ключ — в кабинете OpenAI, раздел API keys. Для OpenRouter или Groq поменяйте адрес ' +
-      'на их и возьмите ключ у них.' },
+    where:L('Ключ — у кабінеті OpenAI, розділ API keys. Для OpenRouter або Groq поміняйте адресу ') +
+      L('на їх і візьміть ключ у них.') },
   { id:'gemini', title:'Google Gemini',
     baseUrl:'https://generativelanguage.googleapis.com/v1beta', model:'gemini-3.8-flash',
     keyHint:'AIza…',
-    where:'Ключ — в Google AI Studio, кнопка «Get API key». Адрес менять не нужно.' }
+    where:L('Ключ — у Google AI Studio, кнопка «Get API key». Адресу змінювати не потрібно.') }
 ];
 
 function provDefaults(id){
@@ -2445,61 +2482,61 @@ function provDefaults(id){
  */
 function aiSection(ai){
   var modes = [
-    ['off', 'Выключен'],
-    ['draft', 'Черновик оператору'],
-    ['auto', 'Отвечает клиенту сам']
+    ['off', L('Вимкнений')],
+    ['draft', L('Чернетка оператору')],
+    ['auto', L('Відповідає клієнту сам')]
   ];
   var mode = ai.mode || 'draft';
   var prov = ai.provider || 'openai';
 
-  return '<div class="pg-sec"><h3>ИИ-ответы</h3><div class="card">' +
-    '<div class="t" style="display:flex;align-items:center;gap:8px">Своя модель' +
-    (ai.connected ? '<span class="pill good">подключена</span>'
-                  : '<span class="pill">не подключена</span>') + '</div>' +
+  return L('<div class="pg-sec"><h3>ШІ-відповіді</h3><div class="card">') +
+    L('<div class="t" style="display:flex;align-items:center;gap:8px">Своя модель') +
+    (ai.connected ? L('<span class="pill good">підключена</span>')
+                  : L('<span class="pill">не підключена</span>')) + '</div>' +
     '<div class="s" style="color:var(--t2);line-height:1.7;margin-top:6px">' +
-    'Ключ ваш: вы платите провайдеру напрямую и видите расход у себя. Подходят Google Gemini ' +
-    'и всё, что говорит на языке OpenAI — сам OpenAI, OpenRouter, Groq, своя модель на сервере.</div>' +
+    L('Ключ ваш: ви платите провайдеру напряму і бачите витрати в себе. Підходять Google Gemini ') +
+    L('і все, що говорить мовою OpenAI — сам OpenAI, OpenRouter, Groq, своя модель на сервері.</div>') +
 
-    '<div class="row2" style="margin-top:10px"><label class="lbl">Провайдер</label>' +
+    L('<div class="row2" style="margin-top:10px"><label class="lbl">Провайдер</label>') +
     '<select id="aiProv">' +
     AI_PROVIDERS.map(function(p){
       return '<option value="' + p.id + '"' + (p.id === prov ? ' selected' : '') + '>' +
         p.title + '</option>';
     }).join('') + '</select></div>' +
 
-    '<div class="row2" style="margin-top:9px"><label class="lbl">Адрес API</label>' +
+    L('<div class="row2" style="margin-top:9px"><label class="lbl">Адреса API</label>') +
     '<input id="aiUrl" placeholder="' + esc(provDefaults(prov).baseUrl) + '" value="' +
       esc(ai.baseUrl || provDefaults(prov).baseUrl) + '"></div>' +
 
-    '<div class="row2" style="margin-top:9px"><label class="lbl">Модель</label>' +
+    L('<div class="row2" style="margin-top:9px"><label class="lbl">Модель</label>') +
     '<input id="aiModel" placeholder="' + esc(provDefaults(prov).model) + '" value="' +
       esc(ai.model || provDefaults(prov).model) + '"></div>' +
 
-    '<div class="row2" style="margin-top:9px"><label class="lbl">Ключ</label>' +
+    L('<div class="row2" style="margin-top:9px"><label class="lbl">Ключ</label>') +
     '<input id="aiKey" type="password" autocomplete="new-password" placeholder="' +
-      (ai.keyHint ? 'записан ' + esc(ai.keyHint) + ' — оставьте пустым, чтобы не менять'
+      (ai.keyHint ? L('записаний ') + esc(ai.keyHint) + L(' — залиште порожнім, щоб не змінювати')
                   : esc(provDefaults(prov).keyHint)) +
       '"></div>' +
     '<div class="hint" id="aiWhere">' + provDefaults(prov).where + '</div>' +
 
-    '<div class="row2" style="margin-top:9px"><label class="lbl">О компании</label>' +
-    '<textarea id="aiPrompt" rows="5" placeholder="Что продаёте, цены, доставка, часы работы, ' +
-      'чего говорить нельзя. Чем конкретнее — тем меньше выдумок.">' +
+    L('<div class="row2" style="margin-top:9px"><label class="lbl">Про компанію</label>') +
+    L('<textarea id="aiPrompt" rows="5" placeholder="Що продаєте, ціни, доставка, години роботи, ') +
+      L('чого говорити не можна. Чим конкретніше — тим менше вигадок.">') +
       esc(ai.systemPrompt || '') + '</textarea></div>' +
 
-    '<div class="row2" style="margin-top:9px"><label class="lbl">Режим</label><select id="aiMode">' +
+    L('<div class="row2" style="margin-top:9px"><label class="lbl">Режим</label><select id="aiMode">') +
     modes.map(function(m){
       return '<option value="' + m[0] + '"' + (m[0] === mode ? ' selected' : '') + '>' + m[1] + '</option>';
     }).join('') + '</select></div>' +
 
-    '<div class="hint">В режиме «отвечает сам» ИИ включается только там, где не сработал ни один ' +
-    'сценарий, и молчит, если за диалог взялся оператор или разговор пошёл про деньги, возврат ' +
-    'или жалобу — такое всегда остаётся человеку.</div>' +
+    L('<div class="hint">У режимі «відповідає сам» ШІ вмикається тільки там, де не спрацював жоден ') +
+    L('сценарій, і мовчить, якщо за діалог взявся оператор або розмова пішла про гроші, повернення ') +
+    L('або скаргу — таке завжди залишається людині.</div>') +
 
     '<div class="acts" style="margin-top:10px">' +
-    '<button id="aiSave">Сохранить</button>' +
-    (ai.connected ? '<button class="ghost" id="aiCheck">Проверить связь</button>' +
-                    '<button class="ghost" id="aiOff">Отключить</button>' : '') +
+    L('<button id="aiSave">Зберегти</button>') +
+    (ai.connected ? L('<button class="ghost" id="aiCheck">Перевірити звʼязок</button>') +
+                    L('<button class="ghost" id="aiOff">Відключити</button>') : '') +
     '</div>' +
     '<div class="err" id="aiErr">' + esc(ai.lastError || '') + '</div>' +
     '<div class="ok" id="aiOk"></div>' +
@@ -2533,14 +2570,14 @@ function wireAi(ai){
       apiKey: el('aiKey').value,
       systemPrompt: el('aiPrompt').value,
       mode: el('aiMode').value
-    }}).then(function(){ toast('ИИ сохранён'); pageIntegrations() })
+    }}).then(function(){ toast(L('ШІ збережено')); pageIntegrations() })
       .catch(function(e){
         var p = e.payload || {};
         el('aiErr').textContent =
-          p.error === 'key_required' ? 'Введите ключ — без него модель не ответит' :
-          p.error === 'model_required' ? 'Укажите модель, например gpt-4o-mini' :
-          p.error === 'bad_url' ? 'Адрес должен начинаться с https://' :
-          'Не удалось сохранить';
+          p.error === 'key_required' ? L('Введіть ключ — без нього модель не відповість') :
+          p.error === 'model_required' ? L('Вкажіть модель, наприклад gpt-4o-mini') :
+          p.error === 'bad_url' ? L('Адреса повинна починатися з https://') :
+          L('Не вдалося зберегти');
         busy(el('aiSave'), false);
       });
   };
@@ -2549,10 +2586,10 @@ function wireAi(ai){
     el('aiErr').textContent = ''; el('aiOk').textContent = '';
     busy(el('aiCheck'), true);
     api('/settings/ai/check', { method:'POST' })
-      .then(function(r){ el('aiOk').textContent = 'Модель ответила: ' + (r.sample || 'ок') })
+      .then(function(r){ el('aiOk').textContent = L('Модель відповіла: ') + (r.sample || L('ок')) })
       .catch(function(e){
         var p = e.payload || {};
-        el('aiErr').textContent = p.detail || 'Провайдер не ответил';
+        el('aiErr').textContent = p.detail || L('Провайдер не відповів');
       })
       .then(function(){ busy(el('aiCheck'), false) });
   };
@@ -2596,28 +2633,28 @@ function pageIntegrations(){
 
     // ── Zoho ──────────────────────────────────────────────────────
     var zohoBody = !d.configured
-      ? '<div class="int-s" style="white-space:normal">Подключение ещё не настроено на сервере: ' +
-        'не заданы ключи приложения Zoho.</div>'
+      ? L('<div class="int-s" style="white-space:normal">Підключення ще не налаштоване на сервері: ') +
+        L('не задані ключі застосунку Zoho.</div>')
       : list.length
         ? list.map(function(z){
             return '<div class="int-row"><div style="min-width:0">' +
-              '<div class="int-n">' + esc(z.org_name || 'Организация Zoho') + '</div>' +
+              '<div class="int-n">' + esc(z.org_name || L('Організація Zoho')) + '</div>' +
               '<div class="int-s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div></div>' +
               '<div class="int-rb">' +
-              '<button class="ghost mini" data-zcheck="' + z.id + '">Проверить</button>' +
-              '<button class="ghost mini" data-zdel="' + z.id + '">Отключить</button></div></div>';
+              '<button class="ghost mini" data-zcheck="' + z.id + L('">Перевірити</button>') +
+              '<button class="ghost mini" data-zdel="' + z.id + L('">Відключити</button></div></div>');
           }).join('')
-        : '<div class="int-s" style="white-space:normal">Войдите под аккаунтом Zoho той ' +
-          'организации, с которой работаете: мы попросим доступ к контактам и лидам — ровно ' +
-          'столько, чтобы найти клиента по номеру и завести нового.</div>';
+        : L('<div class="int-s" style="white-space:normal">Увійдіть під акаунтом Zoho тієї ') +
+          L('організації, з якою працюєте: ми попросимо доступ до контактів і лідів — рівно ') +
+          L('стільки, щоб знайти клієнта за номером і створити нового.</div>');
 
     var zoho = crmCard({
-      icon:'zoho', mark:'Z', title:'Zoho CRM', sub:'Переписка прямо в карточке клиента',
-      pill: list.length ? '<span class="pill good">подключена</span>'
-                        : '<span class="pill">не подключена</span>',
+      icon:'zoho', mark:'Z', title:'Zoho CRM', sub:L('Листування прямо в картці клієнта'),
+      pill: list.length ? L('<span class="pill good">підключена</span>')
+                        : L('<span class="pill">не підключена</span>'),
       body: zohoBody,
       acts: d.configured
-        ? '<button id="zGo">' + (list.length ? 'Подключить ещё организацию' : 'Войти через Zoho') +
+        ? '<button id="zGo">' + (list.length ? L('Підключити ще організацію') : L('Увійти через Zoho')) +
           '</button><span class="err" id="zErr"></span><span class="ok" id="zOk"></span>'
         : ''
     });
@@ -2626,22 +2663,22 @@ function pageIntegrations(){
     var bxBody = bx
       ? '<div class="int-row"><div style="min-width:0">' +
         '<div class="int-n">' + esc(bx.title) + '</div>' +
-        '<div class="int-s">' + (bx.lastError ? esc(bx.lastError) : 'лиды уходят сюда') + '</div>' +
+        '<div class="int-s">' + (bx.lastError ? esc(bx.lastError) : L('ліди йдуть сюди')) + '</div>' +
         '</div><div class="int-rb">' +
-        '<button class="ghost mini" data-crmcheck="' + bx.id + '">Проверить</button>' +
-        '<button class="ghost mini" data-crmdel="' + bx.id + '">Отключить</button></div></div>'
-      : '<div class="int-s" style="white-space:normal">Подходит и облако, и коробка на своём ' +
-        'сервере — отличается только адрес. В Битриксе: <b>Разработчикам → Другое → ' +
-        'Входящий вебхук</b>, права <b>crm</b>. Скопируйте адрес вебхука сюда.</div>' +
+        '<button class="ghost mini" data-crmcheck="' + bx.id + L('">Перевірити</button>') +
+        '<button class="ghost mini" data-crmdel="' + bx.id + L('">Відключити</button></div></div>')
+      : L('<div class="int-s" style="white-space:normal">Підходить і хмара, і коробка на своєму ') +
+        L('сервері — відрізняється тільки адреса. У Бітріксі: <b>Розробникам → Інше → ') +
+        L('Вхідний вебхук</b>, права <b>crm</b>. Скопіюйте адресу вебхука сюди.</div>') +
         '<div class="row2" style="margin-top:9px">' +
-        '<input id="bxUrl" placeholder="https://компания.bitrix24.ua/rest/1/ключ/">' +
-        '<button id="bxAdd">Подключить</button></div>';
+        L('<input id="bxUrl" placeholder="https://компанія.bitrix24.ua/rest/1/ключ/">') +
+        L('<button id="bxAdd">Підключити</button></div>');
 
     var bitrix = crmCard({
-      icon:'bitrix', mark:'B24', title:'Битрикс24', sub:'Облако и коробка',
-      pill: bx ? (bx.status === 'active' ? '<span class="pill good">подключён</span>'
-                                         : '<span class="pill warn">нужно переподключить</span>')
-               : '<span class="pill">не подключён</span>',
+      icon:'bitrix', mark:'B24', title:L('Бітрікс24'), sub:L('Хмара і коробка'),
+      pill: bx ? (bx.status === 'active' ? L('<span class="pill good">підключений</span>')
+                                         : L('<span class="pill warn">потрібно перепідключити</span>'))
+               : L('<span class="pill">не підключений</span>'),
       body: bxBody,
       acts: '<span class="err" id="bxErr"></span><span class="ok" id="bxOk"></span>'
     });
@@ -2650,45 +2687,45 @@ function pageIntegrations(){
     var pdBody = pd
       ? '<div class="int-row"><div style="min-width:0">' +
         '<div class="int-n">' + esc(pd.title) + '</div>' +
-        '<div class="int-s">' + (pd.lastError ? esc(pd.lastError) : 'лиды уходят сюда') + '</div>' +
+        '<div class="int-s">' + (pd.lastError ? esc(pd.lastError) : L('ліди йдуть сюди')) + '</div>' +
         '</div><div class="int-rb">' +
-        '<button class="ghost mini" data-crmcheck="' + pd.id + '">Проверить</button>' +
-        '<button class="ghost mini" data-crmdel="' + pd.id + '">Отключить</button></div></div>'
-      : '<div class="int-s" style="white-space:normal">Токен — в Pipedrive: ' +
-        '<b>Личные настройки → API</b>. Домен компании виден в адресной строке.</div>' +
+        '<button class="ghost mini" data-crmcheck="' + pd.id + L('">Перевірити</button>') +
+        '<button class="ghost mini" data-crmdel="' + pd.id + L('">Відключити</button></div></div>')
+      : L('<div class="int-s" style="white-space:normal">Токен — у Pipedrive: ') +
+        L('<b>Особисті налаштування → API</b>. Домен компанії видно в адресному рядку.</div>') +
         '<div class="row2" style="margin-top:9px">' +
-        '<input id="pdDom" placeholder="компания.pipedrive.com">' +
-        '<input id="pdTok" type="password" autocomplete="new-password" placeholder="токен API">' +
-        '<button id="pdAdd">Подключить</button></div>';
+        L('<input id="pdDom" placeholder="компанія.pipedrive.com">') +
+        L('<input id="pdTok" type="password" autocomplete="new-password" placeholder="токен API">') +
+        L('<button id="pdAdd">Підключити</button></div>');
 
     var pipedrive = crmCard({
-      icon:'pipedrive', mark:'PD', title:'Pipedrive', sub:'Клиент и сделка в воронке',
-      pill: pd ? (pd.status === 'active' ? '<span class="pill good">подключён</span>'
-                                         : '<span class="pill warn">нужно переподключить</span>')
-               : '<span class="pill">не подключён</span>',
+      icon:'pipedrive', mark:'PD', title:'Pipedrive', sub:L('Клієнт і угода у воронці'),
+      pill: pd ? (pd.status === 'active' ? L('<span class="pill good">підключений</span>')
+                                         : L('<span class="pill warn">потрібно перепідключити</span>'))
+               : L('<span class="pill">не підключений</span>'),
       body: pdBody,
       acts: '<span class="err" id="pdErr"></span><span class="ok" id="pdOk"></span>'
     });
 
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Интеграции', 'Rozmovio живёт рядом с вашей CRM: переписка видна в карточке ' +
-        'клиента, а новые обращения превращаются в лиды.') +
+      pageHead(L('Інтеграції'), L('Rozmovio живе поряд з вашою CRM: листування видно в картці ') +
+        L('клієнта, а нові звернення перетворюються на ліди.')) +
 
       '<div class="pg-sec"><h3>CRM</h3>' + zoho + bitrix + pipedrive + '</div>' +
 
       (list.length
-        ? '<div class="pg-sec"><h3>Виджет в карточке клиента</h3><div class="card">' +
-          '<div class="int-s" style="white-space:normal;line-height:1.7">Zoho заводит виджеты ' +
-          'только из своих настроек — программно их создать нельзя. Это делается один раз и ' +
-          'занимает минуту.</div>' +
+        ? L('<div class="pg-sec"><h3>Віджет у картці клієнта</h3><div class="card">') +
+          L('<div class="int-s" style="white-space:normal;line-height:1.7">Zoho створює віджети ') +
+          L('тільки зі своїх налаштувань — програмно їх створити не можна. Це робиться один раз і ') +
+          L('займає хвилину.</div>') +
           '<ol class="steps" style="margin-top:10px">' +
-          '<li>В Zoho CRM: <b>Настройки</b> (шестерёнка) → <b>Developer Space</b> → ' +
+          L('<li>У Zoho CRM: <b>Налаштування</b> (шестерня) → <b>Developer Space</b> → ') +
           '<b>Widgets</b> → <b>Create Widget</b>.</li>' +
-          '<li>Имя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>' +
-          '<li>Base URL — вот этот адрес: <code id="wurl">' + esc(WIDGET_URL()) + '</code> ' +
-          '<button class="ghost mini" id="wcopy">Скопировать</button></li>' +
-          '<li>Сохранить. Затем <b>Настройки → Модули и поля → Контакты → Связанные списки</b> ' +
-          'и добавить <b>Rozmovio</b>. То же для модуля <b>Лиды</b>.</li>' +
+          L('<li>Імʼя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>') +
+          L('<li>Base URL — ось ця адреса: <code id="wurl">') + esc(WIDGET_URL()) + '</code> ' +
+          L('<button class="ghost mini" id="wcopy">Скопіювати</button></li>') +
+          L('<li>Зберегти. Потім <b>Налаштування → Модулі і поля → Контакти → Звʼязані списки</b> ') +
+          L('і додати <b>Rozmovio</b>. Те саме для модуля <b>Ліди</b>.</li>') +
           '</ol></div></div>'
         : '') +
 
@@ -2705,7 +2742,7 @@ function pageIntegrations(){
       api('/settings/zoho/start').then(function(r){ location.href = r.url })
         .catch(function(){
           busy(el('zGo'), false);
-          el('zErr').textContent = 'Не удалось начать подключение';
+          el('zErr').textContent = L('Не вдалося почати підключення');
         });
     };
 
@@ -2719,14 +2756,14 @@ function pageIntegrations(){
         el('zErr').textContent = ''; el('zOk').textContent = '';
         api('/settings/zoho/' + b.dataset.zcheck + '/check', { method:'POST' })
           .then(function(r){
-            el('zOk').textContent = 'Связь есть' + (r.user ? ', вошли как ' + r.user : '');
+            el('zOk').textContent = L('Звʼязок є') + (r.user ? L(', увійшли як ') + r.user : '');
             pageIntegrations();
           })
           .catch(function(e){
             var p = e.payload || {};
             el('zErr').textContent = p.error === 'token_rejected'
-              ? 'Zoho больше не принимает доступ: ' + (p.detail || '') + '. Подключите заново.'
-              : 'Не удалось проверить';
+              ? L('Zoho більше не приймає доступ: ') + (p.detail || '') + L('. Підключіть заново.')
+              : L('Не вдалося перевірити');
             busy(b, false);
           });
       };
@@ -2741,10 +2778,10 @@ function pageIntegrations(){
       el('bxErr').textContent = '';
       busy(el('bxAdd'), true);
       api('/settings/crm', { method:'POST', body:{ kind:'bitrix24', webhook: el('bxUrl').value } })
-        .then(function(r){ toast('Битрикс подключён' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+        .then(function(r){ toast(L('Бітрікс підключено') + (r.who ? ': ' + r.who : '')); pageIntegrations() })
         .catch(function(e){
           var p = e.payload || {};
-          el('bxErr').textContent = p.detail || 'Не удалось подключить';
+          el('bxErr').textContent = p.detail || L('Не вдалося підключити');
           busy(el('bxAdd'), false);
         });
     };
@@ -2755,10 +2792,10 @@ function pageIntegrations(){
       api('/settings/crm', { method:'POST', body:{
         kind:'pipedrive', domain: el('pdDom').value, token: el('pdTok').value
       }})
-        .then(function(r){ toast('Pipedrive подключён' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+        .then(function(r){ toast(L('Pipedrive підключено') + (r.who ? ': ' + r.who : '')); pageIntegrations() })
         .catch(function(e){
           var p = e.payload || {};
-          el('pdErr').textContent = p.detail || 'Не удалось подключить';
+          el('pdErr').textContent = p.detail || L('Не вдалося підключити');
           busy(el('pdAdd'), false);
         });
     };
@@ -2767,10 +2804,10 @@ function pageIntegrations(){
       b.onclick = function(){
         busy(b, true);
         api('/settings/crm/' + b.dataset.crmcheck + '/check', { method:'POST' })
-          .then(function(r){ toast('Связь есть' + (r.who ? ': ' + r.who : '')); pageIntegrations() })
+          .then(function(r){ toast(L('Звʼязок є') + (r.who ? ': ' + r.who : '')); pageIntegrations() })
           .catch(function(e){
             var p = e.payload || {};
-            alertLine(p.detail || 'CRM не ответила');
+            alertLine(p.detail || L('CRM не відповіла'));
             busy(b, false);
           });
       };
@@ -2785,13 +2822,13 @@ function pageIntegrations(){
 /** Копирование с запасным способом: буфер недоступен без https. */
 function copyText(text){
   if (navigator.clipboard){
-    navigator.clipboard.writeText(text).then(function(){ toast('Скопировано') });
+    navigator.clipboard.writeText(text).then(function(){ toast(L('Скопійовано')) });
     return;
   }
   var t = document.createElement('textarea');
   t.value = text; document.body.appendChild(t); t.select();
   document.execCommand('copy'); document.body.removeChild(t);
-  toast('Скопировано');
+  toast(L('Скопійовано'));
 }
 
 /* ── Подключение Facebook: Messenger и Instagram ──────────────────
@@ -2801,18 +2838,18 @@ function copyText(text){
    чтобы обновление страницы не пыталось подключить то же самое снова. */
 
 var META_ERRORS = {
-  cancelled:'Вход через Facebook отменён.',
-  state:'Ссылка устарела — нажмите «Войти через Facebook» ещё раз.',
-  exchange:'Facebook не подтвердил вход. Попробуйте ещё раз.',
-  unavailable:'Подключение Facebook ещё не включено на сервере.'
+  cancelled:L('Вхід через Facebook скасовано.'),
+  state:L('Посилання застаріло — натисніть «Увійти через Facebook» ще раз.'),
+  exchange:L('Facebook не підтвердив вхід. Спробуйте ще раз.'),
+  unavailable:L('Підключення Facebook ще не увімкнено на сервері.')
 };
 
 var ZOHO_ERRORS = {
-  cancelled:'Подключение Zoho отменено.',
-  state:'Ссылка устарела — нажмите «Войти через Zoho» ещё раз.',
-  exchange:'Zoho не подтвердила доступ. Попробуйте ещё раз.',
-  server:'Zoho вернула неизвестный адрес сервера. Напишите нам.',
-  org:'Zoho не отдала сведения об организации. Проверьте права аккаунта.'
+  cancelled:L('Підключення Zoho скасовано.'),
+  state:L('Посилання застаріло — натисніть «Увійти через Zoho» ще раз.'),
+  exchange:L('Zoho не підтвердила доступ. Спробуйте ще раз.'),
+  server:L('Zoho повернула невідому адресу сервера. Напишіть нам.'),
+  org:L('Zoho не віддала відомості про організацію. Перевірте права акаунта.')
 };
 
 function readMetaHash(){
@@ -2823,8 +2860,8 @@ function readMetaHash(){
   var zok = h.indexOf('zoho=ok') >= 0;
   var zerr = h.match(/zoho-error=([a-z]+)/);
   if (zok || zerr){
-    S.zohoNote = zok ? 'Организация Zoho подключена.' : null;
-    S.zohoError = zerr ? (ZOHO_ERRORS[zerr[1]] || 'Не удалось подключить Zoho') : null;
+    S.zohoNote = zok ? L('Організація Zoho підключена.') : null;
+    S.zohoError = zerr ? (ZOHO_ERRORS[zerr[1]] || L('Не вдалося підключити Zoho')) : null;
     history.replaceState(null, '', location.pathname);
     setView('integrations');
     return true;
@@ -2834,7 +2871,7 @@ function readMetaHash(){
   var e = h.match(/meta-error=([a-z]+)/);
   if (!m && !e) return false;
   if (m) S.metaPick = m[1];
-  if (e) S.metaError = META_ERRORS[e[1]] || 'Не удалось подключить Facebook';
+  if (e) S.metaError = META_ERRORS[e[1]] || L('Не вдалося підключити Facebook');
   history.replaceState(null, '', location.pathname);
   // Раньше здесь открывалась модалка настроек, теперь это раздел.
   setView('channels');
@@ -2848,34 +2885,34 @@ function startMeta(){
       busy(el('metaGo'), false);
       var p = (e && e.payload) || {};
       el('metaErr').textContent = p.error === 'meta_unavailable'
-        ? META_ERRORS.unavailable : 'Не удалось начать вход';
+        ? META_ERRORS.unavailable : L('Не вдалося почати вхід');
     });
 }
 
 function showMetaPick(id){
   var box = el('metaBody');
-  box.innerHTML = '<div class="empty">Загружаю страницы...</div>';
+  box.innerHTML = L('<div class="empty">Завантажую сторінки...</div>');
   api('/settings/channels/meta/pick/' + id).then(function(d){
     var pages = d.pages || [];
     if (!pages.length){
       S.metaPick = null;
-      box.innerHTML = '<div class="err">У этого аккаунта Facebook нет страниц, или при входе ' +
-        'не отмечена ни одна. Нажмите «Войти через Facebook» и на шаге выбора отметьте нужные страницы.</div>' +
-        '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+      box.innerHTML = L('<div class="err">У цього акаунта Facebook немає сторінок, або під час входу ') +
+        L('не позначена жодна. Натисніть «Увійти через Facebook» і на кроці вибору позначте потрібні сторінки.</div>') +
+        L('<div class="row2" style="margin-top:10px"><button id="metaGo">Увійти через Facebook</button></div>');
       el('metaGo').onclick = startMeta;
       return;
     }
-    box.innerHTML = '<div class="hint">Отметьте, что подключить:</div>' +
+    box.innerHTML = L('<div class="hint">Позначте, що підключити:</div>') +
       pages.map(function(p){
         return '<div class="item"><div><div class="t">' + esc(p.name) + '</div>' +
           '<div class="s"><label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="messenger" checked> Messenger</label>' +
           (p.instagram
             ? ' &nbsp; <label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="instagram" checked> Instagram' +
               (p.instagram.username ? ' @' + esc(p.instagram.username) : '') + '</label>'
-            : ' &nbsp; <span class="muted">Instagram к странице не привязан</span>') +
+            : L(' &nbsp; <span class="muted">Instagram до сторінки не привʼязаний</span>')) +
           '</div></div></div>';
       }).join('') +
-      '<div class="row2" style="margin-top:10px"><button id="metaSave">Подключить выбранное</button></div>' +
+      L('<div class="row2" style="margin-top:10px"><button id="metaSave">Підключити вибране</button></div>') +
       '<div class="err" id="metaErr"></div>';
     if (S.metaError){ el('metaErr').textContent = S.metaError; S.metaError = null; }
     el('metaSave').onclick = function(){
@@ -2891,27 +2928,27 @@ function showMetaPick(id){
           var bad = (r.results || []).filter(function(x){ return !x.ok });
           S.metaPick = bad.length ? id : null;
           var ok = (r.results || []).length - bad.length;
-          toast(ok ? 'Подключено каналов: ' + ok : 'Ничего не подключено');
+          toast(ok ? L('Підключено каналів: ') + ok : L('Нічого не підключено'));
           if (bad.length){
             S.metaError = bad.map(function(x){ return x.page + ': ' + x.error }).join('; ');
           }
           tabChannels();
         })
-        .catch(function(){ busy(el('metaSave'), false); el('metaErr').textContent = 'Не удалось подключить' });
+        .catch(function(){ busy(el('metaSave'), false); el('metaErr').textContent = L('Не вдалося підключити') });
     };
   }).catch(function(){
     S.metaPick = null;
-    box.innerHTML = '<div class="err">Выбор страниц устарел (15 минут). Войдите через Facebook ещё раз.</div>' +
-      '<div class="row2" style="margin-top:10px"><button id="metaGo">Войти через Facebook</button></div>';
+    box.innerHTML = L('<div class="err">Вибір сторінок застарів (15 хвилин). Увійдіть через Facebook ще раз.</div>') +
+      L('<div class="row2" style="margin-top:10px"><button id="metaGo">Увійти через Facebook</button></div>');
     el('metaGo').onclick = startMeta;
   });
 }
 
 function errLabel(e){
   var r = (e && e.reason) || '';
-  if (r === 'session_revoked') return 'сеанс завершён в Telegram — подключите номер заново';
-  if (r === 'token_revoked') return 'токен бота отозван — подключите заново';
-  return 'ошибка: ' + (typeof e === 'string' ? e : JSON.stringify(e));
+  if (r === 'session_revoked') return L('сеанс завершено в Telegram — підключіть номер заново');
+  if (r === 'token_revoked') return L('токен бота відкликано — підключіть заново');
+  return L('помилка: ') + (typeof e === 'string' ? e : JSON.stringify(e));
 }
 
 /* Вход в номерной Telegram. Сервер отдаёт готовую картинку QR,
@@ -2921,7 +2958,7 @@ var TGU = { id:null, timer:null };
 function startTgUser(name){
   var box = el('uqrbox');
   if (TGU.timer) clearTimeout(TGU.timer);
-  box.innerHTML = '<div class="qrwrap"><div class="empty">Готовлю QR-код...</div></div>';
+  box.innerHTML = L('<div class="qrwrap"><div class="empty">Готую QR-код...</div></div>');
   busy(el('uqr'), true);
   api('/settings/channels/telegram-user/start', { method:'POST', body:{ displayName: name } })
     .then(function(r){ TGU.id = r.loginId; pollTgUser() })
@@ -2929,7 +2966,7 @@ function startTgUser(name){
       busy(el('uqr'), false);
       var p = (e && e.payload) || {};
       box.innerHTML = '<div class="err">' + (p.error === 'mtproto_unavailable'
-        ? 'Номерной Telegram ещё не включён на сервере.' : 'Не удалось начать вход.') + '</div>';
+        ? L('Номерний Telegram ще не увімкнений на сервері.') : L('Не вдалося почати вхід.')) + '</div>';
     });
 }
 
@@ -2941,26 +2978,26 @@ function pollTgUser(){
     if (TGU.id !== id || !el('uqrbox')) return;
     if (st.state === 'qr' && st.qrSvg) {
       box.innerHTML = '<div class="qrwrap"><div class="qr">' + st.qrSvg + '</div><ol class="steps">' +
-        '<li>Откройте Telegram на телефоне</li>' +
-        '<li><b>Настройки → Устройства → Подключить устройство</b></li>' +
-        '<li>Наведите камеру на этот код</li></ol></div>' +
-        '<div class="hint">Код обновляется каждые полминуты — это нормально.</div>';
+        L('<li>Відкрийте Telegram на телефоні</li>') +
+        L('<li><b>Налаштування → Пристрої → Підключити пристрій</b></li>') +
+        L('<li>Наведіть камеру на цей код</li></ol></div>') +
+        L('<div class="hint">Код оновлюється кожні півхвилини — це нормально.</div>');
     } else if (st.state === 'password') {
       if (!el('upw')) {
         box.innerHTML = '<div class="qrwrap"><div>' +
-          '<div class="t">На аккаунте включён облачный пароль</div>' +
+          L('<div class="t">На акаунті увімкнено хмарний пароль</div>') +
           '<div class="hint" id="uphint"></div>' +
-          '<div class="row2"><input id="upw" type="password" placeholder="Облачный пароль Telegram" autocomplete="off">' +
-          '<button id="upwgo">Войти</button></div>' +
+          L('<div class="row2"><input id="upw" type="password" placeholder="Хмарний пароль Telegram" autocomplete="off">') +
+          L('<button id="upwgo">Увійти</button></div>') +
           '<div class="err" id="upwerr"></div>' +
-          '<div class="hint">Пароль передаётся в Telegram и нигде у нас не сохраняется.</div></div></div>';
+          L('<div class="hint">Пароль передається в Telegram і ніде в нас не зберігається.</div></div></div>');
         el('upwgo').onclick = function(){
           var pw = el('upw').value;
           if (!pw) return;
           busy(el('upwgo'), true);
           api('/settings/channels/telegram-user/login/' + id + '/password',
               { method:'POST', body:{ password: pw } })
-            .catch(function(){ el('upwerr').textContent = 'Не удалось отправить пароль' })
+            .catch(function(){ el('upwerr').textContent = L('Не вдалося надіслати пароль') })
             .then(function(){ el('upw').value = '' });
         };
         el('upw').onkeydown = function(ev){ if (ev.key === 'Enter') el('upwgo').click() };
@@ -2968,18 +3005,18 @@ function pollTgUser(){
       } else {
         busy(el('upwgo'), false);
       }
-      el('uphint').textContent = st.passwordHint ? 'Подсказка: ' + st.passwordHint : '';
-      el('upwerr').textContent = st.passwordError ? 'Пароль не подошёл, попробуйте ещё раз' : '';
+      el('uphint').textContent = st.passwordHint ? L('Підказка: ') + st.passwordHint : '';
+      el('upwerr').textContent = st.passwordError ? L('Пароль не підійшов, спробуйте ще раз') : '';
     } else if (st.state === 'done') {
       TGU.id = null;
-      box.innerHTML = '<div class="ok">Номер подключён. Сообщения начнут приходить в течение минуты.</div>';
-      toast('Telegram по номеру подключён');
+      box.innerHTML = L('<div class="ok">Номер підключено. Повідомлення почнуть надходити протягом хвилини.</div>');
+      toast(L('Telegram за номером підключено'));
       setTimeout(tabChannels, 1500);
       return;
     } else if (st.state === 'error') {
       TGU.id = null;
       busy(el('uqr'), false);
-      box.innerHTML = '<div class="err">' + esc(st.error || 'Вход не удался') + '</div>';
+      box.innerHTML = '<div class="err">' + esc(st.error || L('Вхід не вдався')) + '</div>';
       return;
     } else if (el('upwgo')) {
       busy(el('upwgo'), true);
@@ -3019,10 +3056,10 @@ function openAcl(userId, btn){
           }).join('') + '</div>' +
           '<div class="hint" id="aclhint-' + userId + '"></div>' +
           '<div class="row2" style="margin-top:8px">' +
-          '<button class="mini" id="aclsave-' + userId + '">Сохранить доступ</button>' +
-          '<button class="ghost mini" id="aclall-' + userId + '">Открыть все</button></div>' +
+          '<button class="mini" id="aclsave-' + userId + L('">Зберегти доступ</button>') +
+          '<button class="ghost mini" id="aclall-' + userId + L('">Відкрити всі</button></div>') +
           '<div class="err" id="aclerr-' + userId + '"></div>'
-        : '<div class="hint">Каналов пока нет — сначала подключите хотя бы один.</div>';
+        : L('<div class="hint">Каналів поки немає — спершу підключіть хоча б один.</div>');
 
       box.style.display = 'block';
       busy(btn, false);
@@ -3036,8 +3073,8 @@ function openAcl(userId, btn){
       function hint(){
         var n = marks().length;
         el('aclhint-' + userId).textContent = n
-          ? 'Виден только выбранный канал' + (n > 1 ? 'ы: ' + n : '')
-          : 'Ни одной галочки — сотрудник видит все каналы.';
+          ? L('Видно тільки вибраний канал') + (n > 1 ? L('и: ') + n : '')
+          : L('Жодної галочки — співробітник бачить усі канали.');
       }
       hint();
       Array.prototype.forEach.call(box.querySelectorAll('[data-ch]'), function(x){
@@ -3055,15 +3092,15 @@ function openAcl(userId, btn){
         var save = el('aclsave-' + userId);
         busy(save, true);
         api('/users/' + userId + '/channels', { method:'PUT', body:{ channelIds: marks() } })
-          .then(function(){ toast('Доступ сохранён'); box.style.display = 'none' })
+          .then(function(){ toast(L('Доступ збережено')); box.style.display = 'none' })
           .catch(function(e){
             var p = e.payload || {};
-            el('aclerr-' + userId).textContent = p.detail || 'Не удалось сохранить';
+            el('aclerr-' + userId).textContent = p.detail || L('Не вдалося зберегти');
           })
           .then(function(){ busy(save, false) });
       };
     })
-    .catch(function(){ busy(btn, false); alertLine('Не удалось получить список каналов') });
+    .catch(function(){ busy(btn, false); alertLine(L('Не вдалося отримати список каналів')) });
 }
 
 function tabUsers(){
@@ -3073,21 +3110,21 @@ function tabUsers(){
       .map(function(r){ return '<option value="' + r + '">' + ROLES[r] + '</option>' }).join('');
 
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Команда', 'Операторы отвечают клиентам, наблюдатели только читают, ' +
-        'администраторы меняют каналы и состав команды.') +
-      '<div class="card"><h3>Пригласить сотрудника</h3>' +
-      '<div class="row2"><input id="uem" type="email" placeholder="почта" autocomplete="off">' +
-      '<input id="unm" placeholder="имя" autocomplete="off">' +
+      pageHead(L('Команда'), L('Оператори відповідають клієнтам, спостерігачі тільки читають, ') +
+        L('адміністратори змінюють канали і склад команди.')) +
+      L('<div class="card"><h3>Запросити співробітника</h3>') +
+      L('<div class="row2"><input id="uem" type="email" placeholder="пошта" autocomplete="off">') +
+      L('<input id="unm" placeholder="імʼя" autocomplete="off">') +
       '<select id="uro">' + opts + '</select>' +
-      '<button id="uadd">Добавить</button></div>' +
-      '<div class="hint">Оператор видит диалоги и отвечает. Наблюдатель только читает. ' +
-      'Администратор может менять каналы и состав команды.</div>' +
+      L('<button id="uadd">Додати</button></div>') +
+      L('<div class="hint">Оператор бачить діалоги і відповідає. Спостерігач тільки читає. ') +
+      L('Адміністратор може змінювати канали і склад команди.</div>') +
       '<div class="err" id="uerr"></div></div>' +
 
-      '<div class="card"><h3>Команда (' + USERS.length + ')</h3>' +
+      L('<div class="card"><h3>Команда (') + USERS.length + ')</h3>' +
       USERS.map(function(u){
-        var pill = u.is_active ? '' : '<span class="pill warn">отключён</span>';
-        var seen = u.last_seen_at ? 'был ' + fmtTime(u.last_seen_at) : 'ещё не заходил';
+        var pill = u.is_active ? '' : L('<span class="pill warn">відключений</span>');
+        var seen = u.last_seen_at ? L('був ') + fmtTime(u.last_seen_at) : L('ще не заходив');
         return '<div class="item"><div>' +
           '<div class="t">' + esc(u.full_name || u.email) + pill + '</div>' +
           '<div class="s">' + esc(u.email) + ' · ' + esc(ROLES[u.role] || u.role) +
@@ -3096,11 +3133,11 @@ function tabUsers(){
           // Доступ к каналам есть только у тех, кого можно ограничить:
           // владелец и администратор видят всё по своей роли.
           (u.role === 'owner' || u.role === 'admin' ? '' :
-            '<button class="ghost mini" data-acl="' + u.id + '">Каналы</button>') +
+            '<button class="ghost mini" data-acl="' + u.id + L('">Канали</button>')) +
           (u.role === 'owner' ? '' :
             '<button class="ghost mini" data-user="' + u.id + '" data-active="' +
             (u.is_active ? 'false' : 'true') + '">' +
-            (u.is_active ? 'Отключить' : 'Включить') + '</button>') +
+            (u.is_active ? L('Відключити') : L('Увімкнути')) + '</button>') +
           '</div></div>' +
           '<div class="aclbox" id="acl-' + u.id + '" style="display:none"></div>';
       }).join('') + '</div>';
@@ -3114,8 +3151,8 @@ function tabUsers(){
         .catch(function(e){
           var p = e.payload || {};
           el('uerr').textContent = p.error === 'seats_limit_reached'
-            ? 'Мест по тарифу: ' + p.limit + '. Отключите кого-то или расширьте тариф.'
-            : p.error === 'bad_email' ? 'Проверьте адрес почты' : 'Не удалось добавить';
+            ? L('Місць за тарифом: ') + p.limit + L('. Відключіть когось або розширте тариф.')
+            : p.error === 'bad_email' ? L('Перевірте адресу пошти') : L('Не вдалося додати');
           busy(el('uadd'), false);
         });
     };
@@ -3139,35 +3176,35 @@ function tabReplies(){
   api('/quick-replies').then(function(d){
     QR = d.quickReplies || [];
     pageBox().innerHTML = '<div class="pg">' +
-      pageHead('Шаблоны ответов', 'Заготовки, которые оператор вставляет в переписку командой ' +
-        '<b>/имя</b>. К шаблону можно приложить до трёх файлов — прайс, схему проезда, инструкцию.') +
-      '<div class="card"><h3>Новый шаблон</h3>' +
-      '<div class="row2"><input id="qsc" placeholder="короткое имя, например цена"></div>' +
+      pageHead(L('Шаблони відповідей'), L('Заготовки, які оператор вставляє в листування командою ') +
+        L('<b>/імʼя</b>. До шаблону можна додати до трьох файлів — прайс, схему проїзду, інструкцію.')) +
+      L('<div class="card"><h3>Новий шаблон</h3>') +
+      L('<div class="row2"><input id="qsc" placeholder="коротке імʼя, наприклад ціна"></div>') +
       '<div class="row2" style="margin-top:9px">' +
-      '<textarea id="qbd" rows="3" placeholder="Текст, который подставится в поле ответа"></textarea>' +
+      L('<textarea id="qbd" rows="3" placeholder="Текст, який підставиться в поле відповіді"></textarea>') +
       '</div>' +
       // Файл прикладывается сразу при создании. Раньше кнопка «Файл»
       // была только у сохранённого шаблона, и в пустом списке человек
       // её не видел вовсе — выходило, что файлов у шаблонов нет.
       '<div class="row2" style="margin-top:9px;display:flex;gap:8px;align-items:center">' +
-      '<button class="ghost mini" id="qnewFile">Приложить файл</button>' +
-      '<span class="dim" id="qnewName">файл не выбран</span></div>' +
-      '<div class="row2" style="margin-top:9px"><button id="qadd">Сохранить</button></div>' +
-      '<div class="hint">В диалоге наберите <b>/имя</b> и нажмите Enter — текст развернётся ' +
-      'в поле ответа, останется нажать Enter второй раз.</div>' +
+      L('<button class="ghost mini" id="qnewFile">Додати файл</button>') +
+      L('<span class="dim" id="qnewName">файл не вибрано</span></div>') +
+      L('<div class="row2" style="margin-top:9px"><button id="qadd">Зберегти</button></div>') +
+      L('<div class="hint">У діалозі наберіть <b>/імʼя</b> і натисніть Enter — текст розгорнеться ') +
+      L('у поле відповіді, залишиться натиснути Enter другий раз.</div>') +
       '<div class="err" id="qerr"></div>' +
       '<input type="file" id="qrFile" style="display:none">' +
       '<input type="file" id="qrNewFile" style="display:none"></div>' +
 
-      '<div class="card"><h3>Шаблоны (' + QR.length + ')</h3>' +
+      L('<div class="card"><h3>Шаблони (') + QR.length + ')</h3>' +
       (QR.length ? QR.map(function(q){
         var files = q.attachments || [];
         var chips = files.map(function(a, i){
-          return '<span class="fchip" title="' + esc(a.filename || 'файл') + '">' +
+          return '<span class="fchip" title="' + esc(a.filename || L('файл')) + '">' +
             '<span class="ic">' + (String(a.mime || '').indexOf('image/') === 0 ? '🖼' : '📄') + '</span>' +
-            '<a href="#" data-open="' + q.id + '" data-oi="' + i + '">' + esc(a.filename || 'файл') + '</a>' +
-            '<span class="dim">' + Math.round((a.size || 0) / 1024) + ' КБ</span>' +
-            '<span class="x" data-del="' + q.id + '" data-di="' + i + '" title="Убрать файл">×</span></span>';
+            '<a href="#" data-open="' + q.id + '" data-oi="' + i + '">' + esc(a.filename || L('файл')) + '</a>' +
+            '<span class="dim">' + Math.round((a.size || 0) / 1024) + L(' КБ</span>') +
+            '<span class="x" data-del="' + q.id + '" data-di="' + i + L('" title="Прибрати файл">×</span></span>');
         }).join('');
         return '<div class="item"><div style="min-width:0">' +
           '<div class="t"><code>/' + esc(q.shortcut) + '</code></div>' +
@@ -3176,9 +3213,9 @@ function tabReplies(){
           '</div>' +
           '<div style="display:flex;gap:6px;flex:none">' +
           (files.length < 3
-            ? '<button class="ghost mini" data-file="' + q.id + '">Файл</button>' : '') +
-          '<button class="ghost mini" data-qr="' + q.id + '">Удалить</button></div></div>';
-      }).join('') : '<div class="hint">Пока пусто.</div>') + '</div></div>';
+            ? '<button class="ghost mini" data-file="' + q.id + L('">Файл</button>') : '') +
+          '<button class="ghost mini" data-qr="' + q.id + L('">Видалити</button></div></div>');
+      }).join('') : L('<div class="hint">Поки порожньо.</div>')) + '</div></div>';
 
     // Файл к новому шаблону выбирается до сохранения и уезжает сразу
     // после того, как шаблон получил свой номер.
@@ -3187,7 +3224,7 @@ function tabReplies(){
     el('qrNewFile').onchange = function(){
       var f = this.files && this.files[0];
       if (!f) return;
-      if (f.size > 20 * 1024 * 1024){ alertLine('Файл больше 20 МБ — Telegram не пропустит'); return }
+      if (f.size > 20 * 1024 * 1024){ alertLine(L('Файл більший за 20 МБ — Telegram не пропустить')); return }
       newFile = f;
       el('qnewName').textContent = f.name;
     };
@@ -3213,7 +3250,7 @@ function tabReplies(){
         .catch(function(e){
           var p = e.payload || {};
           el('qerr').textContent = p.error === 'shortcut_too_long'
-            ? 'Короткое имя длиннее 32 символов' : 'Заполните имя и текст';
+            ? L('Коротке імʼя довше за 32 символи') : L('Заповніть імʼя і текст');
           busy(el('qadd'), false);
         });
     };
@@ -3232,7 +3269,7 @@ function tabReplies(){
     picker.onchange = function(){
       var f = this.files && this.files[0];
       if (!f) return;
-      if (f.size > 20 * 1024 * 1024){ alertLine('Файл больше 20 МБ — Telegram не пропустит'); return }
+      if (f.size > 20 * 1024 * 1024){ alertLine(L('Файл більший за 20 МБ — Telegram не пропустить')); return }
       var id = this.dataset.qr;
       readAsBase64(f).then(function(b64){
         return api('/quick-replies/' + id + '/attachment', { method:'POST', body:{
@@ -3245,8 +3282,8 @@ function tabReplies(){
         .catch(function(e){
           var p = e.payload || {};
           el('qerr').textContent = p.error === 'too_many_files'
-            ? 'К одному шаблону можно приложить не больше трёх файлов'
-            : p.error === 'file_too_large' ? 'Файл больше 20 МБ' : 'Не удалось загрузить файл';
+            ? L('До одного шаблону можна додати не більше трьох файлів')
+            : p.error === 'file_too_large' ? L('Файл більший за 20 МБ') : L('Не вдалося завантажити файл');
         });
     };
 
@@ -3259,7 +3296,7 @@ function tabReplies(){
           { headers:{ Authorization:'Bearer ' + TOKEN } })
           .then(function(r){ return r.blob() })
           .then(function(b){ window.open(URL.createObjectURL(b), '_blank') })
-          .catch(function(){ alertLine('Файл недоступен') });
+          .catch(function(){ alertLine(L('Файл недоступний')) });
       };
     });
 
@@ -3429,11 +3466,11 @@ function paintBell(){
   b.dataset.painted = '';
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(on ? 'bell' : 'bellOff'));
-  b.insertAdjacentText('beforeend', on ? 'Звук' : 'Тихо');
+  b.insertAdjacentText('beforeend', on ? L('Звук') : L('Тихо'));
   b.classList.toggle('live', on);
-  b.title = (PREFS.sound ? 'Звук включён' : 'Звук выключен') + ' · ' +
-    (PREFS.push ? 'уведомления включены' : 'уведомления выключены') +
-    ' — нажмите, чтобы переключить';
+  b.title = (PREFS.sound ? L('Звук увімкнено') : L('Звук вимкнено')) + ' · ' +
+    (PREFS.push ? L('сповіщення увімкнені') : L('сповіщення вимкнені')) +
+    L(' — натисніть, щоб переключити');
 }
 
 /**
@@ -3448,11 +3485,11 @@ function paintThemeBtn(){
   b.dataset.painted = '';
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(v === 'light' ? 'sun' : v === 'dark' ? 'moon' : 'auto'));
-  b.insertAdjacentText('beforeend', v === 'light' ? 'Светлая' : v === 'dark' ? 'Тёмная' : 'Тема');
+  b.insertAdjacentText('beforeend', v === 'light' ? L('Світла') : v === 'dark' ? L('Темна') : L('Тема'));
   b.title = v === 'auto'
-    ? 'Тема как в системе — нажмите, чтобы выбрать светлую'
-    : v === 'light' ? 'Светлая тема — нажмите, чтобы выбрать тёмную'
-      : 'Тёмная тема — нажмите, чтобы вернуть системную';
+    ? L('Тема як у системі — натисніть, щоб вибрати світлу')
+    : v === 'light' ? L('Світла тема — натисніть, щоб вибрати темну')
+      : L('Темна тема — натисніть, щоб повернути системну');
 }
 
 /**
@@ -3468,8 +3505,8 @@ function notify(c){
   if (document.visibilityState === 'visible' && !document.hidden) return;
 
   try {
-    var n = new Notification(c.display_name || 'Новое сообщение', {
-      body: c.preview || 'Клиент написал в ' + (CH[c.channel_type] || c.channel_type),
+    var n = new Notification(c.display_name || L('Нове повідомлення'), {
+      body: c.preview || L('Клієнт написав у ') + (CH[c.channel_type] || c.channel_type),
       // tag по диалогу: три сообщения подряд заменяют друг друга,
       // а не выстраиваются в стопку из трёх окон.
       tag: 'od-' + c.id,
@@ -3512,7 +3549,7 @@ function announce(list){
 
 function fillChannelFilter(){
   var sel = el('fCh');
-  var want = '<option value="">Все каналы</option>' + CHANNELS.map(function(c){
+  var want = L('<option value="">Всі канали</option>') + CHANNELS.map(function(c){
     return '<option value="' + c.id + '">' + esc(c.display_name) + '</option>';
   }).join('');
   if (sel.innerHTML === want) return;
@@ -3538,7 +3575,7 @@ function refresh(){
 }
 
 function showErr(e){
-  if (e && e.status === 401){ logout(); el('gateErr').textContent = 'Токен недействителен или истёк'; }
+  if (e && e.status === 401){ logout(); el('gateErr').textContent = L('Токен недійсний або застарів'); }
 }
 
 var VIEWS = {
@@ -3559,7 +3596,7 @@ function setView(view){
   if (view !== 'chats') {
     S.view = view;
     S.channelId = null;
-    pageBox().innerHTML = '<div class="pg"><div class="empty">Загружаю...</div></div>';
+    pageBox().innerHTML = L('<div class="pg"><div class="empty">Завантажую...</div></div>');
     (VIEWS[view] || function(){})();
   }
 }
@@ -3586,6 +3623,7 @@ function applyRole(){
 function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
 
 function start(){
+  applyLang();
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
   paintIcons();
@@ -3677,7 +3715,7 @@ el('bell').onclick = function(){
       Notification.requestPermission().then(function(p){
         PREFS.push = p === 'granted';
         savePrefs();
-        if (!PREFS.push) alertLine('Браузер не разрешил уведомления');
+        if (!PREFS.push) alertLine(L('Браузер не дозволив сповіщення'));
       });
       return;
     }
@@ -3715,7 +3753,7 @@ el('ask').onclick = function(){
   var email = el('email').value.trim();
   el('gateErr').textContent = '';
   if (!email || email.indexOf('@') < 1){
-    el('gateErr').textContent = 'Введите почту';
+    el('gateErr').textContent = L('Введіть пошту');
     return;
   }
   busy(el('ask'), true);
@@ -3731,7 +3769,7 @@ el('ask').onclick = function(){
       el('gateErr').textContent =
         p.error === 'too_many_requests' ? p.detail
         : p.error === 'mail_failed' ? p.detail
-        : 'Не удалось отправить код';
+        : L('Не вдалося надіслати код');
     })
     .then(function(){ busy(el('ask'), false) });
 };
@@ -3755,8 +3793,8 @@ el('suGo').onclick = function(){
   var company = el('suCompany').value.trim();
   var email = el('suEmail').value.trim();
   el('suErr').textContent = '';
-  if (company.length < 2){ el('suErr').textContent = 'Напишите название компании'; return }
-  if (!email || email.indexOf('@') < 1){ el('suErr').textContent = 'Введите рабочую почту'; return }
+  if (company.length < 2){ el('suErr').textContent = L('Напишіть назву компанії'); return }
+  if (!email || email.indexOf('@') < 1){ el('suErr').textContent = L('Введіть робочу пошту'); return }
 
   busy(el('suGo'), true);
   api('/auth/request', { method:'POST', body:{ email: email, company: company } })
@@ -3768,7 +3806,7 @@ el('suGo').onclick = function(){
     })
     .catch(function(e){
       var p = e.payload || {};
-      el('suErr').textContent = p.detail || 'Не удалось отправить код';
+      el('suErr').textContent = p.detail || L('Не вдалося надіслати код');
     })
     .then(function(){ busy(el('suGo'), false) });
 };
@@ -3776,7 +3814,7 @@ el('suGo').onclick = function(){
 function submitCode(tenantId){
   var code = el('code').value.trim();
   el('codeErr').textContent = '';
-  if (code.length !== 6){ el('codeErr').textContent = 'Код из шести цифр'; return }
+  if (code.length !== 6){ el('codeErr').textContent = L('Код із шести цифр'); return }
 
   busy(el('verify'), true);
   var body = { email: pendingEmail, code: code };
@@ -3804,7 +3842,7 @@ function submitCode(tenantId){
         // и не понимает, что делать дальше.
         if (r.created) {
           setView('channels');
-          toast('Компания создана. Подключите первый канал — это десять минут.');
+          toast(L('Компанію створено. Підключіть перший канал — це десять хвилин.'));
         }
       }
     })
@@ -3812,11 +3850,11 @@ function submitCode(tenantId){
       var p = e.payload || {};
       el('codeErr').textContent =
         p.error === 'wrong_code'
-          ? 'Неверный код' + (p.attemptsLeft > 0 ? ', осталось попыток: ' + p.attemptsLeft : '')
-        : p.error === 'code_expired' ? 'Код истёк, запросите новый'
-        : p.error === 'too_many_attempts' ? 'Слишком много попыток, запросите новый код'
-        : p.error === 'no_code' ? 'Код не запрашивали'
-        : 'Не удалось войти';
+          ? L('Невірний код') + (p.attemptsLeft > 0 ? L(', залишилось спроб: ') + p.attemptsLeft : '')
+        : p.error === 'code_expired' ? L('Код застарів, запросіть новий')
+        : p.error === 'too_many_attempts' ? L('Занадто багато спроб, запросіть новий код')
+        : p.error === 'no_code' ? L('Код не запитували')
+        : L('Не вдалося увійти');
     })
     .then(function(){ busy(el('verify'), false) });
 }
@@ -3842,7 +3880,7 @@ el('enter').onclick = function(){
     enterWith(t);
   }).catch(function(){
     TOKEN = '';
-    el('tokErr').textContent = 'Токен не подошёл. Проверьте, что скопировали целиком.';
+    el('tokErr').textContent = L('Токен не підійшов. Перевірте, що скопіювали цілком.');
   });
 };
 el('tok').onkeydown = function(e){ if (e.key === 'Enter') el('enter').click() };
@@ -3853,6 +3891,8 @@ el('tok').onkeydown = function(e){ if (e.key === 'Enter') el('enter').click() };
  * хранилище у неё своё (или его почистили). Форму входа показываем
  * только когда и сеанса нет.
  */
+applyLang();
+
 if (TOKEN) {
   start();
   sessionKeep();
