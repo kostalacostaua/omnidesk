@@ -621,6 +621,20 @@ export const INBOX_HTML = `<!DOCTYPE html>
      помещаются в одну строку, и до этого имя просто пропадало —
      сжималось до нуля, потому что кнопки не сжимаются. */
   @media(max-width:820px){
+    /* Страница на телефоне не прокручивается: прокручиваются ленты
+       внутри неё. Без этого Safari, показывая поле ввода, уводит весь
+       документ вверх — и поле уезжает под клавиатуру вместе с ним. */
+    html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+    /* Строка сетки обязана считаться от высоты окна, а не от
+       содержимого: иначе переписка «выталкивает» поле ответа за
+       нижний край, и высота, выставленная под клавиатуру, ничего не
+       меняет — поле просто оказывается за пределами экрана. */
+    #app{position:fixed;top:0;left:0;width:100%;
+      grid-template-rows:minmax(0,1fr);overflow:hidden}
+    /* Вход — исключение: с открытой клавиатурой форма выше экрана,
+       и закреплённая страница спрятала бы поле ввода кода. */
+    #gate{height:100dvh;overflow-y:auto;align-items:flex-start;padding-top:8vh}
+
     /* «Сповіщення» и «Notifications» в 56 точек одной строкой не
        влезают: переносим слово, а не обрезаем его. */
     .rbtn{width:60px;font-size:9px;padding:8px 2px;white-space:normal;
@@ -1093,12 +1107,36 @@ window.addEventListener('popstate', function(e){
 /** Телефон. Ширина, а не «мобильность»: подписи считаем по месту. */
 function narrow(){ return window.innerWidth <= 820 }
 
+/**
+ * Подгонка под клавиатуру на телефоне.
+ *
+ * Одной высоты мало, и это главное, что тут надо понимать. Когда на iOS
+ * выезжает клавиатура, окно страницы не уменьшается: Safari оставляет
+ * его прежним и ПРОКРУЧИВАЕТ, чтобы показать поле ввода. Приложение при
+ * этом уезжает вверх, под адресную строку, а нижняя часть — вместе с
+ * полем ответа — оказывается за клавиатурой.
+ *
+ * Поэтому три вещи сразу: страница закреплена и не прокручивается,
+ * высота берётся у visualViewport (он знает видимую часть), и весь
+ * каркас сдвигается на offsetTop — ровно настолько, насколько Safari
+ * увёл окно. Тогда поле ответа стоит над клавиатурой, а не под ней.
+ */
 function fitHeight(){
   var vv = window.visualViewport;
-  if (!vv) return;
+  var app = el('app');
+  if (!vv || !app) return;
+
   // На широком экране высотой распоряжается вёрстка: снимаем свою.
-  if (window.innerWidth > 820){ el('app').style.height = ''; return }
-  el('app').style.height = Math.round(vv.height) + 'px';
+  if (window.innerWidth > 820){
+    app.style.height = '';
+    app.style.transform = '';
+    return;
+  }
+
+  app.style.height = Math.round(vv.height) + 'px';
+  var off = Math.round(vv.offsetTop || 0);
+  app.style.transform = off ? 'translateY(' + off + 'px)' : '';
+
   // Клавиатура выехала — последнее сообщение должно остаться на виду.
   var box = el('msgs');
   if (box) box.scrollTop = box.scrollHeight;
@@ -1109,6 +1147,24 @@ if (window.visualViewport){
   window.visualViewport.addEventListener('scroll', fitHeight);
 }
 window.addEventListener('orientationchange', function(){ setTimeout(fitHeight, 250) });
+
+/*
+ * Фокус в поле. Safari к этому моменту ещё не сообщил новую высоту:
+ * клавиатура выезжает с задержкой и анимацией. Поэтому пересчитываем
+ * несколько раз подряд — дешевле, чем поймать единственный верный
+ * момент, которого у разных версий iOS нет.
+ */
+document.addEventListener('focusin', function(e){
+  var t = e.target;
+  if (!t || (t.tagName !== 'TEXTAREA' && t.tagName !== 'INPUT')) return;
+  [80, 250, 500].forEach(function(ms){ setTimeout(fitHeight, ms) });
+});
+
+document.addEventListener('focusout', function(){
+  // Клавиатура ушла — окно должно вернуться на место. Без этого
+  // страница остаётся прокрученной, и сверху висит пустая полоса.
+  setTimeout(function(){ window.scrollTo(0, 0); fitHeight() }, 120);
+});
 
 var toastTimer = null;
 function toast(text){
