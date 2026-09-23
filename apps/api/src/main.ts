@@ -392,6 +392,7 @@ const notify = registerNotify(app, {
 registerWebchat(app, {
   pool,
   inboundQueue,
+  storage,
   appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });

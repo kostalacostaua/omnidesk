@@ -1,4 +1,4 @@
-import type { UnifiedMessage } from './types.js';
+import type { Attachment, UnifiedMessage } from './types.js';
 
 /**
  * Чат на сайте.
@@ -235,6 +235,45 @@ export interface WebchatIncoming {
   name?: string | null;
   /** Страница, с которой написали: оператору это половина контекста. */
   page?: string | null;
+  /** Файлы, уже сложенные в хранилище: сюда попадают их описания. */
+  attachments?: Attachment[];
+}
+
+/**
+ * Сколько весит файл от посетителя.
+ *
+ * Десять мегабайт — это фотография с телефона и почти любой документ.
+ * Больше присылают редко и обычно по ошибке, а каждый такой файл
+ * проходит через память сервера в виде base64, то есть занимает ещё
+ * треть сверху.
+ */
+export const WEBCHAT_FILE_LIMIT = 10 * 1024 * 1024;
+
+/**
+ * Что именно прислали.
+ *
+ * Картинку показываем прямо в переписке, остальное — строкой с именем
+ * файла: предсказуемо и не ломает вёрстку окна шириной 380 точек.
+ */
+export function webchatFileKind(mime: string): 'image' | 'audio' | 'video' | 'file' {
+  const m = (mime ?? '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('audio/')) return 'audio';
+  if (m.startsWith('video/')) return 'video';
+  return 'file';
+}
+
+/**
+ * Имя файла приходит от постороннего и попадает и в интерфейс
+ * оператора, и обратно в окно чата. Путь из него убирается целиком:
+ * «../» в имени — это не имя, а попытка.
+ */
+export function safeFileName(raw: string): string {
+  const base = String(raw ?? '')
+    .replace(/[/\\]+/g, ' ')
+    .replace(/[\u0000-\u001f]+/g, '')
+    .trim();
+  return (base || 'file').slice(0, 120);
 }
 
 /**
@@ -248,7 +287,10 @@ export function normalizeWebchat(
   ctx: { tenantId: string; channelId: string },
 ): UnifiedMessage | null {
   const text = (msg.text ?? '').trim();
-  if (!text) return null;
+  const files = msg.attachments ?? [];
+  // Файл без подписи — обычное дело: человек присылает фотографию и
+  // ждёт ответа. Требовать к нему текст значит требовать пустой пробел.
+  if (!text && !files.length) return null;
 
   return {
     tenantId: ctx.tenantId,
@@ -261,7 +303,10 @@ export function normalizeWebchat(
     },
     direction: 'in',
     senderType: 'customer',
-    content: { text: text.slice(0, 4000) },
+    content: {
+      ...(text ? { text: text.slice(0, 4000) } : {}),
+      ...(files.length ? { attachments: files } : {}),
+    },
     status: 'delivered',
     sentAt: new Date(),
     raw: { page: msg.page ?? null, visitorId: msg.visitorId },

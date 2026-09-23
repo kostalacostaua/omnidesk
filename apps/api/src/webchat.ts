@@ -3,17 +3,22 @@ import type { Queue } from 'bullmq';
 import { randomBytes } from 'node:crypto';
 import {
   WEBCHAT_CHANNEL,
+  WEBCHAT_FILE_LIMIT,
   domainAllowed,
   jobKey,
   launcherColor,
   normalizeWebchat,
+  safeFileName,
+  webchatFileKind,
   safeColor,
   safeLogo,
   webchatSettings,
   withSystem,
   withTenant,
+  type Attachment,
   type InboundJob,
   type Pool,
+  type Storage,
 } from '@omnidesk/core';
 
 /**
@@ -40,6 +45,7 @@ import {
 interface WebchatDeps {
   pool: Pool;
   inboundQueue: Queue<InboundJob>;
+  storage: Storage;
   appUrl: string;
   log: (level: string, msg: string, extra?: Record<string, unknown>) => void;
 }
@@ -75,7 +81,7 @@ function rateOk(visitorId: string): boolean {
 }
 
 export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
-  const { pool, inboundQueue, appUrl, log } = deps;
+  const { pool, inboundQueue, storage, appUrl, log } = deps;
 
   /** Канал по публичному ключу сайта. Читается без контекста тенанта. */
   async function channelByKey(key: string): Promise<ChannelRow | null> {
@@ -246,6 +252,7 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
           body: string | null;
           sent_at: Date;
           at_us: string;
+          files: Attachment[] | null;
         }>(
           // Метка времени возвращается ещё и строкой с микросекундами.
           // Драйвер отдаёт timestamptz как Date, а у Date точность —
@@ -255,14 +262,19 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
           // истинно, и последнее сообщение возвращается при каждом
           // опросе — раз в три секунды, бесконечно.
           `SELECT m.id, m.direction, m.content->>'text' AS body, m.sent_at,
-                  to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at_us
+                  to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at_us,
+                  m.content->'attachments' AS files
              FROM messages m
              JOIN conversations c ON c.id = m.conversation_id
              JOIN contact_identities ci ON ci.contact_id = c.contact_id
             WHERE ci.channel_type = $1 AND ci.external_id = $2
               AND c.channel_id = $3
               AND ($4::timestamptz IS NULL OR m.sent_at > $4::timestamptz)
-              AND m.content->>'text' IS NOT NULL
+              -- Сообщение с одним лишь файлом — обычное дело: человек
+              -- присылает фотографию и ждёт ответа. Требование текста
+              -- прятало бы такие сообщения от того, кто их и прислал.
+              AND (m.content->>'text' IS NOT NULL
+                   OR jsonb_array_length(coalesce(m.content->'attachments', '[]'::jsonb)) > 0)
             ORDER BY m.sent_at, m.id
             LIMIT 200`,
           [WEBCHAT_CHANNEL, visitorId, row.channel_id, after && !isNaN(after.getTime()) ? after : null],
@@ -278,16 +290,107 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
           at: m.sent_at,
           /** Метка для следующего опроса: та же, но без потери точности. */
           cursor: m.at_us,
+          /**
+           * Наружу идёт только описание файла, но не ключ хранилища:
+           * по ключу можно было бы дотянуться до чужого вложения, а имя
+           * и размер нужны, чтобы нарисовать сообщение.
+           */
+          files: (m.files ?? [])
+            .map((f, i) => ({
+              i,
+              name: safeFileName(String(f.filename ?? '')),
+              mime: String(f.mime ?? ''),
+              kind: webchatFileKind(String(f.mime ?? '')),
+              size: Number(f.size ?? 0),
+              ready: f.storageKey ? true : false,
+            }))
+            .filter((f) => f.ready),
         })),
       };
     },
   );
 
+  /**
+   * Вложение из переписки посетителя.
+   *
+   * Отдельный путь от операторского /media: тот требует входа, а здесь
+   * входа нет и быть не может. Пропуском служит тот же идентификатор
+   * посетителя, что и для чтения переписки, и проверяется он так же —
+   * файл отдаётся, только если сообщение лежит в разговоре именно
+   * этого посетителя и именно этого канала.
+   */
+  app.get<{
+    Params: { key: string; messageId: string; index: string };
+    Querystring: { visitorId?: string; download?: string };
+  }>('/chat/:key/media/:messageId/:index', async (req, reply) => {
+    const row = await channelByKey(req.params.key);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    const visitorId = String(req.query?.visitorId ?? '');
+    if (!/^[a-f0-9]{32}$/.test(visitorId)) return reply.code(400).send({ error: 'bad_visitor' });
+
+    const index = Number(req.params.index);
+    if (!Number.isInteger(index) || index < 0) return reply.code(400).send({ error: 'bad_index' });
+
+    const att = await withTenant(pool, row.tenant_id, async (db) => {
+      const { rows } = await db.query<{
+        storage_key: string | null;
+        mime: string | null;
+        filename: string | null;
+      }>(
+        // ::int обязателен: без приведения параметр считается текстом,
+        // и обращение к массиву по ключу «0» возвращает NULL.
+        `SELECT m.content->'attachments'->($4)::int->>'storageKey' AS storage_key,
+                m.content->'attachments'->($4)::int->>'mime'       AS mime,
+                m.content->'attachments'->($4)::int->>'filename'   AS filename
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           JOIN contact_identities ci ON ci.contact_id = c.contact_id
+          WHERE m.id = $1
+            AND ci.channel_type = $2 AND ci.external_id = $3
+            AND c.channel_id = $5
+          LIMIT 1`,
+        [req.params.messageId, WEBCHAT_CHANNEL, visitorId, index, row.channel_id],
+      );
+      return rows[0] ?? null;
+    });
+
+    if (!att?.storage_key) return reply.code(404).send({ error: 'not_found' });
+
+    const obj = await storage.get(att.storage_key);
+    if (!obj) return reply.code(404).send({ error: 'not_stored' });
+
+    const name = safeFileName(att.filename ?? 'file');
+    return reply
+      .type(att.mime ?? obj.contentType)
+      .header('cache-control', 'private, max-age=86400, immutable')
+      .header('content-length', String(obj.size))
+      /* Картинку показываем в окне, остальное отдаём на скачивание.
+         Без attachment браузер попытается открыть чужой html прямо на
+         нашем домене — а это уже не файл, а страница от нашего имени. */
+      .header(
+        'content-disposition',
+        (webchatFileKind(att.mime ?? '') === 'image' && req.query?.download !== '1'
+          ? 'inline'
+          : 'attachment') + `; filename*=UTF-8''${encodeURIComponent(name)}`,
+      )
+      .header('x-content-type-options', 'nosniff')
+      .send(obj.body);
+  });
+
   /** Сообщение от посетителя. */
   app.post<{
     Params: { key: string };
-    Body: { visitorId?: string; text?: string; name?: string; page?: string };
-  }>('/chat/:key/messages', async (req, reply) => {
+    Body: {
+      visitorId?: string;
+      text?: string;
+      name?: string;
+      page?: string;
+      file?: { name?: string; mime?: string; dataBase64?: string };
+    };
+    // Файл едет внутри JSON как base64, поэтому тело крупнее обычного.
+    // Полтора предела: base64 прибавляет к весу файла треть.
+  }>('/chat/:key/messages', { bodyLimit: Math.ceil(WEBCHAT_FILE_LIMIT * 1.5) }, async (req, reply) => {
     const row = await channelByKey(req.params.key);
     if (!row || row.status !== 'active') return reply.code(404).send({ error: 'not_found' });
 
@@ -295,7 +398,8 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
     if (!/^[a-f0-9]{32}$/.test(visitorId)) return reply.code(400).send({ error: 'bad_visitor' });
 
     const text = String(req.body?.text ?? '').trim();
-    if (!text) return reply.code(400).send({ error: 'empty' });
+    const file = req.body?.file;
+    if (!text && !file?.dataBase64) return reply.code(400).send({ error: 'empty' });
     if (text.length > 4000) return reply.code(413).send({ error: 'too_long' });
 
     if (!rateOk(visitorId)) return reply.code(429).send({ error: 'too_fast' });
@@ -304,6 +408,34 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
     // нельзя, а дедупликация на нём и держится.
     const clientId = `wc_${visitorId.slice(0, 8)}_${Date.now()}_${randomBytes(3).toString('hex')}`;
 
+    const attachments: Attachment[] = [];
+    if (file?.dataBase64) {
+      const body = Buffer.from(String(file.dataBase64), 'base64');
+      if (!body.length) return reply.code(400).send({ error: 'bad_file' });
+      if (body.length > WEBCHAT_FILE_LIMIT) return reply.code(413).send({ error: 'file_too_big' });
+
+      const mime = String(file.mime ?? '').slice(0, 120) || 'application/octet-stream';
+      const kind = webchatFileKind(mime);
+      const key = `webchat/${row.tenant_id}/${clientId}/0`;
+      try {
+        await storage.put(key, body, mime);
+      } catch (err) {
+        log('warn', 'Не удалось сохранить файл из чата на сайте', { error: String(err) });
+        return reply.code(503).send({ error: 'storage_failed' });
+      }
+
+      attachments.push({
+        // В нашей модели вложений нет «чего угодно»: всё, что не
+        // картинка, звук или видео, для остальных каналов документ.
+        type: kind === 'file' ? 'document' : kind,
+        mime,
+        size: body.length,
+        filename: safeFileName(String(file.name ?? '')),
+        storageKey: key,
+        ready: true,
+      });
+    }
+
     const message = normalizeWebchat(
       {
         visitorId,
@@ -311,6 +443,7 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
         clientId,
         name: String(req.body?.name ?? '').slice(0, 80) || null,
         page: String(req.body?.page ?? '').slice(0, 300) || null,
+        ...(attachments.length ? { attachments } : {}),
       },
       { tenantId: row.tenant_id, channelId: row.channel_id },
     );
@@ -605,6 +738,27 @@ export function chatPage(
   button.send{border:0;background:var(--brand);color:#fff;border-radius:12px;padding:0 16px;
     font-weight:600;cursor:pointer;font-size:14px}
   .hint{padding:10px 16px;font-size:12px;color:#7a8299;background:#f5f7fb}
+  /* Скрепка и смайлик: обе кнопки — иконки без рамки, чтобы поле ввода
+     оставалось главным, а не тонуло между тремя кнопками. */
+  button.tool{border:0;background:transparent;color:#7a8299;cursor:pointer;font-size:19px;
+    line-height:1;padding:0 6px;align-self:flex-end;height:44px;flex:none}
+  button.tool:hover{color:var(--brand)}
+  /* Картинку показываем целиком: фотография товара, обрезанная до
+     квадрата, отвечает не на тот вопрос, который задавали. */
+  .m img.pic{display:block;max-width:100%;border-radius:10px;margin:2px 0}
+  .m a.file{display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none;
+    padding:7px 9px;border-radius:10px;background:rgba(11,16,34,.06);margin:2px 0}
+  .m.mine a.file{background:rgba(255,255,255,.18)}
+  .m a.file b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .m a.file span{opacity:.7;font-size:12px;flex:none}
+  #emo{display:none;position:absolute;bottom:64px;left:8px;right:8px;background:#fff;
+    border:1px solid #e6e9f2;border-radius:14px;padding:8px;box-shadow:0 12px 30px rgba(11,16,34,.18);
+    max-height:190px;overflow-y:auto;z-index:5}
+  #emo button{border:0;background:transparent;font-size:21px;line-height:1.6;cursor:pointer;
+    width:12.5%;padding:0}
+  #emo button:hover{background:#f0f3fa;border-radius:8px}
+  #bottom{position:relative;flex:none}
+  .warn{padding:8px 16px;font-size:12.5px;color:#b42318;background:#fff4f3}
 </style>
 </head>
 <body>
@@ -620,10 +774,17 @@ export function chatPage(
     ${inline || preview ? '' : '<button id="x" aria-label="Закрити">&times;</button>'}
   </header>
   <div id="log"></div>
-  <form id="f">
-    <textarea id="t" rows="1" placeholder="Напишіть повідомлення" maxlength="4000"></textarea>
-    <button class="send" type="submit">&#10148;</button>
-  </form>
+  <div id="bottom">
+    <div id="emo"></div>
+    <div class="warn" id="warn" style="display:none"></div>
+    <form id="f">
+      <button class="tool" type="button" id="clip" aria-label="Файл">&#128206;</button>
+      <button class="tool" type="button" id="smile" aria-label="Емодзі">&#128578;</button>
+      <input type="file" id="fileIn" style="display:none">
+      <textarea id="t" rows="1" placeholder="Напишіть повідомлення" maxlength="4000"></textarea>
+      <button class="send" type="submit">&#10148;</button>
+    </form>
+  </div>
 </div>
 <script>
 (function(){
@@ -633,6 +794,14 @@ export function chatPage(
   var log = document.getElementById('log');
   var form = document.getElementById('f');
   var input = document.getElementById('t');
+  var fileIn = document.getElementById('fileIn');
+  var MAX = ${WEBCHAT_FILE_LIMIT};
+  var MAXMB = Math.round(MAX / 1024 / 1024);
+  /* Разделитель для отметки «своё, уже показано»: у сообщения с файлом
+     текста нет, и сравнивать по тексту стало нечего. */
+  var SEP = '|#|';
+  /* Заглушки своих файлов: ждут, пока сервер вернёт сообщение с номером. */
+  var holders = {};
   var visitorId = null, after = null, unread = 0, timer = null;
   /* Свои сообщения показываем сразу, не дожидаясь сервера, — а потом они
      возвращаются при опросе. Чтобы не нарисовать их дважды, держим
@@ -662,10 +831,59 @@ export function chatPage(
     try { localStorage.setItem(STORE, v) } catch(e){}
   }
 
-  function bubble(text, mine, at){
+  function human(n){
+    if (!n) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function mediaUrl(msgId, i, download){
+    return '/chat/' + encodeURIComponent(KEY) + '/media/' + encodeURIComponent(msgId) +
+      '/' + i + '?visitorId=' + visitorId + (download ? '&download=1' : '');
+  }
+
+  /* Файлы рисуются узлами, а не разметкой строкой: имя файла придумал
+     посторонний, и единственный способ не разбирать потом, что он туда
+     вписал, — не собирать из него HTML вообще. */
+  function fileNode(f, msgId){
+    if (f.kind === 'image' && msgId){
+      var a = document.createElement('a');
+      a.href = mediaUrl(msgId, f.i, false);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      var img = document.createElement('img');
+      img.className = 'pic';
+      img.src = a.href;
+      img.alt = f.name || '';
+      a.appendChild(img);
+      return a;
+    }
+    var link = document.createElement(msgId ? 'a' : 'div');
+    link.className = 'file';
+    if (msgId){
+      link.href = mediaUrl(msgId, f.i, true);
+      link.target = '_blank';
+      link.rel = 'noopener';
+    }
+    var name = document.createElement('b');
+    name.textContent = f.name || 'file';
+    var size = document.createElement('span');
+    size.textContent = human(f.size);
+    /* Именно fromCodePoint: у скрепки номер больше 65535, и fromCharCode
+       отдаёт половину пары — в окне это пустой квадрат. */
+    link.appendChild(document.createTextNode(String.fromCodePoint(128206) + ' '));
+    link.appendChild(name);
+    link.appendChild(size);
+    return link;
+  }
+
+  function bubble(text, mine, at, files, msgId){
     var d = document.createElement('div');
     d.className = 'm ' + (mine ? 'mine' : 'them');
-    d.textContent = text;
+    if (text) d.textContent = text;
+    var list = files || [];
+    for (var i = 0; i < list.length; i++) d.appendChild(fileNode(list[i], msgId));
     if (at){
       var t = document.createElement('div');
       t.className = 't';
@@ -674,6 +892,7 @@ export function chatPage(
     }
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
+    return d;
   }
 
   function greet(){
@@ -695,11 +914,24 @@ export function chatPage(
         if (m.id) shown[m.id] = 1;
 
         if (m.mine){
-          var seen = pending.indexOf(m.text);
-          if (seen >= 0){ pending.splice(seen, 1); continue }
+          var files = m.files || [];
+          if (files.length){
+            /* Свой файл показан заглушкой без ссылки: номера сообщения
+               тогда ещё не было, а без него картинку не загрузить.
+               Теперь номер есть — заглушку убираем и рисуем настоящее,
+               уже с картинкой. */
+            var h = holders[SEP + files[0].name];
+            if (h){
+              if (h.parentNode) h.parentNode.removeChild(h);
+              delete holders[SEP + files[0].name];
+            }
+          } else {
+            var seen = pending.indexOf(m.text);
+            if (seen >= 0){ pending.splice(seen, 1); continue }
+          }
         }
 
-        bubble(m.text, m.mine, m.at);
+        bubble(m.text, m.mine, m.at, m.files, m.id);
         if (!m.mine){ unread++; parentSay({ rz:'unread', n:unread }) }
       }
     }).catch(function(){});
@@ -721,6 +953,30 @@ export function chatPage(
     });
   }
 
+  function warn(msg){
+    var w = document.getElementById('warn');
+    w.textContent = msg;
+    w.style.display = msg ? 'block' : 'none';
+    if (msg) setTimeout(function(){ w.style.display = 'none' }, 6000);
+  }
+
+  function send(text, file){
+    var body = { visitorId: visitorId, text: text, page: document.referrer || '' };
+    if (file) body.file = file;
+
+    fetch('/chat/' + encodeURIComponent(KEY) + '/messages', {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (r.status === 413) return warn('Файл завеликий: до ' + MAXMB + ' МБ');
+      if (!r.ok) return warn('Повідомлення не надіслалося. Спробуйте ще раз.');
+      setTimeout(poll, 700);
+    }).catch(function(){
+      warn('Немає звязку. Спробуйте ще раз.');
+    });
+  }
+
   form.onsubmit = function(e){
     e.preventDefault();
     var text = input.value.trim();
@@ -729,18 +985,80 @@ export function chatPage(
     input.style.height = 'auto';
     bubble(text, true, new Date().toISOString());
     pending.push(text);
-
-    fetch('/chat/' + encodeURIComponent(KEY) + '/messages', {
-      method:'POST',
-      headers:{ 'content-type':'application/json' },
-      body: JSON.stringify({ visitorId: visitorId, text: text, page: document.referrer || '' })
-    }).then(function(r){
-      if (!r.ok) bubble('Повідомлення не надіслалося. Спробуйте ще раз.', false, null);
-      setTimeout(poll, 700);
-    }).catch(function(){
-      bubble('Немає звязку. Спробуйте ще раз.', false, null);
-    });
+    send(text, null);
   };
+
+  /* Файл уходит отдельным сообщением, без подписи. Так проще и честнее:
+     поле ввода остаётся полем ввода, а не превращается в форму с
+     прикреплением, где половина людей забывает нажать «отправить». */
+  document.getElementById('clip').onclick = function(){ fileIn.click() };
+
+  fileIn.onchange = function(){
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f || !visitorId) return;
+    if (f.size > MAX){ warn('Файл завеликий: до ' + MAXMB + ' МБ'); return }
+
+    var reader = new FileReader();
+    reader.onload = function(){
+      var raw = String(reader.result);
+      var comma = raw.indexOf(',');
+      if (comma < 0){ warn('Не вдалося прочитати файл'); return }
+
+      var mine = { i:0, name:f.name, size:f.size, kind:kindOf(f.type) };
+      holders[SEP + f.name] = bubble('', true, new Date().toISOString(), [mine], null);
+
+      send('', { name: f.name, mime: f.type || '', dataBase64: raw.slice(comma + 1) });
+    };
+    reader.onerror = function(){ warn('Не вдалося прочитати файл') };
+    reader.readAsDataURL(f);
+  };
+
+  function kindOf(mime){
+    var m = (mime || '').toLowerCase();
+    if (m.indexOf('image/') === 0) return 'image';
+    if (m.indexOf('audio/') === 0) return 'audio';
+    if (m.indexOf('video/') === 0) return 'video';
+    return 'file';
+  }
+
+  /* Смайлики набором, а не библиотекой: чужой набор — это ещё сотня
+     килобайт на каждой странице клиента ради того, чем пользуются
+     полторы минуты в день. */
+  var EMOJI = ('128512 128513 128514 129315 128516 128521 128522 128525 128536 128539 ' +
+    '128578 128579 129300 129303 128530 128527 128526 128533 128543 128546 ' +
+    '128557 128561 128563 128565 128548 128545 128544 128169 128064 128075 ' +
+    '128077 128078 128079 128588 128591 128170 128147 10084 128142 10024 ' +
+    '128293 127881 127880 127942 128176 128666 9989 10060 9888 128272 ' +
+    '128241 128231 128197 128340 128204 128200 128717 127873 128230 128737').split(' ');
+
+  var emo = document.getElementById('emo');
+  for (var ei = 0; ei < EMOJI.length; ei++){
+    (function(code){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = String.fromCodePoint(Number(code));
+      b.onclick = function(){
+        var at = input.selectionStart;
+        var v = input.value;
+        input.value = v.slice(0, at) + b.textContent + v.slice(input.selectionEnd);
+        input.focus();
+        input.selectionStart = input.selectionEnd = at + b.textContent.length;
+      };
+      emo.appendChild(b);
+    })(EMOJI[ei]);
+  }
+
+  document.getElementById('smile').onclick = function(){
+    emo.style.display = emo.style.display === 'block' ? 'none' : 'block';
+  };
+  /* Панель закрывается по щелчку мимо: на телефоне она занимает треть
+     окна, и искать вторую кнопку, чтобы её убрать, никто не станет. */
+  document.addEventListener('click', function(e){
+    if (e.target.closest && !e.target.closest('#emo') && e.target.id !== 'smile'){
+      emo.style.display = 'none';
+    }
+  });
 
   input.addEventListener('input', function(){
     input.style.height = 'auto';
