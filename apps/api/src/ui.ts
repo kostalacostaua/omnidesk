@@ -41,7 +41,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
      На экран Домой» после этого открывает инбокс без адресной строки. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- default, а не black-translucent: при translucent приложение
+     занимает и полосу статуса, и логотип уезжает под «остров». -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Rozmovio">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
@@ -630,7 +632,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
        нижний край, и высота, выставленная под клавиатуру, ничего не
        меняет — поле просто оказывается за пределами экрана. */
     #app{position:fixed;top:0;left:0;width:100%;
-      grid-template-rows:minmax(0,1fr);overflow:hidden}
+      grid-template-rows:minmax(0,1fr);overflow:hidden;
+      /* Безопасные зоны телефона: сверху полоса статуса и «остров»,
+         снизу — черта жеста. В браузере они нулевые, в приложении на
+         домашнем экране — нет, и без этого отступа логотип оказывался
+         под «островом». */
+      padding-top:env(safe-area-inset-top);box-sizing:border-box}
+    #rail{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+    #convs,#page,#bots{padding-bottom:env(safe-area-inset-bottom)}
     /* Вход — исключение: с открытой клавиатурой форма выше экрана,
        и закреплённая страница спрятала бы поле ввода кода. */
     #gate{height:100dvh;overflow-y:auto;align-items:flex-start;padding-top:8vh}
@@ -1128,6 +1137,17 @@ function fitHeight(){
 
   // На широком экране высотой распоряжается вёрстка: снимаем свою.
   if (window.innerWidth > 820){
+    app.style.height = '';
+    app.style.transform = '';
+    return;
+  }
+
+  // Высоту перехватываем ТОЛЬКО пока открыта клавиатура. В остальное
+  // время ею распоряжается вёрстка (100dvh): в приложении на домашнем
+  // экране visualViewport не считает нижнюю безопасную зону, и снизу
+  // оставалась пустая полоса высотой с эту зону.
+  var keyboard = vv.height < window.innerHeight - 120;
+  if (!keyboard){
     app.style.height = '';
     app.style.transform = '';
     return;
