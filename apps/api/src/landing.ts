@@ -30,6 +30,16 @@ const ICON_TG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const ICON_IG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="5.5"/><circle cx="12" cy="12" r="4.2"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/></svg>`;
 const ICON_MS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5c-5.3 0-9.5 3.9-9.5 8.8 0 2.8 1.4 5.2 3.6 6.8V22l3.2-1.8c.9.2 1.8.4 2.7.4 5.3 0 9.5-3.9 9.5-8.8S17.3 2.5 12 2.5z"/><path d="M6.6 14.4l3.2-4.8 2.6 2.2 2.4-2.9 2.6 4"/></svg>`;
 const ICON_PH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><path d="M10.5 18.7h3"/></svg>`;
+/**
+ * У Messenger, WhatsApp и Viber была одна иконка на троих: в списке из
+ * восьми каналов это читается как «три одинаковых», и взгляд по ним
+ * скользит мимо. Поэтому у каждого своя форма.
+ */
+const ICON_WA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.8a9.2 9.2 0 0 0-7.9 13.9L3 21.2l4.7-1.1A9.2 9.2 0 1 0 12 2.8z"/><path d="M9 8.4c.3-.1.6 0 .8.3l.8 1.3c.1.3.1.6-.1.8l-.5.6c.6 1.1 1.5 2 2.6 2.6l.6-.5c.2-.2.5-.2.8-.1l1.3.8c.3.2.4.5.3.8-.3.8-1.1 1.3-1.9 1.2-2.9-.3-5.4-2.8-5.7-5.7-.1-.8.3-1.6 1-1.9z"/></svg>`;
+const ICON_VB = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6c-4.8 0-8.6 3.3-8.6 7.9 0 2.6 1.2 4.8 3.2 6.3v3.9l3.1-2.1c.7.1 1.5.2 2.3.2 4.8 0 8.6-3.3 8.6-7.9S16.8 2.6 12 2.6z"/><path d="M9.3 7.6c.9-.2 1.4 1.3 1.6 2 .1.4-.2.7-.5.9 .4 1 1.1 1.8 2.1 2.3 .2-.3.5-.6.9-.5.7.2 2.2.7 2 1.6-.2.9-1.2 1.4-2 1.3-2.5-.3-4.7-2.5-5.1-5-.1-.8.2-1.5 1-1.6z"/></svg>`;
+
+/** Чат на сайте: окно браузера с пузырём — по нему канал узнают. */
+const ICON_WC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="14" rx="2.5"/><path d="M2.5 7.5h19"/><path d="M8 11h8M8 14h5"/></svg>`;
 const ICON_ZH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h10M4 12h16M4 16.5h10"/><circle cx="18.5" cy="7.5" r="2"/><circle cx="18.5" cy="16.5" r="2"/></svg>`;
 
 /** Разметка одной карточки канала. */
@@ -342,6 +352,7 @@ export const LANDING_HTML = `<!DOCTYPE html>
         <div>${ICON_PH}<span data-t="strip.ph"></span></div>
         <div>${ICON_IG}<span data-t="strip.ig"></span></div>
         <div>${ICON_MS}<span data-t="strip.ms"></span></div>
+        <div>${ICON_WC}<span data-t="strip.wc"></span></div>
       </div>
     </div>
 
@@ -373,13 +384,14 @@ export const LANDING_HTML = `<!DOCTYPE html>
       <p class="lead" data-t="ch.lead"></p>
     </div>
     <div class="grid g2 rise">
+      ${chCard(ICON_WC, 'ch.wc')}
       ${chCard(ICON_TG, 'ch.tgbot')}
       ${chCard(ICON_PH, 'ch.tgph')}
       ${chCard(ICON_IG, 'ch.ig')}
       ${chCard(ICON_MS, 'ch.ms')}
-      ${chCard(ICON_MS, 'ch.wa')}
-      ${chCard(ICON_MS, 'ch.vb')}
-      ${chCard(ICON_MS, 'ch.vbn', true)}
+      ${chCard(ICON_WA, 'ch.wa')}
+      ${chCard(ICON_VB, 'ch.vb')}
+      ${chCard(ICON_VB, 'ch.vbn', true)}
     </div>
   </div>
 </section>
@@ -546,10 +558,11 @@ var T = {
     'hero.mail':'Ваша робоча пошта','hero.go':'Спробувати 14 днів',
     'hero.note':'Без картки. Перший канал підключається за 10 хвилин.',
     'strip.tg':'Telegram-бот','strip.ph':'Telegram за номером',
-    'strip.ig':'Instagram Direct','strip.ms':'Messenger',
+    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Чат на сайті',
     'shot.m1':'Добрий день! Ще є в наявності?','shot.m2':'Так, є. Відкладу на вас до вечора',
     'shot.m3':'Дякую, буду за годину',
-    'ch.h':'Канали, які вже працюють','ch.lead':'Кожен канал підключається у налаштуваннях: бот — токеном, номер — входом по QR, Instagram і Messenger — входом через Facebook.',
+    'ch.h':'Канали, які вже працюють','ch.lead':'Кожен канал підключається у налаштуваннях: чат на сайті — рядком коду, бот — токеном, номер — входом по QR, Instagram і Messenger — входом через Facebook.',
+    'ch.wc.t':'Чат на сайті','ch.wc.s':'Один рядок коду — і кнопка чату на ваших сторінках. Переписка одразу в скриньці.',
     'ch.tgbot.t':'Telegram-бот','ch.tgbot.s':'Клієнти пишуть боту компанії. Фото, файли, голосові, реакції.',
     'ch.tgph.t':'Telegram за номером','ch.tgph.s':'Ваш особистий номер як канал: вхід по QR, переписки приходять у скриньку.',
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Повідомлення бізнес-акаунту, відповіді з імені акаунта, історії та реакції.',
@@ -601,10 +614,11 @@ var T = {
     'hero.mail':'Your work email','hero.go':'Start 14-day trial',
     'hero.note':'No card required. First channel connects in 10 minutes.',
     'strip.tg':'Telegram bot','strip.ph':'Telegram by number',
-    'strip.ig':'Instagram Direct','strip.ms':'Messenger',
+    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Website chat',
     'shot.m1':'Hi! Is it still in stock?','shot.m2':'Yes, it is. I will hold it for you till tonight',
     'shot.m3':'Thanks, I will be there in an hour',
-    'ch.h':'Channels that already work','ch.lead':'Each channel is connected in settings: a bot by token, a phone number by QR sign-in, Instagram and Messenger by Facebook login.',
+    'ch.h':'Channels that already work','ch.lead':'Each channel is connected in settings: website chat by a line of code, a bot by token, a phone number by QR sign-in, Instagram and Messenger by Facebook login.',
+    'ch.wc.t':'Website chat','ch.wc.s':'One line of code puts a chat button on your pages. Messages land in the same inbox.',
     'ch.tgbot.t':'Telegram bot','ch.tgbot.s':'Customers write to your company bot. Photos, files, voice notes, reactions.',
     'ch.tgph.t':'Telegram by number','ch.tgph.s':'Your personal number as a channel: QR sign-in, chats land in the inbox.',
     'ch.ig.t':'Instagram Direct','ch.ig.s':'Messages to the business account, replies as the account, story replies and reactions.',
