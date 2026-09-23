@@ -1865,8 +1865,82 @@ async function handleReaction(job: OutboundJob): Promise<void> {
  * · ЛИМИТЫ. Telegram отвечает 429 с полем retry_after. Игнорировать его —
  *   верный способ получить временную блокировку бота.
  */
+/**
+ * Отметить диалог прочитанным у провайдера.
+ *
+ * Это не косметика. Оператор ответил из Rozmovio, а в телефоне
+ * владельца тот же чат висит непрочитанным — и он открывает его второй
+ * раз, чтобы увидеть, что там уже всё отвечено. У каждого провайдера
+ * свой способ: Telegram читает историю до сообщения, Meta помечает
+ * беседу просмотренной, WhatsApp — конкретное сообщение.
+ */
+async function handleRead(job: OutboundJob): Promise<void> {
+  const row = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<{
+      channel_type: string;
+      credentials_enc: Buffer;
+      peer_id: string | null;
+    }>(
+      `SELECT ch.type AS channel_type, ch.credentials_enc, ci.external_id AS peer_id
+         FROM conversations c
+         JOIN channels ch ON ch.id = c.channel_id
+         LEFT JOIN contact_identities ci
+                ON ci.contact_id = c.contact_id AND ci.channel_type = ch.type
+        WHERE c.id = $1 LIMIT 1`,
+      [job.conversationId],
+    );
+    return rows[0] ?? null;
+  });
+  if (!row || !row.peer_id) return;
+
+  // Номерной Telegram: читать историю умеет только тот, у кого открыта
+  // сессия аккаунта. Передаём сервису sessions.
+  if (row.channel_type === 'telegram_user') {
+    await mtprotoOutQueue.add('read', job, { jobId: jobKey('mtpread', job.messageId) });
+    return;
+  }
+
+  if (row.channel_type === 'messenger' || row.channel_type === 'instagram') {
+    const creds = await metaCredentials(job.tenantId, job.channelId);
+    if (!creds) return;
+    try {
+      await graphPost('me/messages', { access_token: creds.pageToken }, {
+        recipient: { id: row.peer_id },
+        sender_action: 'mark_seen',
+      });
+    } catch (err) {
+      // Отметка о прочтении — не сообщение клиенту: если Meta отказала,
+      // переписка от этого не страдает. Шумим в лог и уходим.
+      log('warn', 'Meta не приняла отметку о прочтении', {
+        conversationId: job.conversationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+
+  if (row.channel_type === 'whatsapp') {
+    const creds = await metaCredentials(job.tenantId, job.channelId);
+    const externalId = job.readUpTo?.externalId;
+    if (!creds || !externalId) return;
+    try {
+      await graphPost(`${creds.pageId}/messages`, { access_token: creds.pageToken }, {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: externalId,
+      });
+    } catch (err) {
+      log('warn', 'WhatsApp не принял отметку о прочтении', {
+        conversationId: job.conversationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
   if (job.kind === 'reaction') return handleReaction(job);
+  if (job.kind === 'read') return handleRead(job);
 
   const row = await withTenant(pool, job.tenantId, async (db) => {
     const { rows } = await db.query<OutboundRow>(
@@ -2329,8 +2403,10 @@ outboundWorker.on('failed', (job, err) => {
   // Иначе оно навсегда остаётся «отправляется»: оператор видит, что ответ
   // как будто уходит, клиент не получает ничего, и никто не понимает,
   // что произошло. Молчаливое зависание хуже честной ошибки.
+  // Отметка о прочтении сообщением не является: помечать ею чужое
+  // входящее как «не доставлено» — вранье в ленте.
   const attempts = job?.opts?.attempts ?? 0;
-  if (job && attempts > 0 && (job.attemptsMade ?? 0) >= attempts) {
+  if (job && job.data.kind !== 'read' && attempts > 0 && (job.attemptsMade ?? 0) >= attempts) {
     void markFailed(job.data, { reason: 'attempts_exhausted', lastError: err.message })
       .then(() =>
         log('warn', 'Сообщение помечено как недоставленное', {

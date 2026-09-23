@@ -427,6 +427,7 @@ async function handleSend(job: OutboundJob, worker: Worker): Promise<void> {
   if (!l) throw new Error('Сессия канала не запущена');
 
   if (job.kind === 'reaction') return handleReaction(l, job);
+  if (job.kind === 'read') return handleRead(l, job);
 
   const row = await withTenant(pool, job.tenantId, async (db) => {
     const { rows } = await db.query<OutRow>(
@@ -510,6 +511,45 @@ async function handleSend(job: OutboundJob, worker: Worker): Promise<void> {
       throw new UnrecoverableError('Сессия отозвана — подключите номер заново');
     }
     throw err;
+  }
+}
+
+/**
+ * Отметить переписку прочитанной в самом Telegram.
+ *
+ * Оператор ответил из Rozmovio, а в телефоне владельца тот же чат висит
+ * непрочитанным: аккаунт-то один, но приложение об ответе не знает.
+ * Человек открывает чат второй раз — увидеть, что там уже всё отвечено.
+ *
+ * Идентификатор входящего у нас составной, «кому:номер», и номер
+ * сообщения здесь — граница: Telegram читает историю ДО неё
+ * включительно.
+ */
+async function handleRead(l: Live, job: OutboundJob): Promise<void> {
+  const external = job.readUpTo?.externalId;
+  if (!external) return;
+  const [peerId, msgIdRaw] = external.split(':');
+  const maxId = Number(msgIdRaw);
+  if (!peerId || !Number.isFinite(maxId)) return;
+
+  const hash = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<{ raw_profile: { accessHash?: string } | null }>(
+      `SELECT raw_profile FROM contact_identities
+        WHERE channel_type = 'telegram_user' AND external_id = $1 LIMIT 1`,
+      [peerId],
+    );
+    return rows[0]?.raw_profile?.accessHash;
+  });
+
+  try {
+    await l.client.invoke(
+      new Api.messages.ReadHistory({ peer: await resolvePeer(l, peerId, hash), maxId }),
+    );
+  } catch (err) {
+    // Отметка о прочтении — не сообщение клиенту. Не доехала, значит
+    // чат останется подсвеченным; ломать из-за этого очередь незачем.
+    const text = errText(err);
+    log('warn', 'Не удалось отметить прочитанным', { peerId, error: text });
   }
 }
 
@@ -705,7 +745,8 @@ sendWorker.on('failed', async (job, err) => {
   log('error', 'Отправка не удалась', { messageId: job?.data?.messageId, error: err.message });
   // Последняя попытка исчерпана, а сообщение всё ещё «отправляется» —
   // помечаем, чтобы оператор увидел ошибку, а не вечные часики.
-  if (job && job.attemptsMade >= (job.opts.attempts ?? 1) && job.data.kind !== 'reaction') {
+  if (job && job.attemptsMade >= (job.opts.attempts ?? 1)
+      && job.data.kind !== 'reaction' && job.data.kind !== 'read') {
     await withTenant(pool, job.data.tenantId, async (db) => {
       await db.query(
         `UPDATE messages SET status = 'failed', failure = $2 WHERE id = $1 AND status = 'pending'`,

@@ -240,7 +240,61 @@ app.addHook('preHandler', async (req, reply) => {
 
 // ─────────────────────────────────────────────────────────────────────────
 
-registerInbox(app, { pool, requireAuth: (req) => requireAuth(req as never) });
+/**
+ * Отметка «прочитано» у провайдера.
+ *
+ * Ищем последнее входящее с идентификатором провайдера и ставим задачу
+ * тому же конвейеру, что и отправку: доступ к каналу есть только у него.
+ * Каналы, где отметки нет (бот Telegram, Viber через партнёра),
+ * отсеиваются здесь же — задача ради ничего никому не нужна.
+ */
+const READ_RECEIPT_CHANNELS = ['telegram_user', 'instagram', 'messenger', 'whatsapp'];
+
+function markReadUpstream(task: { tenantId: string; conversationId: string }): void {
+  void (async () => {
+    const row = await withTenant(pool, task.tenantId, async (db) => {
+      const { rows } = await db.query<{
+        message_id: string;
+        channel_id: string;
+        external_id: string;
+        channel_type: string;
+      }>(
+        `SELECT m.id AS message_id, m.channel_id, m.external_id, ch.type AS channel_type
+           FROM messages m
+           JOIN channels ch ON ch.id = m.channel_id
+          WHERE m.conversation_id = $1 AND m.direction = 'in' AND m.external_id IS NOT NULL
+          ORDER BY m.sent_at DESC LIMIT 1`,
+        [task.conversationId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row || !READ_RECEIPT_CHANNELS.includes(row.channel_type)) return;
+
+    await outboundQueue.add(
+      'read',
+      {
+        tenantId: task.tenantId,
+        channelId: row.channel_id,
+        conversationId: task.conversationId,
+        messageId: row.message_id,
+        kind: 'read',
+        readUpTo: { externalId: row.external_id },
+        idempotencyKey: `read:${row.message_id}`,
+      },
+      // Один ключ на сообщение: открыли диалог десять раз — отметка
+      // уедет один раз, а не десять.
+      { jobId: jobKey('read', row.message_id), attempts: 2 },
+    );
+  })().catch((err: unknown) => {
+    app.log.warn({ err }, 'Не удалось поставить отметку о прочтении');
+  });
+}
+
+registerInbox(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+  markReadUpstream,
+});
 
 registerEmailAuth(app, {
   pool,

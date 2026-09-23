@@ -20,10 +20,21 @@ interface Auth {
 export interface InboxDeps {
   pool: Pool;
   requireAuth: (req: unknown) => Auth | null;
+  /**
+   * Сообщить провайдеру, что диалог прочитан.
+   *
+   * Оператор ответил в Rozmovio, а в телефоне владельца чат всё ещё
+   * подсвечен непрочитанным: провайдер об этом не знает. Отметку ставит
+   * тот, у кого есть доступ к каналу, — очередь исходящих.
+   */
+  markReadUpstream?: (task: {
+    tenantId: string;
+    conversationId: string;
+  }) => void;
 }
 
 export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
-  const { pool, requireAuth } = deps;
+  const { pool, requireAuth, markReadUpstream } = deps;
   const auth401 = { error: 'unauthorized' } as const;
 
   // ── Список диалогов ───────────────────────────────────────────────
@@ -187,6 +198,13 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     });
 
     if (!updated) return reply.code(404).send({ error: 'not_found' });
+
+    // Прочитано у нас — значит прочитано и там. Иначе владелец видит в
+    // своём телефоне непрочитанный чат, на который уже ответили.
+    if (b.read === true) {
+      markReadUpstream?.({ tenantId: auth.tenantId, conversationId: req.params.id });
+    }
+
     return { ok: true };
   });
 
