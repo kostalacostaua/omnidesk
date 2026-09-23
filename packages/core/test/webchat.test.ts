@@ -31,7 +31,26 @@ describe('настройки', () => {
     const s = webchatSettings({ title: 'Магазин', script: '<script>', domains: ['Example.com/'] });
     expect(s.title).toBe('Магазин');
     expect(s.domains).toEqual(['example.com']);
-    expect(Object.keys(s).sort()).toEqual(['color', 'domains', 'greeting', 'title']);
+    expect(Object.keys(s).sort()).toEqual([
+      'color', 'domains', 'greeting', 'logo', 'position', 'subtitle', 'title',
+    ]);
+  });
+
+  it('логотип принимается только картинкой: страницу видит посторонний', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(webchatSettings({ logo: png }).logo).toBe(png);
+    expect(webchatSettings({ logo: 'https://evil.test/track.gif' }).logo).toBe('');
+    expect(webchatSettings({ logo: 'data:text/html;base64,PHNjcmlwdD4=' }).logo).toBe('');
+  });
+
+  it('слишком тяжёлый логотип не попадает в страницу', () => {
+    const huge = 'data:image/png;base64,' + 'A'.repeat(300 * 1024);
+    expect(webchatSettings({ logo: huge }).logo).toBe('');
+  });
+
+  it('сторона кнопки — только левая или правая', () => {
+    expect(webchatSettings({ position: 'left' }).position).toBe('left');
+    expect(webchatSettings({ position: 'посередине' }).position).toBe('right');
   });
 
   it('домен приводится к виду, в котором его можно сравнивать', () => {

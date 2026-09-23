@@ -35,6 +35,8 @@ import {
   withTenant,
   answerMatches,
   pickScenario,
+  parseRouting,
+  pickAssignee,
   VIBER_CHANNEL,
   ViberError,
   waKind,
@@ -1545,8 +1547,79 @@ async function announceChannelDown(
  * и собраны здесь, чтобы пятый канал не появился без оповещений.
  */
 async function onInbound(msg: UnifiedMessage, conversationId: string): Promise<number> {
+  await assignConversation(msg, conversationId);
   await announceNew(msg, conversationId);
   return runBot(msg, conversationId);
+}
+
+/**
+ * Раздать новый диалог.
+ *
+ * Пока ответственного нет, диалог ничей: каждый оператор думает, что его
+ * возьмёт другой, и дольше всех ждёт клиент. Круг идёт по тем, кому
+ * канал виден, — назначить на человека, который канал не видит, значит
+ * спрятать от него же его работу.
+ *
+ * Пустой список доступа означает «канал виден всем»: так устроен ACL, и
+ * здесь это правило повторяется, а не изобретается заново.
+ */
+async function assignConversation(msg: UnifiedMessage, conversationId: string): Promise<void> {
+  try {
+    const assigned = await withTenant(pool, msg.tenantId, async (db) => {
+      const { rows: ch } = await db.query<{ routing: unknown }>(
+        `SELECT routing FROM channels WHERE id = $1`,
+        [msg.channelId],
+      );
+      const routing = parseRouting(ch[0]?.routing);
+      if (routing.mode === 'none') return null;
+
+      // Уже взятый диалог не перераспределяем: человек мог взять его
+      // руками за секунду до нас.
+      const { rows: conv } = await db.query<{ assignee_id: string | null }>(
+        `SELECT assignee_id FROM conversations WHERE id = $1`,
+        [conversationId],
+      );
+      if (!conv[0] || conv[0].assignee_id) return null;
+
+      const { rows: people } = await db.query<{ id: string }>(
+        `SELECT u.id FROM users u
+          WHERE u.is_active
+            AND u.role <> 'viewer'
+            AND (
+              NOT EXISTS (SELECT 1 FROM user_channels uc WHERE uc.user_id = u.id)
+              OR EXISTS (SELECT 1 FROM user_channels uc
+                          WHERE uc.user_id = u.id AND uc.channel_id = $1)
+            )
+          ORDER BY lower(coalesce(u.full_name, u.email)), u.id`,
+        [msg.channelId],
+      );
+      const candidates = people.map((p) => p.id);
+
+      const next = pickAssignee(routing, candidates);
+      if (!next) return null;
+
+      await db.query(`UPDATE conversations SET assignee_id = $2 WHERE id = $1`, [
+        conversationId,
+        next,
+      ]);
+      await db.query(
+        `UPDATE channels SET routing = routing || jsonb_build_object('lastUserId', $2::text)
+          WHERE id = $1`,
+        [msg.channelId, next],
+      );
+      return next;
+    });
+
+    if (assigned) {
+      log('info', 'Диалог назначен', { conversationId, userId: assigned });
+    }
+  } catch (err) {
+    // Не назначили — диалог остаётся общим. Это хуже, чем назначенный,
+    // но несравнимо лучше, чем потерянное сообщение.
+    log('warn', 'Не удалось назначить диалог', {
+      conversationId, error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**

@@ -597,6 +597,25 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
+  /* Настройки виджета и его превью стоят рядом: подобрать цвет, глядя
+     только на поле выбора цвета, нельзя. На узком экране превью уходит
+     вниз — иначе не останется места ни тому, ни другому. */
+  .tmlist{display:flex;flex-direction:column;gap:2px;margin-top:10px}
+  .tmrow{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;
+    cursor:pointer;font-size:13.5px}
+  .tmrow:hover{background:var(--hover)}
+  .tmrow input{width:auto;margin:0}
+  .tmrole{color:var(--t3);font-size:12px}
+  .tmnote{color:var(--t3);font-size:12px;margin-left:auto}
+  .wcedit{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+  @media(max-width:900px){.wcedit{grid-template-columns:minmax(0,1fr)}}
+  .wcprev{display:flex;flex-direction:column;gap:8px}
+  .wcphone{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel);
+    height:420px;box-shadow:var(--shadow)}
+  .wcphone iframe{width:100%;height:100%;border:0;display:block}
+  .wclogo{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .wclogo img{width:40px;height:40px;border-radius:10px;object-fit:contain;
+    background:var(--panel2);border:1px solid var(--line);padding:3px}
   .snip{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
     font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0}
   .ntevs{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 4px}
@@ -2863,9 +2882,88 @@ function tabChannels(){
    страницу. Поэтому он стоит первым и копируется одной кнопкой, а
    настройки — цвет, приветствие, домены — идут следом. */
 
+/* ── Кто работает с каналом ───────────────────────────────────────
+   Две настройки рядом намеренно: «кто видит» и «кому достаётся». По
+   отдельности они выглядят как разные разделы, а на деле это один
+   вопрос — кто ведёт этот канал. */
+
+var TEAM = { id:null, data:null };
+
+function chTeamPanel(id){
+  api('/channels/' + id + '/team').then(function(d){
+    TEAM.id = id;
+    TEAM.data = d;
+    var r = d.routing || {};
+    var people = d.users || [];
+
+    var rows = people.map(function(u){
+      return '<label class="tmrow">' +
+        '<input type="checkbox" data-usr="' + u.id + '"' +
+          (u.sees ? ' checked' : '') + (u.unrestricted ? ' disabled' : '') + '>' +
+        '<span>' + esc(u.name) + '</span>' +
+        '<span class="tmrole">' + esc(ROLES[u.role] || u.role) + '</span>' +
+        (u.unrestricted ? L('<span class="tmnote">бачить усі канали за роллю</span>') : '') +
+        '</label>';
+    }).join('');
+
+    var pick = people.filter(function(u){ return u.role !== 'viewer' }).map(function(u){
+      return '<option value="' + u.id + '"' + (r.userId === u.id ? ' selected' : '') + '>' +
+        esc(u.name) + '</option>';
+    }).join('');
+
+    el('chTeam').innerHTML =
+      L('<div class="pg-sec"><h3>Хто працює з каналом</h3><div class="tile">') +
+      L('<div class="sub" style="white-space:normal">Знята позначка ховає канал від людини: ') +
+      L('вона не бачить ні діалогів, ні повідомлень із нього.</div>') +
+      '<div class="tmlist">' + rows + '</div>' +
+
+      L('<div class="row2" style="margin-top:12px"><div class="lbl" style="width:180px">Нові діалоги</div>') +
+      '<select id="chRoute" style="max-width:280px">' +
+      '<option value="none"' + (r.mode === 'none' ? ' selected' : '') + '>' +
+        L('нікому: беруть вручну') + '</option>' +
+      '<option value="round_robin"' + (r.mode === 'round_robin' ? ' selected' : '') + '>' +
+        L('по черзі між операторами') + '</option>' +
+      '<option value="user"' + (r.mode === 'user' ? ' selected' : '') + '>' +
+        L('завжди одній людині') + '</option>' +
+      '</select></div>' +
+
+      '<div class="row2" id="chWhoRow" style="display:' + (r.mode === 'user' ? '' : 'none') + '">' +
+      L('<div class="lbl" style="width:180px">Кому саме</div>') +
+      '<select id="chWho" style="max-width:280px">' + pick + '</select></div>' +
+
+      L('<div class="hint">По черзі — між тими, кому канал видно, у порядку імен. ') +
+      L('Уже взятий діалог не перепризначається.</div>') +
+      L('<div class="acts"><button id="chTeamSave">Зберегти</button></div>') +
+      '<div class="ok" id="chTeamOk"></div></div></div>';
+
+    el('chRoute').onchange = function(){
+      el('chWhoRow').style.display = this.value === 'user' ? '' : 'none';
+    };
+
+    el('chTeamSave').onclick = function(){
+      busy(el('chTeamSave'), true);
+      var ids = [];
+      Array.prototype.forEach.call(document.querySelectorAll('[data-usr]'), function(x){
+        if (x.checked && !x.disabled) ids.push(x.dataset.usr);
+      });
+      api('/channels/' + id + '/team', { method:'PUT', body:{
+        userIds: ids,
+        routing: { mode: el('chRoute').value, userId: el('chWho') ? el('chWho').value : null }
+      }})
+        .then(function(){ el('chTeamOk').textContent = L('Збережено') })
+        .catch(function(){ el('chTeamOk').textContent = L('Не вдалося зберегти') })
+        .then(function(){ busy(el('chTeamSave'), false) });
+    };
+  }).catch(function(){});
+}
+
+
 function wcPanel(id){
   api('/channels/' + id + '/webchat').then(function(d){
-    var st = d.settings || {};
+    WC.id = id;
+    WC.key = d.siteKey;
+    WC.st = d.settings || {};
+
     el('wcBox').innerHTML =
       L('<div class="pg-sec"><h3>Код для сайту</h3><div class="tile">') +
       L('<div class="sub" style="white-space:normal">Вставте цей рядок перед закриваючим тегом ') +
@@ -2879,43 +2977,144 @@ function wcPanel(id){
       L('<div class="acts"><button class="ghost mini" id="wcCopy2">Скопіювати рамку</button></div>') +
       '<div class="ok" id="wcOk"></div></div></div>' +
 
-      L('<div class="pg-sec"><h3>Вигляд і доступ</h3><div class="tile">') +
-      L('<div class="row2"><div class="lbl" style="width:150px">Заголовок</div>') +
-      '<input id="wcTitle" value="' + esc(st.title || '') + '"></div>' +
-      L('<div class="row2"><div class="lbl" style="width:150px">Привітання</div>') +
-      '<input id="wcGreet" value="' + esc(st.greeting || '') + '"></div>' +
-      L('<div class="row2"><div class="lbl" style="width:150px">Колір</div>') +
-      '<input id="wcColor" type="color" value="' + esc(st.color || '#2F6BFF') + '" style="max-width:80px"></div>' +
-      L('<div class="row2"><div class="lbl" style="width:150px">Дозволені домени</div>') +
+      L('<div class="pg-sec"><h3>Вигляд</h3><div class="wcedit">') +
+
+      '<div class="tile">' +
+      L('<div class="row2"><div class="lbl" style="width:140px">Логотип</div>') +
+      '<div class="wclogo"><img id="wcLogoImg" alt="" style="display:' +
+        (WC.st.logo ? 'block' : 'none') + '" src="' + esc(WC.st.logo || '') + '">' +
+      L('<button class="ghost mini" id="wcLogoPick">Завантажити</button>') +
+      L('<button class="ghost mini" id="wcLogoDel">Прибрати</button>') +
+      '<input type="file" id="wcLogoFile" accept="image/*" style="display:none"></div></div>' +
+      L('<div class="hint">Квадратна картинка, ми самі зменшимо її до 128 точок.</div>') +
+
+      L('<div class="row2"><div class="lbl" style="width:140px">Заголовок</div>') +
+      '<input id="wcTitle" maxlength="60" value="' + esc(WC.st.title || '') + '"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:140px">Підпис</div>') +
+      '<input id="wcSub" maxlength="120" placeholder="' + L('Відповідаємо протягом 15 хвилин') +
+        '" value="' + esc(WC.st.subtitle || '') + '"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:140px">Привітання</div>') +
+      '<input id="wcGreet" maxlength="300" value="' + esc(WC.st.greeting || '') + '"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:140px">Колір</div>') +
+      '<input id="wcColor" type="color" value="' + esc(WC.st.color || '#2F6BFF') +
+        '" style="max-width:70px">' +
+      '<select id="wcPos" style="max-width:190px">' +
+      '<option value="right"' + (WC.st.position !== 'left' ? ' selected' : '') + '>' +
+        L('кнопка праворуч') + '</option>' +
+      '<option value="left"' + (WC.st.position === 'left' ? ' selected' : '') + '>' +
+        L('кнопка ліворуч') + '</option></select></div>' +
+      L('<div class="acts"><button id="wcSave">Зберегти</button></div>') +
+      '<div class="ok" id="wcOk2"></div></div>' +
+
+      /* Превью — не украшение: подобрать цвет и длину подписи иначе
+         можно только так — сохранить, открыть сайт, вернуться. */
+      '<div class="wcprev"><div class="wcphone"><iframe id="wcFrameView" title="preview"></iframe></div>' +
+      L('<div class="hint" style="text-align:center">Так чат побачить відвідувач</div></div>') +
+
+      '</div></div>' +
+
+      L('<div class="pg-sec"><h3>Де працює</h3><div class="tile">') +
+      L('<div class="row2"><div class="lbl" style="width:140px">Дозволені домени</div>') +
       '<input id="wcDom" placeholder="example.com, shop.example.com" value="' +
-        esc((st.domains || []).join(', ')) + '"></div>' +
+        esc((WC.st.domains || []).join(', ')) + '"></div>' +
       L('<div class="hint">Порожньо — віджет працює будь-де. Список доменів рятує від забутого ') +
       L('віджета на тестовому сайті, але це не захист: адресу сторінки повідомляє браузер.</div>') +
-      L('<div class="acts"><button id="wcSave">Зберегти</button></div>') +
-      '<div class="ok" id="wcOk2"></div></div></div>';
+      L('<div class="acts"><button id="wcSaveDom">Зберегти</button></div>') +
+      '<div class="ok" id="wcOk3"></div></div></div>';
 
     el('wcCopy').onclick = function(){ wcCopy(d.snippet, 'wcOk') };
     el('wcCopy2').onclick = function(){ wcCopy(d.iframe, 'wcOk') };
     el('wcOpen').onclick = function(){ window.open('/chat/' + d.siteKey, '_blank', 'noopener') };
 
-    el('wcSave').onclick = function(){
-      busy(el('wcSave'), true);
-      api('/channels/' + id + '/webchat', { method:'PATCH', body:{
-        title: el('wcTitle').value.trim(),
-        greeting: el('wcGreet').value.trim(),
-        color: el('wcColor').value,
-        domains: el('wcDom').value
-      }})
-        .then(function(){
-          el('wcOk2').textContent = L('Збережено');
-          return api('/channels').then(function(r){ CHANNELS = r.channels || [] });
-        })
-        .catch(function(){ el('wcOk2').textContent = L('Не вдалося зберегти') })
-        .then(function(){ busy(el('wcSave'), false) });
+    el('wcLogoPick').onclick = function(){ el('wcLogoFile').click() };
+    el('wcLogoFile').onchange = function(){ wcLogoLoad(this.files && this.files[0]) };
+    el('wcLogoDel').onclick = function(){
+      WC.st.logo = '';
+      el('wcLogoImg').style.display = 'none';
+      wcPreview();
     };
+
+    ['wcTitle','wcSub','wcGreet'].forEach(function(f){ el(f).oninput = wcPreview });
+    el('wcColor').oninput = wcPreview;
+    el('wcPos').onchange = wcPreview;
+
+    el('wcSave').onclick = function(){ wcSave('wcOk2') };
+    el('wcSaveDom').onclick = function(){ wcSave('wcOk3') };
+
+    wcPreview();
   }).catch(function(){
     el('wcBox').innerHTML = L('<div class="pg-sec"><div class="empty">Не вдалося завантажити код віджета.</div></div>');
   });
+}
+
+var WC = { id:null, key:null, st:{}, timer:null };
+
+/* Картинку ужимаем в браузере, а не на сервере. Причина простая: логотип
+   лежит прямо в настройках, и лишние сотни килобайт поедут потом в
+   каждую страницу с виджетом. */
+function wcLogoLoad(file){
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(){
+    var img = new Image();
+    img.onload = function(){
+      var size = 128;
+      var c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      var g = c.getContext('2d');
+      // Вписываем целиком, не обрезая: логотип с отрезанным краем —
+      // это претензия от клиента, а не мелочь.
+      var k = Math.min(size / img.width, size / img.height);
+      var w = img.width * k, h = img.height * k;
+      g.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      WC.st.logo = c.toDataURL('image/png');
+      el('wcLogoImg').src = WC.st.logo;
+      el('wcLogoImg').style.display = 'block';
+      wcPreview();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* Черновик настроек уходит в адрес превью. Логотип туда не помещается —
+   он приезжает сообщением уже после загрузки страницы. */
+function wcPreview(){
+  clearTimeout(WC.timer);
+  WC.timer = setTimeout(function(){
+    var f = el('wcFrameView');
+    if (!f) return;
+    var q = '?preview=1&inline=1' +
+      '&title=' + encodeURIComponent(el('wcTitle').value) +
+      '&subtitle=' + encodeURIComponent(el('wcSub').value) +
+      '&greeting=' + encodeURIComponent(el('wcGreet').value) +
+      '&color=' + encodeURIComponent(el('wcColor').value) +
+      '&logo=' + encodeURIComponent(WC.st.logo || '') +
+      '&v=' + Date.now();
+    f.src = '/chat/' + WC.key + q;
+  }, 250);
+}
+
+function wcSave(okId){
+  var btn = okId === 'wcOk3' ? el('wcSaveDom') : el('wcSave');
+  busy(btn, true);
+  api('/channels/' + WC.id + '/webchat', { method:'PATCH', body:{
+    title: el('wcTitle').value.trim(),
+    subtitle: el('wcSub').value.trim(),
+    greeting: el('wcGreet').value.trim(),
+    color: el('wcColor').value,
+    logo: WC.st.logo || '',
+    position: el('wcPos').value,
+    domains: el('wcDom').value
+  }})
+    .then(function(){
+      el(okId).textContent = L('Збережено');
+      return api('/channels').then(function(r){ CHANNELS = r.channels || [] });
+    })
+    .then(function(){ return api('/channels/' + WC.id + '/webchat') })
+    .then(function(d){ el('wcSnip').textContent = d.snippet })
+    .catch(function(e){ el(okId).textContent = ((e.payload||{}).detail) || L('Не вдалося зберегти') })
+    .then(function(){ busy(btn, false) });
 }
 
 /* Буфер обмена доступен не везде: в старом браузере и по http его нет.
@@ -2978,6 +3177,7 @@ function openChannel(id){
     '</div></div></div>' +
 
     (c.type === 'webchat' ? '<div id="wcBox"></div>' : '') +
+    '<div id="chTeam"></div>' +
 
     L('<div class="pg-sec"><h3>Автоматизація</h3><div class="grid">') +
     '<div class="tile click" id="chFlows"><div class="t1"><div class="chico soon">⚡</div>' +
@@ -2989,6 +3189,7 @@ function openChannel(id){
     '</div></div></div>';
 
   if (c.type === 'webchat') wcPanel(id);
+  if (isAdmin()) chTeamPanel(id);
 
   el('chBack').onclick = tabChannels;
   el('chFlows').onclick = function(){ setView('bots') };

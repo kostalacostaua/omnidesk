@@ -7,6 +7,7 @@ import {
   jobKey,
   normalizeWebchat,
   safeColor,
+  safeLogo,
   webchatSettings,
   withSystem,
   withTenant,
@@ -114,8 +115,25 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
       .send(loaderScript(appUrl)),
   );
 
-  /** Страница чата: она же содержимое рамки. */
-  app.get<{ Params: { key: string }; Querystring: { inline?: string } }>(
+  /**
+   * Страница чата: она же содержимое рамки.
+   *
+   * В режиме превью она же показывает ещё не сохранённые настройки: их
+   * присылает страница настроек в адресе. Иначе подбор цвета выглядел бы
+   * так — сохранить, открыть сайт, посмотреть, вернуться.
+   */
+  app.get<{
+    Params: { key: string };
+    Querystring: {
+      inline?: string;
+      preview?: string;
+      title?: string;
+      subtitle?: string;
+      greeting?: string;
+      color?: string;
+      logo?: string;
+    };
+  }>(
     '/chat/:key',
     async (req, reply) => {
       const row = await channelByKey(req.params.key);
@@ -123,9 +141,22 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
         return reply.code(404).type('text/html; charset=utf-8').send(missingPage());
       }
 
-      const s = await settingsOf(row);
+      const saved = await settingsOf(row);
+      const preview = req.query?.preview === '1';
+      const s = preview
+        ? webchatSettings({
+            ...saved,
+            ...(req.query?.title !== undefined ? { title: req.query.title } : {}),
+            ...(req.query?.subtitle !== undefined ? { subtitle: req.query.subtitle } : {}),
+            ...(req.query?.greeting !== undefined ? { greeting: req.query.greeting } : {}),
+            ...(req.query?.color !== undefined ? { color: req.query.color } : {}),
+            ...(req.query?.logo !== undefined ? { logo: req.query.logo } : {}),
+            domains: saved.domains,
+          })
+        : saved;
+
       const origin = String(req.headers['referer'] ?? '');
-      if (origin && !domainAllowed(s.domains, origin)) {
+      if (!preview && origin && !domainAllowed(s.domains, origin)) {
         log('warn', 'Виджет открыт на неразрешённом домене', { key: req.params.key, origin });
         return reply.code(403).type('text/html; charset=utf-8').send(blockedPage());
       }
@@ -135,7 +166,7 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
         .header('cache-control', 'no-store')
         // Рамку встраивают в чужие страницы — это и есть её работа.
         .header('content-security-policy', 'frame-ancestors *')
-        .send(chatPage(req.params.key, s, req.query?.inline === '1'));
+        .send(chatPage(req.params.key, s, req.query?.inline === '1', preview));
     },
   );
 
@@ -280,9 +311,13 @@ export function loaderScript(appUrl: string): string {
   if (!key) return;
   var base = '${base}';
 
+  // Сторона экрана приходит атрибутом: скрипт общий на всех клиентов,
+  // и запрашивать ради одной настройки ещё один ответ сервера незачем.
+  var side = me.getAttribute('data-side') === 'left' ? 'left' : 'right';
+
   var btn = document.createElement('button');
   btn.setAttribute('aria-label', 'Chat');
-  btn.style.cssText = 'position:fixed;right:20px;bottom:20px;width:56px;height:56px;border:0;' +
+  btn.style.cssText = 'position:fixed;' + side + ':20px;bottom:20px;width:56px;height:56px;border:0;' +
     'border-radius:50%;background:#2F6BFF;color:#fff;cursor:pointer;z-index:2147483000;' +
     'box-shadow:0 10px 30px rgba(11,16,34,.28);display:flex;align-items:center;' +
     'justify-content:center;padding:0;transition:transform .15s ease';
@@ -304,7 +339,7 @@ export function loaderScript(appUrl: string): string {
 
   function phone(){ return window.innerWidth < 520 }
 
-  var DESK = 'position:fixed;right:20px;bottom:88px;width:380px;height:min(560px,70vh);' +
+  var DESK = 'position:fixed;' + side + ':20px;bottom:88px;width:380px;height:min(560px,70vh);' +
     'border:0;border-radius:16px;z-index:2147483000;' +
     'box-shadow:0 24px 60px -20px rgba(11,16,34,.45);background:#fff';
   var FULL = 'position:fixed;inset:0;width:100%;height:100%;border:0;border-radius:0;' +
@@ -374,10 +409,12 @@ function blockedPage(): string {
  */
 export function chatPage(
   key: string,
-  s: { title: string; greeting: string; color: string },
+  s: { title: string; subtitle: string; greeting: string; color: string; logo: string },
   inline: boolean,
+  preview = false,
 ): string {
   const color = safeColor(s.color);
+  const logo = safeLogo(s.logo);
   return `<!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -392,7 +429,15 @@ export function chatPage(
   #wrap{display:flex;flex-direction:column;height:100%}
   header{display:flex;align-items:center;justify-content:space-between;gap:10px;
     padding:14px 16px;background:var(--brand);color:#fff;flex:none}
-  header b{font-size:15px;font-weight:600}
+  header .who{display:flex;align-items:center;gap:10px;min-width:0}
+  /* Логотип на цветной шапке: белая подложка, иначе тёмный знак на
+     тёмном фоне превращается в пятно. */
+  header img{width:32px;height:32px;border-radius:9px;object-fit:contain;flex:none;
+    background:#fff;padding:3px}
+  header b{font-size:15px;font-weight:600;display:block;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  header .sub{font-size:12px;opacity:.85;margin-top:1px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
   header button{background:transparent;border:0;color:#fff;font-size:22px;line-height:1;
     cursor:pointer;padding:0 2px;opacity:.85}
   #log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:#f5f7fb}
@@ -414,8 +459,14 @@ export function chatPage(
 <body>
 <div id="wrap">
   <header>
-    <b>${esc(s.title)}</b>
-    ${inline ? '' : '<button id="x" aria-label="Закрити">&times;</button>'}
+    <div class="who">
+      ${logo ? `<img src="${logo}" alt="">` : ''}
+      <div style="min-width:0">
+        <b>${esc(s.title)}</b>
+        ${s.subtitle ? `<div class="sub">${esc(s.subtitle)}</div>` : ''}
+      </div>
+    </div>
+    ${inline || preview ? '' : '<button id="x" aria-label="Закрити">&times;</button>'}
   </header>
   <div id="log"></div>
   <form id="f">
@@ -426,6 +477,7 @@ export function chatPage(
 <script>
 (function(){
   var KEY = ${JSON.stringify(key)};
+  var PREVIEW = ${preview ? 'true' : 'false'};
   var STORE = 'rz_chat_' + KEY;
   var log = document.getElementById('log');
   var form = document.getElementById('f');
@@ -541,7 +593,21 @@ export function chatPage(
     if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); form.requestSubmit() }
   });
 
-  start();
+  /*
+   * Превью. Здесь нет ни посетителя, ни переписки: страница открыта в
+   * настройках, чтобы посмотреть на вид. Показываем приветствие и пару
+   * реплик, чтобы было видно и свой пузырь, и чужой, — по пустому окну
+   * цвет не подберёшь.
+   */
+  if (PREVIEW){
+    greet();
+    bubble('Доброго дня! Скільки коштує доставка?', true, new Date().toISOString());
+    bubble('По місту — безкоштовно від 500 грн.', false, new Date().toISOString());
+    input.disabled = true;
+    form.onsubmit = function(e){ e.preventDefault() };
+  } else {
+    start();
+  }
 })();
 </script>
 </body>

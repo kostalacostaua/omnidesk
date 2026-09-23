@@ -13,5 +13,6 @@ export * from './crm-simple.js';
 export * from './viber.js';
 export * from './whatsapp.js';
 export * from './webchat.js';
+export * from './routing.js';
 export * from './notify.js';
 export * from './mail.js';

@@ -20,7 +20,10 @@ import {
   embedSnippet,
   iframeSnippet,
   normalizeDomain,
+  parseRouting,
+  ROUTING_DEFAULT,
   safeColor,
+  safeLogo,
   webchatSettings,
   graphPost,
   safeEqual,
@@ -400,15 +403,26 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     return {
       siteKey: row.external_id,
       settings: webchatSettings(row.meta),
-      snippet: embedSnippet(appUrl, row.external_id),
+      snippet: embedSnippet(appUrl, row.external_id, webchatSettings(row.meta).position),
       iframe: iframeSnippet(appUrl, row.external_id),
     };
   });
 
   app.patch<{
     Params: { id: string };
-    Body: { title?: string; greeting?: string; color?: string; domains?: string };
-  }>('/channels/:id/webchat', async (req, reply) => {
+    Body: {
+      title?: string;
+      subtitle?: string;
+      greeting?: string;
+      color?: string;
+      logo?: string;
+      position?: string;
+      domains?: string;
+    };
+    // Логотип едет внутри JSON как data:image, поэтому тело крупнее
+    // обычного. Мегабайта хватает с большим запасом: интерфейс ужимает
+    // картинку до 128 точек ещё до отправки.
+  }>('/channels/:id/webchat', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);
 
@@ -418,12 +432,25 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       .filter(Boolean)
       .slice(0, 20);
 
+    const logo = String(req.body?.logo ?? '');
     const patch = {
       title: String(req.body?.title ?? WEBCHAT_DEFAULTS.title).trim().slice(0, 60),
+      subtitle: String(req.body?.subtitle ?? '').trim().slice(0, 120),
       greeting: String(req.body?.greeting ?? '').trim().slice(0, 300),
       color: safeColor(String(req.body?.color ?? WEBCHAT_DEFAULTS.color)),
+      // Пустая строка — это «убрать логотип», а не «не трогать»:
+      // убрать его иначе было бы нечем.
+      logo: safeLogo(logo),
+      position: req.body?.position === 'left' ? 'left' : 'right',
       domains,
     };
+
+    if (logo && !patch.logo) {
+      return reply.code(400).send({
+        error: 'bad_logo',
+        detail: 'Логотип має бути картинкою до 190 КБ',
+      });
+    }
 
     const updated = await withTenant(pool, auth.tenantId, async (db) => {
       const { rowCount } = await db.query(
@@ -436,6 +463,146 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     if (!updated) return reply.code(404).send({ error: 'not_found' });
 
     return { settings: patch };
+  });
+
+  /**
+   * Кто видит канал и кому достаются новые диалоги.
+   *
+   * Обе настройки живут на странице канала, а не только в разделе людей:
+   * человек настраивает канал и там же решает, кто с ним работает.
+   * Ходить за этим в другой раздел — значит не настроить вовсе.
+   */
+  app.get<{ Params: { id: string } }>('/channels/:id/team', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const data = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows: ch } = await db.query<{ routing: unknown }>(
+        `SELECT routing FROM channels WHERE id = $1`,
+        [req.params.id],
+      );
+      if (!ch[0]) return null;
+
+      const { rows: users } = await db.query<{
+        id: string;
+        full_name: string | null;
+        email: string;
+        role: string;
+        restricted: boolean;
+        allowed: boolean;
+      }>(
+        `SELECT u.id, u.full_name, u.email, u.role,
+                EXISTS (SELECT 1 FROM user_channels uc WHERE uc.user_id = u.id) AS restricted,
+                EXISTS (SELECT 1 FROM user_channels uc
+                         WHERE uc.user_id = u.id AND uc.channel_id = $1) AS allowed
+           FROM users u
+          WHERE u.is_active
+          ORDER BY lower(coalesce(u.full_name, u.email)), u.id`,
+        [req.params.id],
+      );
+
+      return { routing: parseRouting(ch[0].routing), users };
+    });
+    if (!data) return reply.code(404).send({ error: 'not_found' });
+
+    return {
+      routing: data.routing,
+      users: data.users.map((u) => ({
+        id: u.id,
+        name: u.full_name || u.email,
+        role: u.role,
+        // Владелец и администратор видят всё по роли: ограничивать их
+        // нечем, и галочка у них была бы обманом.
+        unrestricted: u.role === 'owner' || u.role === 'admin',
+        sees: u.role === 'owner' || u.role === 'admin' || !u.restricted || u.allowed,
+      })),
+    };
+  });
+
+  /** Задать доступ к каналу и правило распределения. */
+  app.put<{
+    Params: { id: string };
+    Body: { userIds?: string[]; routing?: { mode?: string; userId?: string | null } };
+  }>('/channels/:id/team', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const ids = Array.isArray(req.body?.userIds) ? req.body!.userIds!.slice(0, 200) : null;
+    const mode = req.body?.routing?.mode;
+    const routing = {
+      mode: mode === 'round_robin' || mode === 'user' ? mode : 'none',
+      userId: req.body?.routing?.userId || null,
+    };
+
+    const done = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `UPDATE channels
+            SET routing = routing || jsonb_build_object(
+                  'mode', $2::text,
+                  'userId', $3::text)
+          WHERE id = $1`,
+        [req.params.id, routing.mode, routing.userId],
+      );
+      if (!rowCount) return false;
+
+      /*
+       * Доступ задаётся «от канала»: отмеченные его видят, остальные —
+       * нет. Тонкость в том, что пустой список у человека означает «ему
+       * видно всё». Поэтому снятая галочка превращается в явный список
+       * остальных каналов, иначе она бы ничего не изменила.
+       */
+      if (ids) {
+        const { rows: people } = await db.query<{ id: string; role: string }>(
+          `SELECT id, role FROM users WHERE is_active`,
+        );
+        const { rows: channels } = await db.query<{ id: string }>(`SELECT id FROM channels`);
+
+        for (const person of people) {
+          if (person.role === 'owner' || person.role === 'admin') continue;
+          const wanted = ids.includes(person.id);
+
+          if (wanted) {
+            const { rowCount: had } = await db.query(
+              `SELECT 1 FROM user_channels WHERE user_id = $1 LIMIT 1`,
+              [person.id],
+            );
+            // Пока список пуст, человеку и так видно всё: добавлять
+            // строку значило бы отнять у него остальные каналы.
+            if (!had) continue;
+            await db.query(
+              `INSERT INTO user_channels (tenant_id, user_id, channel_id)
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+              [auth.tenantId, person.id, req.params.id],
+            );
+          } else {
+            const { rowCount: had } = await db.query(
+              `SELECT 1 FROM user_channels WHERE user_id = $1 LIMIT 1`,
+              [person.id],
+            );
+            if (!had) {
+              // Ограничений не было — вводим их: все каналы, кроме этого.
+              for (const channel of channels) {
+                if (channel.id === req.params.id) continue;
+                await db.query(
+                  `INSERT INTO user_channels (tenant_id, user_id, channel_id)
+                   VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+                  [auth.tenantId, person.id, channel.id],
+                );
+              }
+            } else {
+              await db.query(
+                `DELETE FROM user_channels WHERE user_id = $1 AND channel_id = $2`,
+                [person.id, req.params.id],
+              );
+            }
+          }
+        }
+      }
+      return true;
+    });
+
+    if (!done) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true, routing: { ...ROUTING_DEFAULT, ...routing } };
   });
 
   // ── Каналы ────────────────────────────────────────────────────────

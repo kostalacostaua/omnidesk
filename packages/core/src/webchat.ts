@@ -22,20 +22,51 @@ export const WEBCHAT_CHANNEL = 'webchat' as const;
 export interface WebchatSettings {
   /** Заголовок окна: «Підтримка», «Магазин квітів». */
   title: string;
+  /**
+   * Подпись под заголовком. Обещание, а не украшение: «Відповідаємо
+   * протягом 15 хвилин» снимает половину вопросов «а вы тут?».
+   */
+  subtitle: string;
   /** Первая фраза, которую видит посетитель до своего сообщения. */
   greeting: string;
   /** Цвет кнопки и своих сообщений. */
   color: string;
+  /**
+   * Логотип компании. Хранится прямо в настройках как data:image —
+   * картинка маленькая (интерфейс ужимает её до 128 точек), а отдельное
+   * публичное хранилище ради неё означало бы ещё один адрес, который
+   * нужно охранять.
+   */
+  logo: string;
+  /** С какой стороны экрана кнопка. */
+  position: 'right' | 'left';
   /** Домены, где виджету разрешено работать. Пусто — где угодно. */
   domains: string[];
 }
 
 export const WEBCHAT_DEFAULTS: WebchatSettings = {
   title: 'Чат з нами',
+  subtitle: '',
   greeting: 'Вітаємо! Напишіть, і ми відповімо.',
   color: '#2F6BFF',
+  logo: '',
+  position: 'right',
   domains: [],
 };
+
+/**
+ * Логотип попадает в страницу, которую видит посторонний, поэтому
+ * принимается только картинка и только встроенная. Ссылка на чужой
+ * адрес означала бы запрос со страницы клиента неизвестно куда.
+ */
+export function safeLogo(value: string): string {
+  const s = (value ?? '').trim();
+  if (!s) return '';
+  if (!/^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(s)) return '';
+  // 256 КБ в base64 — это примерно 190 КБ картинки: логотипу хватает
+  // с запасом, а страница от этого не тяжелеет заметно.
+  return s.length > 256 * 1024 ? '' : s;
+}
 
 /** Разбор настроек из meta канала: чужие поля игнорируются. */
 export function webchatSettings(meta: unknown): WebchatSettings {
@@ -46,8 +77,11 @@ export function webchatSettings(meta: unknown): WebchatSettings {
 
   return {
     title: String(m['title'] ?? WEBCHAT_DEFAULTS.title).slice(0, 60),
+    subtitle: String(m['subtitle'] ?? WEBCHAT_DEFAULTS.subtitle).slice(0, 120),
     greeting: String(m['greeting'] ?? WEBCHAT_DEFAULTS.greeting).slice(0, 300),
     color: safeColor(String(m['color'] ?? WEBCHAT_DEFAULTS.color)),
+    logo: safeLogo(String(m['logo'] ?? '')),
+    position: m['position'] === 'left' ? 'left' : 'right',
     domains,
   };
 }
@@ -139,9 +173,10 @@ export function normalizeWebchat(
  * поэтому переписка не ходит через чужой сайт и не зависит от его
  * правил безопасности.
  */
-export function embedSnippet(appUrl: string, siteKey: string): string {
+export function embedSnippet(appUrl: string, siteKey: string, position: 'right' | 'left' = 'right'): string {
   const base = appUrl.replace(/\/+$/, '');
-  return `<script src="${base}/chat.js" data-key="${siteKey}" async></script>`;
+  const side = position === 'left' ? ' data-side="left"' : '';
+  return `<script src="${base}/chat.js" data-key="${siteKey}"${side} async></script>`;
 }
 
 /** Вариант для тех, кому нужен чат прямо в странице, а не кнопкой. */
