@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import {
   AiError,
   askModel,
+  PROVIDERS,
   decryptJson,
   encryptJson,
   withTenant,
+  type AiProvider,
   type AiTurn,
   type Pool,
 } from '@omnidesk/core';
@@ -28,6 +30,7 @@ interface AiDeps {
 }
 
 interface AiRow {
+  provider: string;
   base_url: string;
   model: string;
   api_key_enc: Buffer | null;
@@ -51,11 +54,16 @@ export function keyHint(key: string): string {
 /** Настройки наружу — без ключа. Он не покидает сервер ни разу. */
 function publicView(row: AiRow | null) {
   if (!row) {
-    return { connected: false, mode: 'off', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', systemPrompt: '', historySize: 12, maxTokens: 400, keyHint: '', lastError: null };
+    return {
+      connected: false, mode: 'off', provider: 'openai',
+      baseUrl: PROVIDERS.openai.baseUrl, model: PROVIDERS.openai.model,
+      systemPrompt: '', historySize: 12, maxTokens: 400, keyHint: '', lastError: null,
+    };
   }
   return {
     connected: Boolean(row.api_key_enc) && row.is_active,
     mode: row.mode,
+    provider: row.provider,
     baseUrl: row.base_url,
     model: row.model,
     systemPrompt: row.system_prompt,
@@ -72,7 +80,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
   async function load(tenantId: string): Promise<AiRow | null> {
     return withTenant(pool, tenantId, async (db) => {
       const { rows } = await db.query<AiRow>(
-        `SELECT base_url, model, api_key_enc, api_key_hint, system_prompt,
+        `SELECT provider, base_url, model, api_key_enc, api_key_hint, system_prompt,
                 mode, history_size, max_tokens, is_active, last_error
            FROM ai_settings WHERE tenant_id = $1`,
         [tenantId],
@@ -99,7 +107,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
 
   app.put<{
     Body: {
-      baseUrl?: string; model?: string; apiKey?: string; systemPrompt?: string;
+      provider?: string; baseUrl?: string; model?: string; apiKey?: string; systemPrompt?: string;
       mode?: string; historySize?: number; maxTokens?: number;
     };
   }>('/settings/ai', async (req, reply) => {
@@ -107,7 +115,10 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
     if (!a) return reply.code(401).send(auth401);
 
     const b = req.body ?? {};
-    const baseUrl = (b.baseUrl ?? '').trim() || 'https://api.openai.com/v1';
+    const provider: AiProvider = b.provider === 'gemini' ? 'gemini' : 'openai';
+    // Пустой адрес — не ошибка, а «как у провайдера по умолчанию»:
+    // у Gemini и OpenAI он разный, и заставлять его вводить незачем.
+    const baseUrl = (b.baseUrl ?? '').trim() || PROVIDERS[provider].baseUrl;
     if (!/^https:\/\/\S+$/i.test(baseUrl)) {
       return reply.code(400).send({ error: 'bad_url', detail: 'Адрес должен начинаться с https://' });
     }
@@ -133,20 +144,21 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
     await withTenant(pool, a.tenantId, async (db) => {
       await db.query(
         `INSERT INTO ai_settings
-           (tenant_id, base_url, model, api_key_enc, api_key_hint, system_prompt,
+           (tenant_id, provider, base_url, model, api_key_enc, api_key_hint, system_prompt,
             mode, history_size, max_tokens, is_active, last_error, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,NULL,now())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,NULL,now())
          ON CONFLICT (tenant_id) DO UPDATE SET
+           provider = EXCLUDED.provider,
            base_url = EXCLUDED.base_url, model = EXCLUDED.model,
            api_key_enc = EXCLUDED.api_key_enc, api_key_hint = EXCLUDED.api_key_hint,
            system_prompt = EXCLUDED.system_prompt, mode = EXCLUDED.mode,
            history_size = EXCLUDED.history_size, max_tokens = EXCLUDED.max_tokens,
            is_active = true, last_error = NULL, updated_at = now()`,
-        [a.tenantId, baseUrl, model, enc, hint, systemPrompt, mode, historySize, maxTokens],
+        [a.tenantId, provider, baseUrl, model, enc, hint, systemPrompt, mode, historySize, maxTokens],
       );
     });
 
-    app.log.info({ tenantId: a.tenantId, model, mode }, 'ИИ подключён');
+    app.log.info({ tenantId: a.tenantId, provider, model, mode }, 'ИИ подключён');
     return publicView(await load(a.tenantId));
   });
 
@@ -173,6 +185,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
     try {
       const text = await askModel(
         {
+          provider: row.provider as AiProvider,
           baseUrl: row.base_url, apiKey: key, model: row.model,
           systemPrompt: row.system_prompt, maxTokens: 60,
         },
@@ -229,6 +242,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
 
     try {
       const text = await askModel({
+        provider: row.provider as AiProvider,
         baseUrl: row.base_url, apiKey: key, model: row.model,
         systemPrompt: row.system_prompt, maxTokens: row.max_tokens,
       }, turns);

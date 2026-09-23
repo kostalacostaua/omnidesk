@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AiError,
   askModel,
+  buildGemini,
   buildMessages,
   completionsUrl,
   explainStatus,
+  geminiUrl,
   needsHuman,
   readCompletion,
+  readGemini,
 } from '../src/ai.js';
 
 /**
@@ -133,5 +136,68 @@ describe('когда нужен человек', () => {
   it('обычный вопрос ИИ отвечает сам', () => {
     expect(needsHuman('А доставка есть?')).toBe(false);
     expect(needsHuman('')).toBe(false);
+  });
+});
+
+/**
+ * Gemini ходит своей дорогой: модель в пути, ключ отдельным
+ * заголовком, переписка называется contents. Ошибка тут означала бы,
+ * что клиент, подключивший Google, не получает ответов вовсе.
+ */
+describe('Google Gemini', () => {
+  const G = {
+    provider: 'gemini' as const,
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKey: 'AIza-test',
+    model: 'gemini-3.8-flash',
+    systemPrompt: 'Продаём сумки.',
+    maxTokens: 300,
+  };
+
+  function reply(text: string) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
+    };
+  }
+
+  it('модель стоит в адресе, а префикс models/ не удваивается', () => {
+    expect(geminiUrl(G.baseUrl, 'gemini-3.8-flash'))
+      .toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent');
+    expect(geminiUrl(G.baseUrl + '/', 'models/gemini-3.7-flash'))
+      .toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent');
+  });
+
+  it('наша сторона называется model, а не assistant', () => {
+    const body = buildGemini(G, [
+      { fromClient: true, text: 'Є сумки?' },
+      { fromClient: false, text: 'Так' },
+    ]) as { contents: Array<{ role: string }>; systemInstruction: { parts: Array<{ text: string }> } };
+    expect(body.contents.map((c) => c.role)).toEqual(['user', 'model']);
+    expect(body.systemInstruction.parts[0]?.text).toContain('Продаём сумки');
+  });
+
+  it('ключ идёт заголовком: в адресе ему не место — он попадёт в журналы', async () => {
+    const fetchImpl = vi.fn(async () => reply('Так, є дві'));
+    const text = await askModel(G, [{ fromClient: true, text: 'Є сумки?' }], { fetchImpl });
+
+    expect(text).toBe('Так, є дві');
+    const [url, init] = fetchImpl.mock.calls[0] as [string, Record<string, unknown>];
+    expect(url).not.toContain('AIza-test');
+    expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('AIza-test');
+    expect(JSON.parse(init.body as string).contents).toHaveLength(1);
+  });
+
+  it('части ответа склеиваются в один текст', () => {
+    expect(readGemini({ candidates: [{ content: { parts: [{ text: 'Так, ' }, { text: 'є' }] } }] }))
+      .toBe('Так, є');
+  });
+
+  it('отказ фильтра — это причина, а не пустой ответ клиенту', () => {
+    expect(() => readGemini({ promptFeedback: { blockReason: 'SAFETY' } }))
+      .toThrow(AiError);
+    expect(() => readGemini({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }))
+      .toThrow(AiError);
   });
 });

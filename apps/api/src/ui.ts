@@ -2241,6 +2241,32 @@ function openChannel(id){
 function WIDGET_URL(){ return location.origin + '/widget' }
 
 /**
+ * Провайдеры, которых мы умеем спрашивать.
+ *
+ * Две дороги, а не одна: у OpenAI и всех, кто повторяет его API,
+ * общий адрес /chat/completions; у Gemini свой формат запроса и свой
+ * заголовок с ключом. Всё остальное здесь — подсказки человеку: где
+ * взять ключ и что вписать в поля, если он не знает.
+ */
+var AI_PROVIDERS = [
+  { id:'openai', title:'OpenAI и совместимые (OpenRouter, Groq, своя модель)',
+    baseUrl:'https://api.openai.com/v1', model:'gpt-4o-mini', keyHint:'sk-…',
+    where:'Ключ — в кабинете OpenAI, раздел API keys. Для OpenRouter или Groq поменяйте адрес ' +
+      'на их и возьмите ключ у них.' },
+  { id:'gemini', title:'Google Gemini',
+    baseUrl:'https://generativelanguage.googleapis.com/v1beta', model:'gemini-3.8-flash',
+    keyHint:'AIza…',
+    where:'Ключ — в Google AI Studio, кнопка «Get API key». Адрес менять не нужно.' }
+];
+
+function provDefaults(id){
+  for (var i = 0; i < AI_PROVIDERS.length; i++){
+    if (AI_PROVIDERS[i].id === id) return AI_PROVIDERS[i];
+  }
+  return AI_PROVIDERS[0];
+}
+
+/**
  * Раздел «ИИ» на странице интеграций.
  *
  * Ключ вводится один раз и больше не показывается — в поле остаётся
@@ -2255,26 +2281,37 @@ function aiSection(ai){
     ['auto', 'Отвечает клиенту сам']
   ];
   var mode = ai.mode || 'draft';
+  var prov = ai.provider || 'openai';
 
   return '<div class="pg-sec"><h3>ИИ-ответы</h3><div class="card">' +
     '<div class="t" style="display:flex;align-items:center;gap:8px">Своя модель' +
     (ai.connected ? '<span class="pill good">подключена</span>'
                   : '<span class="pill">не подключена</span>') + '</div>' +
     '<div class="s" style="color:var(--t2);line-height:1.7;margin-top:6px">' +
-    'Ключ ваш: вы платите провайдеру напрямую и видите расход у себя. Подходит любой сервис ' +
-    'с совместимым с OpenAI адресом — сам OpenAI, OpenRouter, Groq, локальная модель.</div>' +
+    'Ключ ваш: вы платите провайдеру напрямую и видите расход у себя. Подходят Google Gemini ' +
+    'и всё, что говорит на языке OpenAI — сам OpenAI, OpenRouter, Groq, своя модель на сервере.</div>' +
 
-    '<div class="row2" style="margin-top:10px"><label class="lbl">Адрес API</label>' +
-    '<input id="aiUrl" placeholder="https://api.openai.com/v1" value="' +
-      esc(ai.baseUrl || 'https://api.openai.com/v1') + '"></div>' +
+    '<div class="row2" style="margin-top:10px"><label class="lbl">Провайдер</label>' +
+    '<select id="aiProv">' +
+    AI_PROVIDERS.map(function(p){
+      return '<option value="' + p.id + '"' + (p.id === prov ? ' selected' : '') + '>' +
+        p.title + '</option>';
+    }).join('') + '</select></div>' +
+
+    '<div class="row2" style="margin-top:9px"><label class="lbl">Адрес API</label>' +
+    '<input id="aiUrl" placeholder="' + esc(provDefaults(prov).baseUrl) + '" value="' +
+      esc(ai.baseUrl || provDefaults(prov).baseUrl) + '"></div>' +
 
     '<div class="row2" style="margin-top:9px"><label class="lbl">Модель</label>' +
-    '<input id="aiModel" placeholder="gpt-4o-mini" value="' + esc(ai.model || 'gpt-4o-mini') + '"></div>' +
+    '<input id="aiModel" placeholder="' + esc(provDefaults(prov).model) + '" value="' +
+      esc(ai.model || provDefaults(prov).model) + '"></div>' +
 
     '<div class="row2" style="margin-top:9px"><label class="lbl">Ключ</label>' +
     '<input id="aiKey" type="password" autocomplete="new-password" placeholder="' +
-      (ai.keyHint ? 'записан ' + esc(ai.keyHint) + ' — оставьте пустым, чтобы не менять' : 'sk-…') +
+      (ai.keyHint ? 'записан ' + esc(ai.keyHint) + ' — оставьте пустым, чтобы не менять'
+                  : esc(provDefaults(prov).keyHint)) +
       '"></div>' +
+    '<div class="hint" id="aiWhere">' + provDefaults(prov).where + '</div>' +
 
     '<div class="row2" style="margin-top:9px"><label class="lbl">О компании</label>' +
     '<textarea id="aiPrompt" rows="5" placeholder="Что продаёте, цены, доставка, часы работы, ' +
@@ -2301,10 +2338,27 @@ function aiSection(ai){
 }
 
 function wireAi(ai){
+  // Смена провайдера подставляет его адрес и модель — но только если
+  // человек не вписал своё: затирать введённое руками нельзя.
+  el('aiProv').onchange = function(){
+    var d = provDefaults(this.value);
+    var urlField = el('aiUrl'), modelField = el('aiModel');
+    var known = AI_PROVIDERS.map(function(p){ return provDefaults(p.id) });
+    var urlIsPreset = !urlField.value || known.some(function(x){ return x.baseUrl === urlField.value });
+    var modelIsPreset = !modelField.value || known.some(function(x){ return x.model === modelField.value });
+    if (urlIsPreset) urlField.value = d.baseUrl;
+    if (modelIsPreset) modelField.value = d.model;
+    urlField.placeholder = d.baseUrl;
+    modelField.placeholder = d.model;
+    el('aiWhere').textContent = d.where;
+    if (!ai.keyHint) el('aiKey').placeholder = d.keyHint;
+  };
+
   el('aiSave').onclick = function(){
     el('aiErr').textContent = ''; el('aiOk').textContent = '';
     busy(el('aiSave'), true);
     api('/settings/ai', { method:'PUT', body:{
+      provider: el('aiProv').value,
       baseUrl: el('aiUrl').value,
       model: el('aiModel').value,
       apiKey: el('aiKey').value,

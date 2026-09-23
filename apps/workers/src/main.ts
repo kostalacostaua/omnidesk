@@ -37,6 +37,7 @@ import {
   AiError,
   askModel,
   needsHuman,
+  type AiProvider,
   type AiTurn,
   type CrmSyncJob,
   type ScenarioJob,
@@ -1305,6 +1306,7 @@ async function advanceRun(tenantId: string, runId: string): Promise<number> {
  * человеку. Ошибка модели в этих местах стоит клиента.
  */
 interface AiRow {
+  provider: string;
   base_url: string;
   model: string;
   api_key_enc: Buffer | null;
@@ -1322,7 +1324,7 @@ async function aiAnswer(
 ): Promise<number> {
   const row = await withTenant(pool, msg.tenantId, async (db) => {
     const { rows } = await db.query<AiRow>(
-      `SELECT base_url, model, api_key_enc, system_prompt, mode,
+      `SELECT provider, base_url, model, api_key_enc, system_prompt, mode,
               history_size, max_tokens, is_active
          FROM ai_settings WHERE tenant_id = $1`,
       [msg.tenantId],
@@ -1362,6 +1364,7 @@ async function aiAnswer(
 
   try {
     const answer = await askModel({
+      provider: row.provider as AiProvider,
       baseUrl: row.base_url,
       apiKey: key,
       model: row.model,
