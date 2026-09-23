@@ -670,6 +670,27 @@ function extractWhatsAppPhoneNumberId(payload: MetaWebhookPayload): string | nul
 async function handleInbound(job: InboundJob): Promise<void> {
   if (job.provider === 'mtproto') return handleMtprotoInbound(job);
 
+  /*
+   * Чат на сайте. Сообщение приходит уже приведённым к общему виду:
+   * разбирать там нечего, поле ввода наше собственное. Остальное —
+   * ровно как в любом канале: запись, CRM, бот и оповещения.
+   */
+  if (job.provider === 'webchat') {
+    const payload = job.payload as Omit<UnifiedMessage, 'sentAt'> & { sentAt: string };
+    const m: UnifiedMessage = { ...payload, sentAt: new Date(payload.sentAt) };
+
+    const { inserted, conversationId, contactId } = await persistMessage(m);
+    log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
+      channelId: job.channelId, externalId: m.externalId, channelType: 'webchat',
+    });
+    if (inserted && contactId) await enqueueCrm(m, contactId, conversationId);
+    if (inserted && conversationId) {
+      const sent = await onInbound(m, conversationId);
+      if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
+    }
+    return;
+  }
+
   if (job.provider === 'viber') {
     const channel = await findChannelById(job.channelId);
     if (!channel) {
@@ -2006,6 +2027,24 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
   if (row.channel_type === VIBER_CHANNEL) return sendViber(job, row, row.peer_id);
 
   if (row.channel_type === 'whatsapp') return sendWhatsApp(job, row, row.peer_id);
+
+  /*
+   * Чат на сайте. Отправлять некуда: сообщение уже лежит в базе, и
+   * посетитель забирает его при опросе. Задача существует ради одного —
+   * перевести сообщение из «отправляется» в «отправлено», иначе
+   * оператор смотрит на вечные часики.
+   */
+  if (row.channel_type === 'webchat') {
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2
+          WHERE id = $1 AND status = 'pending'`,
+        [job.messageId, `wc_out_${job.messageId}`],
+      );
+    });
+    log('info', 'Ответ в чат на сайте записан', { messageId: job.messageId });
+    return;
+  }
 
   if (row.channel_type !== 'telegram_bot') {
     // Осознанный отказ вместо тихой неправильной отправки.

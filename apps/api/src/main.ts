@@ -3,6 +3,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
+  QUEUE_INBOUND,
   QUEUE_OUTBOUND,
   QUEUE_MEDIA,
   QUEUE_CRM_SYNC,
@@ -22,6 +23,7 @@ import {
   withSystem,
   withTenant,
   type ChannelType,
+  type InboundJob,
   type OutboundJob,
   type MediaJob,
   type CrmSyncJob,
@@ -39,6 +41,7 @@ import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
+import { registerWebchat } from './webchat.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -63,6 +66,17 @@ const redis = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', {
   family: 0,
 });
 const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, {
+  connection: redis,
+  defaultJobOptions,
+});
+/**
+ * Входящие из чата на сайте.
+ *
+ * У остальных каналов входящие принимает ingress, но у этого нет
+ * вебхука: сообщение приходит прямо со страницы посетителя, а страницу
+ * отдаём мы. Дальше — та же очередь и тот же воркер, что у всех.
+ */
+const inboundQueue = new Queue<InboundJob>(QUEUE_INBOUND, {
   connection: redis,
   defaultJobOptions,
 });
@@ -372,6 +386,13 @@ const notify = registerNotify(app, {
   connection: redis,
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+registerWebchat(app, {
+  pool,
+  inboundQueue,
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 

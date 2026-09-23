@@ -100,7 +100,7 @@ export interface MtprotoInboundPayload {
 export interface InboundJob {
   channelId: string;
   tenantId: string;
-  provider: 'telegram' | 'meta' | 'mtproto' | 'viber';
+  provider: 'telegram' | 'meta' | 'mtproto' | 'viber' | 'webchat';
   /** Сырое тело вебхука как есть. */
   payload: unknown;
   receivedAt: string;

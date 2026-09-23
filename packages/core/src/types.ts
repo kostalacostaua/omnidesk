@@ -18,7 +18,12 @@ export type ChannelType =
    * Личного аккаунта Viber здесь нет и быть не может — открытого
    * протокола у них нет, а обходные библиотеки ведут к блокировке.
    */
-  | 'viber_business';
+  | 'viber_business'
+  /**
+   * Чат на сайте клиента. Собеседник — посетитель страницы: у него нет
+   * ни номера, ни аккаунта, только идентификатор, выданный нами.
+   */
+  | 'webchat';
 
 export type Direction = 'in' | 'out';
 export type SenderType = 'customer' | 'agent' | 'bot' | 'system';
@@ -139,6 +144,9 @@ export function computeResponseWindow(
     case 'viber_business':
       return { type: 'standard', expiresAt: new Date(t + 24 * HOUR) };
 
+    // В чате на сайте окон нет: это наш собственный канал, и никакой
+    // чужой платформы, которая ограничивала бы ответ, здесь не стоит.
+    case 'webchat':
     case 'telegram_bot':
     case 'telegram_user':
       return { type: 'none', expiresAt: null };

@@ -15,6 +15,13 @@ import {
   decryptJson,
   graphGet,
   parseTemplates,
+  WEBCHAT_CHANNEL,
+  WEBCHAT_DEFAULTS,
+  embedSnippet,
+  iframeSnippet,
+  normalizeDomain,
+  safeColor,
+  webchatSettings,
   graphPost,
   safeEqual,
   telegramForwardSecret,
@@ -55,6 +62,9 @@ export interface SettingsDeps {
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
   const { pool, masterKey, requireAuth } = deps;
+  // Адрес приложения нужен коду для вставки на чужой сайт: там ссылка
+  // обязана быть абсолютной, относительная ведёт в никуда.
+  const appUrl = deps.meta?.appUrl || deps.publicUrl || 'https://app.rozmovio.com';
 
   const auth401 = { error: 'unauthorized' } as const;
 
@@ -323,6 +333,110 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       }
     },
   );
+
+  /**
+   * Чат на сайте.
+   *
+   * Канал создаётся сразу рабочим: ключ выдан, код для вставки готов.
+   * Настройки — заголовок, приветствие, цвет и домены — правятся потом
+   * и без переподключения: человек ставит виджет за минуту, а подбирает
+   * цвет уже спокойно.
+   */
+  app.post<{ Body: { displayName?: string } }>(
+    '/settings/channels/webchat',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      // Ключ публичный: он виден в коде страницы у каждого посетителя.
+      // Секретом он не является — по нему можно начать разговор, но не
+      // прочитать чужой.
+      const siteKey = 'wc' + randomUUID().replace(/-/g, '').slice(0, 22);
+      const channelId = randomUUID();
+      const title = req.body?.displayName?.trim().slice(0, 80) || 'Чат на сайті';
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+          [
+            channelId,
+            auth.tenantId,
+            WEBCHAT_CHANNEL,
+            title,
+            siteKey,
+            // Секретов у канала нет: шифровать нечего, но колонка
+            // обязательная — кладём пустой объект.
+            encryptJson(masterKey, auth.tenantId, {}),
+            JSON.stringify({ ...WEBCHAT_DEFAULTS, title }),
+          ],
+        );
+      });
+
+      return {
+        channelId,
+        siteKey,
+        snippet: embedSnippet(appUrl, siteKey),
+        iframe: iframeSnippet(appUrl, siteKey),
+      };
+    },
+  );
+
+  /** Настройки виджета и код для вставки. */
+  app.get<{ Params: { id: string } }>('/channels/:id/webchat', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ external_id: string; meta: unknown }>(
+        `SELECT external_id, meta FROM channels WHERE id = $1 AND type = $2`,
+        [req.params.id, WEBCHAT_CHANNEL],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    return {
+      siteKey: row.external_id,
+      settings: webchatSettings(row.meta),
+      snippet: embedSnippet(appUrl, row.external_id),
+      iframe: iframeSnippet(appUrl, row.external_id),
+    };
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: { title?: string; greeting?: string; color?: string; domains?: string };
+  }>('/channels/:id/webchat', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const domains = String(req.body?.domains ?? '')
+      .split(/[,;\s]+/)
+      .map((d) => normalizeDomain(d))
+      .filter(Boolean)
+      .slice(0, 20);
+
+    const patch = {
+      title: String(req.body?.title ?? WEBCHAT_DEFAULTS.title).trim().slice(0, 60),
+      greeting: String(req.body?.greeting ?? '').trim().slice(0, 300),
+      color: safeColor(String(req.body?.color ?? WEBCHAT_DEFAULTS.color)),
+      domains,
+    };
+
+    const updated = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `UPDATE channels SET meta = meta || $2::jsonb, display_name = $3
+          WHERE id = $1 AND type = $4`,
+        [req.params.id, JSON.stringify(patch), patch.title, WEBCHAT_CHANNEL],
+      );
+      return (rowCount ?? 0) > 0;
+    });
+    if (!updated) return reply.code(404).send({ error: 'not_found' });
+
+    return { settings: patch };
+  });
 
   // ── Каналы ────────────────────────────────────────────────────────
   app.get('/channels', async (req, reply) => {

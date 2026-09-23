@@ -596,6 +596,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
   .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
+  .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
+  .snip{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0}
   .ntevs{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 4px}
   .ntev{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);cursor:pointer}
   .ntev input{width:auto;margin:0}
@@ -919,7 +922,7 @@ function fmtDate(iso){
 var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
-  messenger:'Messenger', viber_business:L('Viber для бізнесу'),
+  messenger:'Messenger', viber_business:L('Viber для бізнесу'), webchat:L('Чат на сайті'),
   viber_user:L('Viber номерний') };
 
 var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
@@ -2620,7 +2623,8 @@ function editRow(id, value, save, errId){
    автоответы и расписание, и в списке им места нет. */
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
-  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB' };
+  whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB',
+  webchat:'WEB' };
 
 function chPill(c){
   return c.status === 'active' ? L('<span class="pill ok">працює</span>')
@@ -2695,6 +2699,13 @@ function tabChannels(){
       L('<div class="acts"><button id="vbGo">Підключити</button></div>') +
       '<div class="err" id="vbErr"></div></div>' +
 
+      '<div class="tile"><div class="t1"><div class="chico webchat">WEB</div>' +
+      L('<div><div class="ttl">Чат на сайті</div><div class="sub">Кнопка на ваших сторінках</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Створюється за секунду: ми даємо один рядок коду, ') +
+      L('ви вставляєте його на сайт. Переписка живе на нашому домені, тож чужі скрипти її не бачать.</div>') +
+      L('<div class="acts"><button id="wcGo">Створити віджет</button></div>') +
+      '<div class="err" id="wcErr"></div></div>' +
+
       '<div class="tile"><div class="t1"><div class="chico whatsapp">WA</div>' +
       L('<div><div class="ttl">WhatsApp Business</div><div class="sub">Номер компанії через Cloud API</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Потрібні токен і <b>Phone number ID</b> з кабінету ') +
@@ -2724,6 +2735,16 @@ function tabChannels(){
       '</div>';
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
+
+    if (el('wcGo')) el('wcGo').onclick = function(){
+      busy(el('wcGo'), true);
+      api('/settings/channels/webchat', { method:'POST' })
+        .then(function(d){ toast(L('Віджет створено')); openChannel(d.channelId) })
+        .catch(function(){
+          el('wcErr').textContent = L('Не вдалося створити');
+          busy(el('wcGo'), false);
+        });
+    };
 
     if (el('waGo')) el('waGo').onclick = function(){
       el('waErr').textContent = '';
@@ -2837,6 +2858,89 @@ function tabChannels(){
 }
 
 /* Страница одного канала: всё, что относится к нему, в одном месте. */
+/* ── Чат на сайте ─────────────────────────────────────────────────
+   Главное здесь — код для вставки: ради него человек и открывает эту
+   страницу. Поэтому он стоит первым и копируется одной кнопкой, а
+   настройки — цвет, приветствие, домены — идут следом. */
+
+function wcPanel(id){
+  api('/channels/' + id + '/webchat').then(function(d){
+    var st = d.settings || {};
+    el('wcBox').innerHTML =
+      L('<div class="pg-sec"><h3>Код для сайту</h3><div class="tile">') +
+      L('<div class="sub" style="white-space:normal">Вставте цей рядок перед закриваючим тегом ') +
+      '&lt;/body&gt;' + L(' на кожній сторінці, де потрібен чат. Кнопка зʼявиться у правому нижньому куті.</div>') +
+      '<pre class="snip" id="wcSnip">' + esc(d.snippet) + '</pre>' +
+      L('<div class="acts"><button class="ghost mini" id="wcCopy">Скопіювати</button>') +
+      L('<button class="ghost mini" id="wcOpen">Подивитися</button></div>') +
+      L('<div class="sub" style="white-space:normal;margin-top:10px">Якщо чат потрібен прямо у сторінці, ') +
+      L('а не кнопкою — цей варіант:</div>') +
+      '<pre class="snip" id="wcFrame">' + esc(d.iframe) + '</pre>' +
+      L('<div class="acts"><button class="ghost mini" id="wcCopy2">Скопіювати рамку</button></div>') +
+      '<div class="ok" id="wcOk"></div></div></div>' +
+
+      L('<div class="pg-sec"><h3>Вигляд і доступ</h3><div class="tile">') +
+      L('<div class="row2"><div class="lbl" style="width:150px">Заголовок</div>') +
+      '<input id="wcTitle" value="' + esc(st.title || '') + '"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:150px">Привітання</div>') +
+      '<input id="wcGreet" value="' + esc(st.greeting || '') + '"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:150px">Колір</div>') +
+      '<input id="wcColor" type="color" value="' + esc(st.color || '#2F6BFF') + '" style="max-width:80px"></div>' +
+      L('<div class="row2"><div class="lbl" style="width:150px">Дозволені домени</div>') +
+      '<input id="wcDom" placeholder="example.com, shop.example.com" value="' +
+        esc((st.domains || []).join(', ')) + '"></div>' +
+      L('<div class="hint">Порожньо — віджет працює будь-де. Список доменів рятує від забутого ') +
+      L('віджета на тестовому сайті, але це не захист: адресу сторінки повідомляє браузер.</div>') +
+      L('<div class="acts"><button id="wcSave">Зберегти</button></div>') +
+      '<div class="ok" id="wcOk2"></div></div></div>';
+
+    el('wcCopy').onclick = function(){ wcCopy(d.snippet, 'wcOk') };
+    el('wcCopy2').onclick = function(){ wcCopy(d.iframe, 'wcOk') };
+    el('wcOpen').onclick = function(){ window.open('/chat/' + d.siteKey, '_blank', 'noopener') };
+
+    el('wcSave').onclick = function(){
+      busy(el('wcSave'), true);
+      api('/channels/' + id + '/webchat', { method:'PATCH', body:{
+        title: el('wcTitle').value.trim(),
+        greeting: el('wcGreet').value.trim(),
+        color: el('wcColor').value,
+        domains: el('wcDom').value
+      }})
+        .then(function(){
+          el('wcOk2').textContent = L('Збережено');
+          return api('/channels').then(function(r){ CHANNELS = r.channels || [] });
+        })
+        .catch(function(){ el('wcOk2').textContent = L('Не вдалося зберегти') })
+        .then(function(){ busy(el('wcSave'), false) });
+    };
+  }).catch(function(){
+    el('wcBox').innerHTML = L('<div class="pg-sec"><div class="empty">Не вдалося завантажити код віджета.</div></div>');
+  });
+}
+
+/* Буфер обмена доступен не везде: в старом браузере и по http его нет.
+   Поэтому запасной путь через скрытое поле, а не молчание. */
+function wcCopy(text, okId){
+  var done = function(){ el(okId).textContent = L('Скопійовано') };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(function(){ wcCopyOld(text, done) });
+  } else {
+    wcCopyOld(text, done);
+  }
+}
+
+function wcCopyOld(text, done){
+  var a = document.createElement('textarea');
+  a.value = text;
+  a.style.position = 'fixed';
+  a.style.opacity = '0';
+  document.body.appendChild(a);
+  a.select();
+  try { document.execCommand('copy'); done() } catch(e){}
+  document.body.removeChild(a);
+}
+
+
 function openChannel(id){
   var c = null;
   for (var i = 0; i < CHANNELS.length; i++) if (CHANNELS[i].id === id) c = CHANNELS[i];
@@ -2873,6 +2977,8 @@ function openChannel(id){
     rows.map(function(r){ return '<div class="k">' + r[0] + '</div><div>' + r[1] + '</div>' }).join('') +
     '</div></div></div>' +
 
+    (c.type === 'webchat' ? '<div id="wcBox"></div>' : '') +
+
     L('<div class="pg-sec"><h3>Автоматизація</h3><div class="grid">') +
     '<div class="tile click" id="chFlows"><div class="t1"><div class="chico soon">⚡</div>' +
     L('<div><div class="ttl">Сценарії цього каналу</div>') +
@@ -2881,6 +2987,8 @@ function openChannel(id){
     L('саме в цьому каналі.</div>') +
     L('<div class="acts"><button class="ghost mini">Відкрити сценарії</button></div></div>') +
     '</div></div></div>';
+
+  if (c.type === 'webchat') wcPanel(id);
 
   el('chBack').onclick = tabChannels;
   el('chFlows').onclick = function(){ setView('bots') };
