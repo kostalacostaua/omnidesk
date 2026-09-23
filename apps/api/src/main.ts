@@ -35,7 +35,7 @@ import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
-import { registerLanding, LANDING_HTML } from './landing.js';
+import { registerLanding, landingPage } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
@@ -504,6 +504,9 @@ registerLanding(app, {
  * Список доменов промо задаётся переменной, а не зашит в код: на
  * проверочных стендах домены другие, и менять из-за этого код нельзя.
  */
+/** Та же страница, что по /promo: собирается один раз вместе с виджетом. */
+const SITE_PAGE = landingPage(process.env['WEBCHAT_SITE_KEY'] ?? '');
+
 const SITE_HOSTS = (process.env['SITE_HOSTS'] ?? 'rozmovio.com,www.rozmovio.com')
   .split(',')
   .map((h) => h.trim().toLowerCase())
@@ -519,7 +522,7 @@ app.get('/', async (req, reply) => {
     return reply
       .type('text/html; charset=utf-8')
       .header('cache-control', 'public, max-age=300')
-      .send(LANDING_HTML);
+      .send(SITE_PAGE);
   }
   return sendUi(req, reply);
 });

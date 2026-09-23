@@ -889,14 +889,23 @@ export function widgetTag(siteKey: string): string {
   return `<script src="/chat.js" data-key="${key}" async></script>`;
 }
 
-/** Вставка перед закрытием body: скрипт асинхронный, порядок не важен. */
-function withWidget(html: string, siteKey: string): string {
-  const tag = widgetTag(siteKey);
-  return tag ? html.replace('</body>', tag + NL + '</body>') : html;
+/**
+ * Готовая промо-страница: разметка плюс наш чат.
+ *
+ * Собирать её нужно ровно здесь и только так. Страница отдаётся из двух
+ * мест — по /promo и по корню на домене сайта, — и первая же попытка
+ * приписать виджет к одному из них закончилась тем, что на самом
+ * rozmovio.com чата не оказалось: корень отдавал исходную разметку в
+ * обход вставки. Поэтому сырой LANDING_HTML остаётся материалом для
+ * тестов, а наружу обе точки отдают результат этой функции.
+ */
+export function landingPage(webchatKey: string): string {
+  const tag = widgetTag(webchatKey);
+  return tag ? LANDING_HTML.replace('</body>', tag + NL + '</body>') : LANDING_HTML;
 }
 
 export function registerLanding(app: FastifyInstance, opts: LandingDeps): void {
-  const page = withWidget(LANDING_HTML, opts.webchatKey ?? '');
+  const page = landingPage(opts.webchatKey ?? '');
 
   const send = async (_req: unknown, reply: FastifyReply) =>
     reply
