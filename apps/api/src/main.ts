@@ -39,6 +39,7 @@ import { registerWidget } from './widget.js';
 import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
+import { channelScope } from './scope.js';
 import { APP_ICON_SVG } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
@@ -652,13 +653,15 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
               q.content->>'text'  AS reply_to_text,
               q.direction         AS reply_to_direction
          FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
          LEFT JOIN messages q
                 ON q.channel_id  = m.channel_id
                AND q.external_id = m.content->>'replyToExternalId'
         WHERE m.conversation_id = $1
+          AND ${channelScope('c.channel_id', '$2')}
         ORDER BY m.sent_at ASC
         LIMIT 200`,
-      [req.params.id],
+      [req.params.id, auth.userId],
     );
     return rows;
   });
@@ -1196,9 +1199,9 @@ app.post<{
                 c.window_expires_at, c.window_type
            FROM conversations c
            JOIN channels ch ON ch.id = c.channel_id
-          WHERE c.id = $1
+          WHERE c.id = $1 AND ${channelScope('c.channel_id', '$2')}
           LIMIT 1`,
-        [req.params.id],
+        [req.params.id, auth.userId],
       );
 
       const conv = rows[0];

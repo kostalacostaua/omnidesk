@@ -1,3 +1,4 @@
+import { channelListScope } from './scope.js';
 import type { FastifyInstance } from 'fastify';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
@@ -142,17 +143,106 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       // credentials_enc НЕ выбираем: токены не должны покидать сервер даже
       // в зашифрованном виде. Показываем только то, по чему канал узнают.
       const { rows } = await db.query(
+        // Каналы, к которым у человека нет доступа, не показываем
+        // вовсе: иначе фильтр предлагает канал, который всегда
+        // возвращает пустой список.
         `SELECT c.id, c.type, c.display_name, c.external_id, c.status,
                 c.meta, c.last_error, c.created_at,
                 (SELECT count(*) FROM conversations v WHERE v.channel_id = c.id) AS conversations
            FROM channels c
+          WHERE ${channelListScope('$1')}
           ORDER BY c.created_at DESC`,
+        [auth.userId],
       );
       return rows;
     });
 
     return { channels: rows };
   });
+
+  /**
+   * Доступ сотрудника к каналам.
+   *
+   * Пустой список означает «все каналы», поэтому ручка отдаёт и то,
+   * что выбрано, и признак «ограничений нет»: в интерфейсе это два
+   * разных состояния, и путать их нельзя — иначе администратор,
+   * сняв все галочки, думает, что запретил всё, а на деле открыл всё.
+   */
+  app.get<{ Params: { id: string } }>('/users/:id/channels', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const data = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ channel_id: string }>(
+        `SELECT channel_id FROM user_channels WHERE user_id = $1`,
+        [req.params.id],
+      );
+      const { rows: role } = await db.query<{ role: string }>(
+        `SELECT role FROM users WHERE id = $1`,
+        [req.params.id],
+      );
+      return { ids: rows.map((r) => r.channel_id), role: role[0]?.role ?? '' };
+    });
+
+    return {
+      channelIds: data.ids,
+      // У владельца и администратора ограничений не бывает: они
+      // отвечают за компанию целиком.
+      unrestricted: data.ids.length === 0,
+      manageable: data.role !== 'owner' && data.role !== 'admin',
+    };
+  });
+
+  /** Задать список каналов. Пустой список снимает ограничение. */
+  app.put<{ Params: { id: string }; Body: { channelIds?: string[] } }>(
+    '/users/:id/channels',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const ids = Array.isArray(req.body?.channelIds) ? req.body!.channelIds!.slice(0, 200) : [];
+
+      const result = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows: who } = await db.query<{ role: string }>(
+          `SELECT role FROM users WHERE id = $1`,
+          [req.params.id],
+        );
+        const role = who[0]?.role;
+        if (!role) return { error: 'not_found' as const };
+        // Ограничивать администратора бессмысленно: он и так видит всё
+        // по своей роли, и строки в таблице создавали бы ложное
+        // впечатление, будто ограничение работает.
+        if (role === 'owner' || role === 'admin') return { error: 'role_unrestricted' as const };
+
+        await db.query(`DELETE FROM user_channels WHERE user_id = $1`, [req.params.id]);
+        if (ids.length) {
+          await db.query(
+            `INSERT INTO user_channels (tenant_id, user_id, channel_id)
+             SELECT $1, $2, c.id FROM channels c WHERE c.id = ANY($3::uuid[])
+             ON CONFLICT DO NOTHING`,
+            [auth.tenantId, req.params.id, ids],
+          );
+        }
+        const { rows } = await db.query<{ channel_id: string }>(
+          `SELECT channel_id FROM user_channels WHERE user_id = $1`,
+          [req.params.id],
+        );
+        return { ids: rows.map((r) => r.channel_id) };
+      });
+
+      if ('error' in result) {
+        return reply.code(result.error === 'not_found' ? 404 : 400).send({
+          error: result.error,
+          detail: result.error === 'role_unrestricted'
+            ? 'Владелец и администратор видят все каналы по своей роли'
+            : 'Сотрудник не найден',
+        });
+      }
+
+      app.log.info({ userId: req.params.id, channels: result.ids.length }, 'Доступ к каналам изменён');
+      return { channelIds: result.ids, unrestricted: result.ids.length === 0 };
+    },
+  );
 
   app.patch<{ Params: { id: string }; Body: { displayName?: string; status?: string } }>(
     '/channels/:id',

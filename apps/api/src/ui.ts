@@ -337,6 +337,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Профиль: шапка, строки данных и числа. Не таблица и не карточки
      в ряд — обычное представление, в котором правится то, что можно
      править, и видно, что править нельзя. */
+  .aclbox{padding:2px 0 14px}
+  .aclgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px}
+  .aclrow{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r1);
+    background:var(--panel2);font-size:12.5px;cursor:pointer}
+  .aclrow input{width:auto;flex:none;margin:0}
+  .aclrow .dim{margin-left:auto;font-size:11px}
   .prof{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:14px;
     background:var(--panel);border:1px solid var(--line);border-radius:var(--r2)}
   .prof-av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;
@@ -2860,6 +2866,82 @@ function pollTgUser(){
   });
 }
 
+/**
+ * Доступ сотрудника к каналам.
+ *
+ * Список каналов галочками прямо под строкой человека: отдельная
+ * страница ради пяти флажков — это два лишних перехода и возврат
+ * «куда я попал». Пусто означает «все каналы», и это написано словами:
+ * администратор, снявший все галочки, должен понимать, что открыл всё,
+ * а не запретил всё.
+ */
+function openAcl(userId, btn){
+  var box = el('acl-' + userId);
+  if (!box) return;
+  if (box.style.display !== 'none'){ box.style.display = 'none'; return }
+
+  busy(btn, true);
+  Promise.all([api('/users/' + userId + '/channels'), api('/channels')])
+    .then(function(res){
+      var picked = {}, list = res[1].channels || [];
+      (res[0].channelIds || []).forEach(function(id){ picked[id] = true });
+
+      box.innerHTML = list.length
+        ? '<div class="aclgrid">' + list.map(function(c){
+            return '<label class="aclrow"><input type="checkbox" data-ch="' + c.id + '"' +
+              (picked[c.id] ? ' checked' : '') + '>' +
+              '<span>' + esc(c.display_name || CH[c.type] || c.type) + '</span>' +
+              '<span class="dim">' + esc(CH[c.type] || c.type) + '</span></label>';
+          }).join('') + '</div>' +
+          '<div class="hint" id="aclhint-' + userId + '"></div>' +
+          '<div class="row2" style="margin-top:8px">' +
+          '<button class="mini" id="aclsave-' + userId + '">Сохранить доступ</button>' +
+          '<button class="ghost mini" id="aclall-' + userId + '">Открыть все</button></div>' +
+          '<div class="err" id="aclerr-' + userId + '"></div>'
+        : '<div class="hint">Каналов пока нет — сначала подключите хотя бы один.</div>';
+
+      box.style.display = 'block';
+      busy(btn, false);
+      if (!list.length) return;
+
+      function marks(){
+        return Array.prototype.filter.call(box.querySelectorAll('[data-ch]'), function(x){
+          return x.checked;
+        }).map(function(x){ return x.dataset.ch });
+      }
+      function hint(){
+        var n = marks().length;
+        el('aclhint-' + userId).textContent = n
+          ? 'Виден только выбранный канал' + (n > 1 ? 'ы: ' + n : '')
+          : 'Ни одной галочки — сотрудник видит все каналы.';
+      }
+      hint();
+      Array.prototype.forEach.call(box.querySelectorAll('[data-ch]'), function(x){
+        x.onchange = hint;
+      });
+
+      el('aclall-' + userId).onclick = function(){
+        Array.prototype.forEach.call(box.querySelectorAll('[data-ch]'), function(x){
+          x.checked = false;
+        });
+        hint();
+      };
+
+      el('aclsave-' + userId).onclick = function(){
+        var save = el('aclsave-' + userId);
+        busy(save, true);
+        api('/users/' + userId + '/channels', { method:'PUT', body:{ channelIds: marks() } })
+          .then(function(){ toast('Доступ сохранён'); box.style.display = 'none' })
+          .catch(function(e){
+            var p = e.payload || {};
+            el('aclerr-' + userId).textContent = p.detail || 'Не удалось сохранить';
+          })
+          .then(function(){ busy(save, false) });
+      };
+    })
+    .catch(function(){ busy(btn, false); alertLine('Не удалось получить список каналов') });
+}
+
 function tabUsers(){
   api('/users').then(function(d){
     USERS = d.users || [];
@@ -2886,11 +2968,17 @@ function tabUsers(){
           '<div class="t">' + esc(u.full_name || u.email) + pill + '</div>' +
           '<div class="s">' + esc(u.email) + ' · ' + esc(ROLES[u.role] || u.role) +
           ' · ' + esc(seen) + '</div></div>' +
+          '<div style="display:flex;gap:6px;flex:none">' +
+          // Доступ к каналам есть только у тех, кого можно ограничить:
+          // владелец и администратор видят всё по своей роли.
+          (u.role === 'owner' || u.role === 'admin' ? '' :
+            '<button class="ghost mini" data-acl="' + u.id + '">Каналы</button>') +
           (u.role === 'owner' ? '' :
             '<button class="ghost mini" data-user="' + u.id + '" data-active="' +
             (u.is_active ? 'false' : 'true') + '">' +
             (u.is_active ? 'Отключить' : 'Включить') + '</button>') +
-          '</div>';
+          '</div></div>' +
+          '<div class="aclbox" id="acl-' + u.id + '" style="display:none"></div>';
       }).join('') + '</div>';
 
     el('uadd').onclick = function(){
@@ -2907,6 +2995,10 @@ function tabUsers(){
           busy(el('uadd'), false);
         });
     };
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-acl]'), function(b){
+      b.onclick = function(){ openAcl(b.dataset.acl, b) };
+    });
 
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-user]'), function(b){
       b.onclick = function(){

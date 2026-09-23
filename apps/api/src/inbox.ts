@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { validateSteps, withTenant, zohoRecordUrl, type Pool } from '@omnidesk/core';
+import { channelScope } from './scope.js';
 
 /**
  * Рабочее место оператора: список диалогов с фильтрами, карточка контакта,
@@ -59,6 +60,11 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     else if (q.assignee && q.assignee !== 'all') where.push(`c.assignee_id = ${push(q.assignee)}::uuid`);
 
     if (q.channelId) where.push(`c.channel_id = ${push(q.channelId)}::uuid`);
+
+    // Доступ к каналам. Условие идёт последним, но действует раньше
+    // всех фильтров: оператор с ограниченным списком не увидит чужой
+    // канал ни выбрав его в фильтре, ни поиском по имени.
+    where.push(channelScope('c.channel_id', push(auth.userId)));
     if (q.tag) where.push(`${push(q.tag)}::text = ANY(c.tags)`);
 
     // Поиск по имени и телефону. ILIKE, а не полнотекстовый индекс:
@@ -109,12 +115,13 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     const row = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query(
         `SELECT
-           count(*) FILTER (WHERE status <> 'resolved')                       AS open,
-           count(*) FILTER (WHERE status <> 'resolved' AND assignee_id = $1)  AS mine,
-           count(*) FILTER (WHERE status <> 'resolved' AND assignee_id IS NULL) AS unassigned,
-           count(*) FILTER (WHERE status = 'resolved')                        AS closed,
-           coalesce(sum(unread_count) FILTER (WHERE status <> 'resolved'), 0) AS unread
-         FROM conversations`,
+           count(*) FILTER (WHERE c.status <> 'resolved')                        AS open,
+           count(*) FILTER (WHERE c.status <> 'resolved' AND c.assignee_id = $1) AS mine,
+           count(*) FILTER (WHERE c.status <> 'resolved' AND c.assignee_id IS NULL) AS unassigned,
+           count(*) FILTER (WHERE c.status = 'resolved')                         AS closed,
+           coalesce(sum(c.unread_count) FILTER (WHERE c.status <> 'resolved'), 0) AS unread
+         FROM conversations c
+         WHERE ${channelScope('c.channel_id', '$1')}`,
         [auth.userId],
       );
       return rows[0] ?? {};
@@ -168,8 +175,12 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
       if (!sets.length) return true;
 
+      // Изменять диалог можно только в своём канале: иначе оператор,
+      // который его не видит, всё равно мог бы закрыть его по ссылке.
+      const uid = push(auth.userId);
       const { rowCount } = await db.query(
-        `UPDATE conversations SET ${sets.join(', ')} WHERE id = $1`,
+        `UPDATE conversations c SET ${sets.join(', ')}
+          WHERE c.id = $1 AND ${channelScope('c.channel_id', uid)}`,
         params,
       );
       return (rowCount ?? 0) > 0;
@@ -186,8 +197,9 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
     const card = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows: conv } = await db.query<{ contact_id: string }>(
-        `SELECT contact_id FROM conversations WHERE id = $1`,
-        [req.params.id],
+        `SELECT contact_id FROM conversations c
+          WHERE c.id = $1 AND ${channelScope('c.channel_id', '$2')}`,
+        [req.params.id, auth.userId],
       );
       if (!conv[0]) return null;
       const contactId = conv[0].contact_id;
