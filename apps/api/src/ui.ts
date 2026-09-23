@@ -4114,6 +4114,18 @@ function ntPushSubscribe(){
   Notification.requestPermission().then(function(perm){
     if (perm !== 'granted') throw new Error(L('Сповіщення заборонені у налаштуваннях браузера'));
     return navigator.serviceWorker.register('/sw.js');
+  }).then(function(){
+    // register() возвращается, как только браузер принял файл, — но
+    // подписываться в этот момент не на что: сценарий ещё не активен, и
+    // PushManager отвечает «no active Service Worker». Ждём готовности.
+    return navigator.serviceWorker.ready;
+  }).then(function(reg){
+    // Старая подписка могла остаться от прежней пары ключей VAPID.
+    // Подписаться поверх неё браузер не даст, а прежняя всё равно уже
+    // не работает — снимаем её и подписываемся заново.
+    return reg.pushManager.getSubscription().then(function(old){
+      return old ? old.unsubscribe().then(function(){ return reg }) : reg;
+    });
   }).then(function(reg){
     return reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: ntKeyBytes(key) });
   }).then(function(sub){
