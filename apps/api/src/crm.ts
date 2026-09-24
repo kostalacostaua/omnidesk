@@ -15,6 +15,7 @@ import {
   parseCrmSettings,
   withSystem,
   withTenant,
+  convertedContactId,
   zohoAccessToken,
   zohoRecordUrl,
   type CrmKind,
@@ -257,19 +258,42 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     leadId: string,
     z: { inst: { api_domain: string }; head: Record<string, string> },
   ): Promise<string | null> {
-    const res = await fetch(`${z.inst.api_domain}/crm/v6/Leads/${leadId}`, {
-      headers: z.head,
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return null;
+    // Поля конвертации у лида настоящие, а не служебные: Converted__s —
+    // признак, Converted_Contact — ссылка на получившийся контакт.
+    const fields = 'Converted__s,Converted_Contact,Converted_Account';
 
-    const body = (await res.json().catch(() => ({}))) as {
-      data?: Array<Record<string, unknown>>;
-    };
-    const row = body.data?.[0] ?? {};
-    const detail = row['$converted_detail'] as { contact?: string; contact_id?: string } | undefined;
-    const newId = String(detail?.contact ?? detail?.contact_id ?? '');
-    if (!row['$converted'] || !/^[0-9]+$/.test(newId)) return null;
+    /*
+     * Два захода, и это не перестраховка.
+     *
+     * Запись по идентификатору Zoho для сконвертированного лида отдаёт
+     * не всегда: в интерфейсе он закрыт, и API местами ведёт себя так
+     * же. Списочная ручка с параметром converted=true отдаёт его
+     * гарантированно — но только вместе с параметром, без него
+     * сконвертированные из списка исключены.
+     */
+    const urls = [
+      `${z.inst.api_domain}/crm/v6/Leads/${leadId}?fields=${fields}`,
+      `${z.inst.api_domain}/crm/v6/Leads?converted=true&ids=${leadId}&fields=${fields}`,
+    ];
+
+    let row: Record<string, unknown> | null = null;
+    for (const url of urls) {
+      const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+      if (res.status === 204) continue;
+      if (!res.ok) continue;
+      const body = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> };
+      const first = body.data?.[0];
+      if (convertedContactId(first)) {
+        row = first ?? null;
+        break;
+      }
+      // Ответ есть, но лид ещё не сконвертирован — второй заход не поможет.
+      if (first) return null;
+    }
+    if (!row) return null;
+
+    const newId = convertedContactId(row);
+    if (!newId) return null;
 
     await withTenant(pool, tenantId, async (db) => {
       await db.query(

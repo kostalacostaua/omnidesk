@@ -36,3 +36,28 @@ export function zohoRecordUrl(
   if (!/^[0-9]+$/.test(recordId)) return null;
   return `${ui}/crm/tab/${module}/${recordId}`;
 }
+
+/**
+ * Контакт, в который превратился лид.
+ *
+ * Лида конвертируют в самой Zoho, и после этого запись лида закрыта, а
+ * связь у нас всё ещё указывает на неё. Zoho отдаёт в самом лиде, во
+ * что он превратился, — и отдаёт двумя способами: полем
+ * Converted_Contact в новых версиях API и служебным $converted_detail
+ * в старых. Понимаем оба: угадывать версию чужого API по номеру в
+ * адресе — худший способ узнать правду.
+ *
+ * Пустой ответ здесь значит «ещё не сконвертирован», а не «ошибка»:
+ * это законное состояние, и показывать его надо словами, а не отказом.
+ */
+export function convertedContactId(row: Record<string, unknown> | null | undefined): string | null {
+  if (!row) return null;
+  const converted = row['Converted__s'] === true || row['$converted'] === true;
+  if (!converted) return null;
+
+  const lookup = row['Converted_Contact'] as { id?: unknown } | undefined;
+  const detail = row['$converted_detail'] as { contact?: unknown; contact_id?: unknown } | undefined;
+  const raw = lookup?.id ?? detail?.contact ?? detail?.contact_id;
+  const id = typeof raw === 'string' || typeof raw === 'number' ? String(raw) : '';
+  return /^[0-9]+$/.test(id) ? id : null;
+}
