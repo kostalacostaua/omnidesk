@@ -30,6 +30,7 @@ import {
   iframeSnippet,
   normalizeDomain,
   parseRouting,
+  parseSla,
   parseWorkHours,
   ROUTING_DEFAULT,
   webchatSettings,
@@ -265,6 +266,43 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       });
 
       return { workHours: wh };
+    },
+  );
+
+  /**
+   * Обещание по времени.
+   *
+   * Два числа и ничего больше. Ноль означает «не обещаем»: пустое
+   * обещание честнее подставленного за человека, потому что отчёт
+   * потом называет его нарушения просрочкой от имени компании.
+   */
+  app.patch<{ Body: { firstReplyMinutes?: number; resolveMinutes?: number } }>(
+    '/settings/sla',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const current = await withSystem(pool, 'текущее обещание', async (db) => {
+        const { rows } = await db.query<{ sla: unknown }>(
+          `SELECT sla FROM tenants WHERE id = $1 LIMIT 1`,
+          [auth.tenantId],
+        );
+        return parseSla(rows[0]?.sla);
+      });
+
+      const sla = parseSla({
+        firstReplyMinutes: req.body?.firstReplyMinutes ?? current.firstReplyMinutes,
+        resolveMinutes: req.body?.resolveMinutes ?? current.resolveMinutes,
+      });
+
+      await withSystem(pool, 'обещание по времени', async (db) => {
+        await db.query(`UPDATE tenants SET sla = $2::jsonb WHERE id = $1`, [
+          auth.tenantId,
+          JSON.stringify(sla),
+        ]);
+      });
+
+      return { sla };
     },
   );
 

@@ -422,11 +422,22 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
   .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
   .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
+  /* Полоска «показан один диалог»: состояние списка, в которое можно
+     попасть из отчёта, обязано быть видно и сниматься одним щелчком. */
+  .drill{display:flex;align-items:center;gap:8px;margin-top:9px;padding:7px 10px;
+    border-radius:9px;background:var(--panel2);font-size:12px;color:var(--t2)}
+  .drill button{padding:3px 9px;font-size:11.5px;box-shadow:none}
+
   /* Отчёты. Полоса отбора и столбики по дням — всё, что здесь своего;
      таблицы берут вид у матрицы доступов. */
   .rpbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .rpbar .grow{flex:1}
   .rpbar button.on{border-color:var(--brand1);color:var(--brand1);font-weight:600}
+  .rptabs{margin-bottom:14px}
+  /* Полоска в строке таблицы: она отвечает на «кто больше» быстрее,
+     чем колонка чисел, и не занимает отдельного графика. */
+  .sbar{display:block;height:7px;border-radius:4px;background:var(--panel2);overflow:hidden}
+  .sbar i{display:block;height:100%;background:var(--brand1);border-radius:4px;min-width:2px}
   .bars{display:flex;gap:8px;align-items:flex-end;overflow-x:auto;padding-bottom:4px}
   /* Не .col: это имя уже занято общим правилом с колонкой по
      вертикали, и столбики от него вставали друг под друга. */
@@ -940,6 +951,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
         <button class="tab" data-status="closed" data-t>Закриті<span class="n" id="nClosed"></span></button>
         <button class="tab" data-status="all" data-t>Усі</button>
       </div>
+      <div class="drill" id="drill" style="display:none"></div>
     </div>
     <div id="convs"></div>
   </div>
@@ -1119,6 +1131,7 @@ function query(){
   if (F.channelId.length) p.push('channelId=' + encodeURIComponent(F.channelId.join(',')));
   if (F.tag.length) p.push('tag=' + encodeURIComponent(F.tag.join(',')));
   if (F.statusId.length) p.push('statusId=' + encodeURIComponent(F.statusId.join(',')));
+  if (DRILL) p.push('id=' + encodeURIComponent(DRILL));
   if (F.q) p.push('q=' + encodeURIComponent(F.q));
   return '/conversations?' + p.join('&');
 }
@@ -5022,7 +5035,12 @@ function kindSelect(id, value){
    говорит про обычный день, девятый дециль — про худшее, что
    случается регулярно. */
 
-var RP = { days: 7, channelId: [], userId: [], data: null };
+var RP = { days: 7, channelId: [], userId: [], tab: 'overview', data: null, breaches: null };
+
+/* Проваливание из отчёта в переписку. Держится отдельно от фильтров и
+   видно на экране полоской: скрытое состояние списка — это когда
+   человек не понимает, почему в нём один диалог. */
+var DRILL = null;
 
 function rpFrom(){
   var d = new Date();
@@ -5041,18 +5059,67 @@ function dur(sec){
   return h + L(' год ') + (m % 60) + L(' хв');
 }
 
-function tabReports(){
+/**
+ * Отчёты разложены по страницам, а не свалены в одну простыню.
+ *
+ * Причина простая: вопросы разные. «Как мы вообще работаем» смотрят раз
+ * в неделю, «какой канал тонет» — когда что-то пошло не так, «кто
+ * сколько сделал» — в конце месяца, «где мы нарушили обещание» — сразу
+ * после жалобы. Одна страница со всем этим заставляет каждый раз
+ * искать глазами свой кусок среди четырёх чужих.
+ *
+ * Полоса отбора общая для всех страниц: период и каналы человек
+ * выбирает один раз, а не заново на каждой вкладке.
+ */
+var RP_TABS = [
+  ['overview', 'Огляд'],
+  ['channels', 'Канали'],
+  ['team', 'Команда'],
+  ['sla', 'SLA'],
+];
+
+function rpQuery(){
   var p = ['from=' + encodeURIComponent(rpFrom().toISOString())];
   if (RP.channelId.length) p.push('channelId=' + encodeURIComponent(RP.channelId.join(',')));
   if (RP.userId.length) p.push('userId=' + encodeURIComponent(RP.userId.join(',')));
+  return p.join('&');
+}
 
-  api('/analytics?' + p.join('&')).then(function(d){
-    RP.data = d;
-    var t = d.totals || {};
-    var days = d.byDay || [];
-    var top = Math.max.apply(null, [1].concat(days.map(function(x){
-      return Math.max(x.messagesIn, x.messagesOut);
-    })));
+/** Выгрузка таблицы. Разделитель — точка с запятой: так Excel в наших
+    краях открывает файл сразу, а не одной колонкой. */
+function csvDump(name, head, rows){
+  var nl = String.fromCharCode(10);
+  var cell = function(v){
+    var t = String(v == null ? '' : v);
+    return t.indexOf(';') >= 0 || t.indexOf('"') >= 0 || t.indexOf(nl) >= 0
+      ? '"' + t.split('"').join('""') + '"' : t;
+  };
+  var body = [head].concat(rows).map(function(r){ return r.map(cell).join(';') }).join(nl);
+  // Метка порядка байтов: без неё Excel читает кириллицу как кракозябры.
+  var blob = new Blob([String.fromCharCode(65279) + body], { type:'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href) }, 1000);
+}
+
+/** Доля в процентах, без деления на ноль. */
+function pct(part, whole){
+  if (!whole) return '—';
+  return Math.round(part / whole * 100) + '%';
+}
+
+function tabReports(){
+  var calls = [api('/analytics?' + rpQuery())];
+  if (RP.tab === 'sla') calls.push(api('/analytics/breaches?' + rpQuery()).catch(function(){
+    return { breaches: [] };
+  }));
+
+  Promise.all(calls).then(function(res){
+    RP.data = res[0];
+    RP.breaches = res[1] || null;
+    var d = RP.data, t = d.totals || {};
 
     pageBox().innerHTML = '<div class="pg">' +
       pageHead(L('Звіти'), L('Рахуються за стрічкою подій: те, що сталося, а не те, як воно виглядає зараз. ') +
@@ -5064,69 +5131,28 @@ function tabReports(){
           '" data-days="' + x[0] + '">' + esc(x[1]) + '</button>';
       }).join('') +
       '<span class="grow"></span>' +
-      '<button class="fbtn" id="rpCh" style="flex:0 0 190px"></button>' +
-      '<button class="fbtn" id="rpUs" style="flex:0 0 190px"></button>' +
+      '<button class="fbtn" id="rpCh" style="flex:0 0 170px"></button>' +
+      '<button class="fbtn" id="rpUs" style="flex:0 0 170px"></button>' +
+      L('<button class="ghost mini" id="rpCsv">Вивантажити CSV</button>') +
       '</div>' +
 
-      '<div class="nums">' +
-      num(t.conversations, L('нових діалогів')) +
-      num(t.messagesIn, L('вхідних')) +
-      num(t.messagesOut, L('вихідних')) +
-      num(t.resolved, L('закрито')) +
-      '</div>' +
+      '<div class="tabs rptabs">' +
+      RP_TABS.map(function(x){
+        return '<button class="tab' + (RP.tab === x[0] ? ' on' : '') +
+          '" data-rtab="' + x[0] + '">' + esc(L(x[1])) + '</button>';
+      }).join('') + '</div>' +
 
-      L('<div class="pg-sec"><h3>Час першої відповіді</h3><div class="card">') +
-      '<div class="nums">' +
-      num(dur(t.medianWait), L('медіана')) +
-      num(dur(t.avgWait), L('середнє')) +
-      num(dur(t.p90Wait), L('9 з 10 швидше ніж')) +
-      num(t.replies, L('відповідей у строк')) +
-      '</div>' +
-      L('<div class="hint">Медіана — про звичайний день: половина клієнтів дочекалась швидше. ') +
-      L('Середнє один забутий на ніч діалог зсуває вдвічі, тому дивіться на обидва числа.</div>') +
-      '</div></div>' +
-
-      (days.length
-        ? L('<div class="pg-sec"><h3>По днях</h3><div class="card"><div class="bars">') +
-          days.map(function(x){
-            return '<div class="bar" title="' + esc(x.day) + ': ' + x.messagesIn +
-              L(' вхідних, ') + x.messagesOut + L(' вихідних">') +
-              '<div class="bcol"><i class="in" style="height:' +
-                Math.round(x.messagesIn / top * 100) + '%"></i>' +
-              '<i class="out" style="height:' + Math.round(x.messagesOut / top * 100) + '%"></i>' +
-              '</div><span>' + esc(x.day.slice(5)) + '</span></div>';
-          }).join('') + '</div>' +
-          L('<div class="hint"><b class="in">■</b> вхідні · <b class="out">■</b> вихідні</div>') +
-          '</div></div>'
-        : '') +
-
-      L('<div class="pg-sec"><h3>По каналах</h3><div class="card">') +
-      ((d.byChannel || []).length
-        ? '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
-          L('<th>Канал</th><th>Діалогів</th><th>Вхідних</th><th>Вихідних</th><th>Медіана</th>') +
-          '</tr></thead><tbody>' +
-          d.byChannel.map(function(c){
-            return '<tr><td>' + esc(c.name || CH[c.type] || c.type) + '</td><td>' +
-              c.conversations + '</td><td>' + c.messagesIn + '</td><td>' + c.messagesOut +
-              '</td><td>' + esc(dur(c.medianWait)) + '</td></tr>';
-          }).join('') + '</tbody></table></div>'
-        : L('<div class="hint">За цей період подій не було.</div>')) + '</div></div>' +
-
-      L('<div class="pg-sec"><h3>По співробітниках</h3><div class="card">') +
-      ((d.byUser || []).length
-        ? '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
-          L('<th>Співробітник</th><th>Відповідей</th><th>Повідомлень</th><th>Закрито</th><th>Медіана</th>') +
-          '</tr></thead><tbody>' +
-          d.byUser.map(function(u){
-            return '<tr><td>' + esc(u.name) + '</td><td>' + u.replies + '</td><td>' +
-              u.messagesOut + '</td><td>' + u.resolved + '</td><td>' +
-              esc(dur(u.medianWait)) + '</td></tr>';
-          }).join('') + '</tbody></table></div>'
-        : L('<div class="hint">За цей період ніхто не відповідав.</div>')) + '</div></div>' +
+      (RP.tab === 'overview' ? rpOverview(d, t)
+        : RP.tab === 'channels' ? rpChannels(d)
+        : RP.tab === 'team' ? rpTeam(d)
+        : rpSla(d, t)) +
       '</div>';
 
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-days]'), function(b){
       b.onclick = function(){ RP.days = Number(b.dataset.days); tabReports() };
+    });
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-rtab]'), function(b){
+      b.onclick = function(){ RP.tab = b.dataset.rtab; tabReports() };
     });
 
     function paintRp(){
@@ -5151,7 +5177,247 @@ function tabReports(){
         return { v:u.id, t:u.full_name || u.name || u.email };
       }), RP.userId, L('Усі співробітники'), function(out){ RP.userId = out; tabReports() });
     };
+    el('rpCsv').onclick = rpExport;
+
+    /* Проваливание: строка таблицы — это не итог, а вопрос «а что там».
+       Щелчок по каналу или человеку переносит в список чатов уже с этим
+       отбором, щелчок по просрочке открывает саму переписку. */
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-drill-ch]'), function(r){
+      r.onclick = function(){ drillTo({ channelId: [r.dataset.drillCh] }) };
+    });
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-drill-us]'), function(r){
+      r.onclick = function(){ drillTo({ assignee: [r.dataset.drillUs] }) };
+    });
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-drill-conv]'), function(r){
+      r.onclick = function(){ drillConv(r.dataset.drillConv) };
+    });
+
+    if (RP.tab === 'sla') wireSla(d.sla || {});
   }).catch(sErr);
+}
+
+function rpOverview(d, t){
+  var days = d.byDay || [];
+  var top = Math.max.apply(null, [1].concat(days.map(function(x){
+    return Math.max(x.messagesIn, x.messagesOut);
+  })));
+  var msgs = (t.messagesIn || 0) + (t.messagesOut || 0);
+
+  return '<div class="nums">' +
+    num(t.conversations, L('нових діалогів')) +
+    num(t.messagesIn, L('вхідних')) +
+    num(t.messagesOut, L('вихідних')) +
+    num(t.conversations ? (msgs / t.conversations).toFixed(1) : '—', L('повідомлень на діалог')) +
+    '</div>' +
+
+    L('<div class="pg-sec"><h3>Час першої відповіді</h3><div class="card">') +
+    '<div class="nums">' +
+    num(dur(t.medianWait), L('медіана')) +
+    num(dur(t.avgWait), L('середнє')) +
+    num(dur(t.p90Wait), L('9 з 10 швидше ніж')) +
+    num(pct(t.repliedConversations, t.conversations), L('діалогів з відповіддю')) +
+    '</div>' +
+    L('<div class="hint">Медіана — про звичайний день: половина клієнтів дочекалась швидше. ') +
+    L('Середнє один забутий на ніч діалог зсуває вдвічі, тому дивіться на обидва числа.</div>') +
+    '</div></div>' +
+
+    L('<div class="pg-sec"><h3>Закриття</h3><div class="card">') +
+    '<div class="nums">' +
+    num(t.resolved, L('закрито')) +
+    num(dur((d.resolve || {}).median), L('медіана до закриття')) +
+    num(dur((d.resolve || {}).avg), L('середнє до закриття')) +
+    num(pct(t.resolved, t.conversations), L('від нових')) +
+    '</div>' +
+    L('<div class="hint">Час до закриття рахується за календарем, а не в робочих годинах: ') +
+    L('діалог живе і вночі, і у вихідні, і саме стільки клієнт чекає розвʼязки.</div>') +
+    '</div></div>' +
+
+    (days.length
+      ? L('<div class="pg-sec"><h3>По днях</h3><div class="card"><div class="bars">') +
+        days.map(function(x){
+          return '<div class="bar" title="' + esc(x.day) + ': ' + x.messagesIn +
+            L(' вхідних, ') + x.messagesOut + L(' вихідних">') +
+            '<div class="bcol"><i class="in" style="height:' +
+              Math.round(x.messagesIn / top * 100) + '%"></i>' +
+            '<i class="out" style="height:' + Math.round(x.messagesOut / top * 100) + '%"></i>' +
+            '</div><span>' + esc(x.day.slice(5)) + '</span></div>';
+        }).join('') + '</div>' +
+        L('<div class="hint"><b class="in">■</b> вхідні · <b class="out">■</b> вихідні</div>') +
+        '</div></div>'
+      : '');
+}
+
+function rpChannels(d){
+  var list = d.byChannel || [];
+  if (!list.length) return L('<div class="card"><div class="hint">За цей період подій не було.</div></div>');
+  var top = Math.max.apply(null, [1].concat(list.map(function(c){ return c.messagesIn })));
+
+  return '<div class="card">' +
+    '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+    L('<th>Канал</th><th>Діалогів</th><th>Вхідних</th><th>Вихідних</th><th>Медіана</th><th></th>') +
+    '</tr></thead><tbody>' +
+    list.map(function(c){
+      return '<tr data-drill-ch="' + esc(c.id) + '" style="cursor:pointer" title="' +
+        L('Показати ці чати') + '"><td>' + esc(c.name || CH[c.type] || c.type) + '</td><td>' +
+        c.conversations + '</td><td>' + c.messagesIn + '</td><td>' + c.messagesOut +
+        '</td><td>' + esc(dur(c.medianWait)) + '</td>' +
+        '<td style="width:120px"><span class="sbar"><i style="width:' +
+        Math.round(c.messagesIn / top * 100) + '%"></i></span></td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    L('<div class="hint">Рядок клікається: відкриється список чатів цього каналу.</div></div>');
+}
+
+function rpTeam(d){
+  var list = d.byUser || [];
+  if (!list.length) return L('<div class="card"><div class="hint">За цей період ніхто не відповідав.</div></div>');
+  var top = Math.max.apply(null, [1].concat(list.map(function(u){ return u.messagesOut })));
+
+  return '<div class="card">' +
+    '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+    L('<th>Співробітник</th><th>Відповідей</th><th>Повідомлень</th><th>Закрито</th><th>Медіана</th><th></th>') +
+    '</tr></thead><tbody>' +
+    list.map(function(u){
+      return '<tr data-drill-us="' + esc(u.id) + '" style="cursor:pointer" title="' +
+        L('Показати ці чати') + '"><td>' + esc(u.name) + '</td><td>' + u.replies + '</td><td>' +
+        u.messagesOut + '</td><td>' + u.resolved + '</td><td>' + esc(dur(u.medianWait)) + '</td>' +
+        '<td style="width:120px"><span class="sbar"><i style="width:' +
+        Math.round(u.messagesOut / top * 100) + '%"></i></span></td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    L('<div class="hint">Рядок клікається: відкриється список чатів цієї людини. ') +
+    L('Числа — про роботу, а не про людину: у того, кому дістаються складні звернення, медіана буде гіршою.</div></div>');
+}
+
+function rpSla(d, t){
+  var sla = d.sla || {};
+  var br = (RP.breaches || {}).breaches || [];
+  var total = (t.replyInTime || 0) + (t.replyLate || 0);
+
+  return L('<div class="card"><h3>Обіцянка</h3>') +
+    '<div class="acts" style="margin-top:0">' +
+    L('<label class="ntev">Перша відповідь, хвилин <input id="slaFirst" type="number" min="0" max="2880" style="max-width:110px"></label>') +
+    L('<label class="ntev">Закриття, хвилин <input id="slaResolve" type="number" min="0" max="2880" style="max-width:110px"></label>') +
+    L('<button id="slaSave">Зберегти</button></div>') +
+    L('<div class="hint">Нуль — не обіцяємо нічого, і тоді жодне число не називається простроченням: ') +
+    L('вигадати обіцянку за компанію гірше, ніж не мати її. Рахується в робочих годинах.</div>') +
+    '<div class="err" id="slaErr"></div></div>' +
+
+    (sla.firstReplyMinutes
+      ? L('<div class="pg-sec"><h3>Як тримаємо</h3><div class="card">') +
+        '<div class="nums">' +
+        num(t.replyInTime, L('у строк')) +
+        num(t.replyLate, L('прострочено')) +
+        num(pct(t.replyInTime, total), L('вкладаємось')) +
+        num(dur(sla.firstReplyMinutes * 60), L('обіцяно')) +
+        '</div></div></div>' +
+
+        L('<div class="pg-sec"><h3>Прострочення</h3><div class="card">') +
+        (br.length
+          ? '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+            L('<th>Клієнт</th><th>Канал</th><th>Хто відповів</th><th>Чекав</th><th>За годинником</th>') +
+            '</tr></thead><tbody>' +
+            br.map(function(x){
+              return '<tr data-drill-conv="' + esc(x.conversationId) + '" style="cursor:pointer" title="' +
+                L('Відкрити переписку') + '"><td>' + esc(x.contact || L('Без імені')) + '</td><td>' +
+                esc(x.channel || CH[x.channelType] || '') + '</td><td>' + esc(x.user || '—') +
+                '</td><td>' + esc(dur(x.waitSeconds)) + '</td><td>' + esc(dur(x.clockSeconds)) +
+                '</td></tr>';
+            }).join('') + '</tbody></table></div>' +
+            L('<div class="hint">Рядок клікається: відкриється сама переписка. ') +
+            L('«Чекав» — у робочих годинах, «за годинником» — як це відчув клієнт.</div>')
+          : L('<div class="hint">Жодного прострочення за цей період.</div>')) +
+        '</div></div>'
+      : L('<div class="hint">Поки обіцянки немає, рахувати прострочення нема від чого.</div>'));
+}
+
+function wireSla(sla){
+  el('slaFirst').value = sla.firstReplyMinutes || 0;
+  el('slaResolve').value = sla.resolveMinutes || 0;
+  el('slaSave').onclick = function(){
+    el('slaErr').textContent = '';
+    busy(el('slaSave'), true);
+    api('/settings/sla', { method:'PATCH', body:{
+      firstReplyMinutes: Number(el('slaFirst').value),
+      resolveMinutes: Number(el('slaResolve').value)
+    }}).then(function(){ tabReports(); toast(L('Обіцянку збережено')) })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('slaErr').textContent = p.detail || L('Не вдалося зберегти');
+        busy(el('slaSave'), false);
+      });
+  };
+}
+
+/** Выгрузка той таблицы, которая сейчас на экране. */
+function rpExport(){
+  var d = RP.data || {}, t = d.totals || {};
+  if (RP.tab === 'channels'){
+    csvDump('kanaly', [L('Канал'), L('Діалогів'), L('Вхідних'), L('Вихідних'), L('Медіана, с')],
+      (d.byChannel || []).map(function(c){
+        return [c.name, c.conversations, c.messagesIn, c.messagesOut, c.medianWait];
+      }));
+  } else if (RP.tab === 'team'){
+    csvDump('komanda', [L('Співробітник'), L('Відповідей'), L('Повідомлень'), L('Закрито'), L('Медіана, с')],
+      (d.byUser || []).map(function(u){
+        return [u.name, u.replies, u.messagesOut, u.resolved, u.medianWait];
+      }));
+  } else if (RP.tab === 'sla'){
+    csvDump('sla', [L('Клієнт'), L('Канал'), L('Хто відповів'), L('Чекав, с'), L('За годинником, с')],
+      (((RP.breaches || {}).breaches) || []).map(function(x){
+        return [x.contact, x.channel, x.user, x.waitSeconds, x.clockSeconds];
+      }));
+  } else {
+    csvDump('po-dnyah', [L('День'), L('Вхідних'), L('Вихідних'), L('Нових діалогів')],
+      (d.byDay || []).map(function(x){
+        return [x.day, x.messagesIn, x.messagesOut, x.conversations];
+      }).concat([[]], [[L('Разом'), t.messagesIn, t.messagesOut, t.conversations]]));
+  }
+}
+
+/** Из отчёта — в список чатов с этим отбором. */
+function drillTo(filters){
+  DRILL = null;
+  F.status = 'all';
+  F.channelId = filters.channelId || [];
+  F.assignee = filters.assignee || [];
+  F.tag = [];
+  F.statusId = [];
+  F.q = '';
+  if (el('fQ')) el('fQ').value = '';
+  Array.prototype.forEach.call(document.querySelectorAll('.tab[data-status]'), function(x){
+    x.classList.toggle('on', x.dataset.status === 'all');
+  });
+  setView('chats');
+  paintFilters();
+  paintDrill();
+  lastList = null;
+  refresh();
+}
+
+/** Из отчёта — прямо в переписку. */
+function drillConv(id){
+  DRILL = id;
+  F.status = 'all';
+  F.channelId = []; F.assignee = []; F.tag = []; F.statusId = []; F.q = '';
+  setView('chats');
+  paintFilters();
+  paintDrill();
+  lastList = null;
+  refresh().then(function(){ openConv(id) });
+}
+
+function paintDrill(){
+  var box = el('drill');
+  if (!box) return;
+  box.style.display = DRILL ? 'flex' : 'none';
+  if (!DRILL) return;
+  box.innerHTML = L('<span>Показаний один діалог зі звіту.</span>') +
+    L('<button class="ghost mini" id="drillOff">Показати всі</button>');
+  el('drillOff').onclick = function(){
+    DRILL = null;
+    paintDrill();
+    lastList = null;
+    refresh();
+  };
 }
 
 function tabStatuses(){

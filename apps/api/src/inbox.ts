@@ -48,6 +48,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
   // ── Список диалогов ───────────────────────────────────────────────
   app.get<{
     Querystring: {
+      id?: string;
       status?: string;
       statusId?: string;
       assignee?: string;
@@ -107,6 +108,15 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
     const channels = many(q.channelId).filter((v) => UUID.test(v));
     if (channels.length) where.push(`c.channel_id = ANY(${push(channels)}::uuid[])`);
+
+    /*
+     * Один диалог по номеру. Нужен, чтобы из отчёта можно было
+     * провалиться в конкретную переписку: без этого «двенадцать
+     * просрочек» остаются цифрой, которую не с чем сопоставить.
+     * Доступ к каналу проверяется ниже как обычно — номер в адресе не
+     * открывает чужой диалог.
+     */
+    if (q.id && UUID.test(q.id)) where.push(`c.id = ${push(q.id)}::uuid`);
 
     /*
      * Свой статус. Фильтр отдельный от системного намеренно: «Відкриті»

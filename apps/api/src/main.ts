@@ -49,6 +49,7 @@ import { registerWebchat } from './webchat.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
 import { registerAnalytics } from './analytics.js';
+import { backfillEvents } from './backfill.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -1619,6 +1620,16 @@ async function start(): Promise<void> {
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`api слушает :${PORT}, интерфейс сборки ${UI_BUILD}`);
+
+  /*
+   * Перенос старой переписки в ленту событий. После listen и без await:
+   * он идёт минуты, а держать выкатку ради отчётов нельзя — сервис
+   * должен принимать сообщения с первой секунды. Отметка в базе не
+   * даёт ему повториться при следующем запуске.
+   */
+  backfillEvents(pool, (msg, extra) => app.log.info(extra ?? {}, msg)).catch((err: unknown) => {
+    app.log.warn({ err }, 'Перенос старой переписки в ленту событий не удался');
+  });
 }
 
 async function shutdown(signal: string): Promise<void> {
