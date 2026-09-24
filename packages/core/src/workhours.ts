@@ -148,3 +148,81 @@ export function fromHhmm(value: string): number {
   if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
   return Math.min(24 * 60, Math.max(0, h * 60 + m));
 }
+
+/**
+ * Начало следующих местных суток.
+ *
+ * Прибавить двадцать четыре часа нельзя: два раза в год сутки длятся
+ * двадцать три или двадцать пять, и подсчёт уехал бы на час — молча и
+ * в отчёте. Поэтому граница ищется делением пополам по календарю: он
+ * единственный знает, где у этих суток конец.
+ */
+function nextLocalMidnight(at: Date, tz: string): Date {
+  const today = localParts(at, tz).day;
+  let lo = at.getTime();
+  let hi = lo + 26 * 3600_000;
+
+  // Тридцати шагов деления хватает на точность до миллисекунды.
+  for (let i = 0; i < 30 && hi - lo > 1000; i++) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (localParts(new Date(mid), tz).day === today) lo = mid;
+    else hi = mid;
+  }
+  return new Date(hi);
+}
+
+/**
+ * Сколько рабочего времени прошло между двумя моментами.
+ *
+ * Это та величина, ради которой рабочие часы вообще заведены: «ответили
+ * через четырнадцать часов» складывается из ночи и выходных и не
+ * говорит ни о ком ничего, а «ответили через сорок минут рабочего
+ * времени» — говорит.
+ *
+ * Считается по местным суткам, а не прибавлением двадцати четырёх
+ * часов, и потому переход на зимнее время ничего не сдвигает.
+ *
+ * Круглосуточное расписание — отдельная ветка не ради скорости, а ради
+ * точности: обход по суткам дал бы тот же ответ, но через семь тысяч
+ * шагов на годовом промежутке.
+ */
+export function workedSeconds(from: Date, to: Date, wh: WorkHours): number {
+  const start = from.getTime();
+  const end = to.getTime();
+  if (!(end > start)) return 0;
+  if (isAlwaysOn(wh)) return Math.round((end - start) / 1000);
+
+  // Неизвестный пояс: считаем всё время рабочим, как и в isWorkTime.
+  // Врать нулём хуже, чем посчитать грубо: нулевое время ответа в
+  // отчёте выглядит достижением.
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: wh.tz });
+  } catch {
+    return Math.round((end - start) / 1000);
+  }
+
+  let total = 0;
+  let cursor = new Date(start);
+
+  // Предел на случай испорченных дат: год рабочего времени в одном
+  // ожидании — это уже не ожидание, а сломанная запись.
+  for (let guard = 0; guard < 400 && cursor.getTime() < end; guard++) {
+    const { day, minutes } = localParts(cursor, wh.tz);
+    const midnight = nextLocalMidnight(cursor, wh.tz);
+    const segEnd = Math.min(end, midnight.getTime());
+    const segMinutes = (segEnd - cursor.getTime()) / 60_000;
+
+    const d = wh.days[day];
+    if (d?.on) {
+      const openFrom = d.allDay ? 0 : d.from;
+      const openTo = d.allDay ? 1440 : d.to;
+      const a = Math.max(minutes, openFrom);
+      const b = Math.min(minutes + segMinutes, openTo);
+      if (b > a) total += (b - a) * 60;
+    }
+
+    cursor = new Date(segEnd);
+  }
+
+  return Math.round(total);
+}

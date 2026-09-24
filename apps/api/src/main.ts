@@ -16,6 +16,10 @@ import {
   mediaKey,
   defaultJobOptions,
   jobKey,
+  messageEventKey,
+  parseWorkHours,
+  recordEvent,
+  workedSeconds,
   encryptJson,
   maskSecret,
   parseMasterKey,
@@ -44,6 +48,7 @@ import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
+import { registerAnalytics } from './analytics.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -306,6 +311,65 @@ function markReadUpstream(task: { tenantId: string; conversationId: string }): v
   });
 }
 
+/**
+ * Записать, что оператор ответил.
+ *
+ * Два события, а не одно. message.out — сколько всего написали, и это
+ * нагрузка. reply — что клиент дождался, и это качество. Из десяти
+ * исходящих подряд ответом на ожидание был первый, и складывать их в
+ * одно значило бы получить среднее время ответа, равное нулю.
+ *
+ * Время ожидания считается в рабочих часах компании и записывается
+ * числом здесь же, а не выводится потом. Расписание могут изменить, и
+ * тогда пересчёт молча переписал бы прошлые отчёты — цифра за июнь
+ * обязана остаться той, какой её видели в июне.
+ */
+async function recordReply(x: {
+  tenantId: string;
+  userId: string;
+  conversationId: string;
+  channelId: string;
+  messageId: string;
+  waitingSince: Date | null;
+}): Promise<void> {
+  const wh = await withSystem(pool, 'рабочие часы для отчёта', async (db) => {
+    const { rows } = await db.query<{ work_hours: unknown }>(
+      `SELECT work_hours FROM tenants WHERE id = $1 LIMIT 1`,
+      [x.tenantId],
+    );
+    return parseWorkHours(rows[0]?.work_hours);
+  });
+
+  await withTenant(pool, x.tenantId, async (db) => {
+    await recordEvent(db, x.tenantId, {
+      type: 'message.out',
+      conversationId: x.conversationId,
+      channelId: x.channelId,
+      userId: x.userId,
+      dedupeKey: messageEventKey('message.out', x.messageId),
+      payload: { by: 'agent' },
+    });
+
+    if (!x.waitingSince) return;
+
+    const now = new Date();
+    await recordEvent(db, x.tenantId, {
+      type: 'reply',
+      conversationId: x.conversationId,
+      channelId: x.channelId,
+      userId: x.userId,
+      dedupeKey: messageEventKey('reply', x.messageId),
+      payload: {
+        // Оба числа: по часам компании — для отчёта, по календарю —
+        // чтобы было с чем сверить, когда цифра покажется странной.
+        waitSeconds: workedSeconds(x.waitingSince, now, wh),
+        clockSeconds: Math.round((now.getTime() - x.waitingSince.getTime()) / 1000),
+        since: x.waitingSince.toISOString(),
+      },
+    });
+  });
+}
+
 registerInbox(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
@@ -406,6 +470,11 @@ registerCustom(app, {
 });
 
 registerStatuses(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+});
+
+registerAnalytics(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
 });
@@ -1426,6 +1495,32 @@ app.post<{
         };
       }
 
+      /*
+       * Сколько клиент ждал этого ответа — считается ДО вставки: после
+       * неё «последнее исходящее» станет вот этим самым, и ожидание
+       * схлопнется в ноль.
+       *
+       * Начало ожидания — первое сообщение клиента после нашего
+       * последнего человеческого ответа. Именно первое: клиент написал
+       * три раза подряд, и ждал он с первого, а не с третьего.
+       *
+       * Ответ бота ожидание не прекращает. Приветствие — не ответ, и
+       * засчитывать его значит получить отчёт, где на всё отвечают за
+       * четыре секунды.
+       */
+      const { rows: waitRows } = await db.query<{ since: Date | null }>(
+        `SELECT min(m.sent_at) AS since
+           FROM messages m
+          WHERE m.conversation_id = $1 AND m.direction = 'in'
+            AND m.sent_at > COALESCE((SELECT max(o.sent_at) FROM messages o
+                                       WHERE o.conversation_id = $1
+                                         AND o.direction = 'out'
+                                         AND o.sender_type <> 'bot'),
+                                     '-infinity'::timestamptz)`,
+        [conv.id],
+      );
+      const waitingSince = waitRows[0]?.since ?? null;
+
       // Сообщение сохраняется СРАЗУ, со статусом pending.
       // Оператор видит его в ленте мгновенно, а доставка идёт своим темпом.
       // external_id появится позже — его присваивает провайдер.
@@ -1464,7 +1559,12 @@ app.post<{
         [conv.id],
       );
 
-      return { messageId: ins[0]!.id, channelId: conv.channel_id };
+      return {
+        messageId: ins[0]!.id,
+        channelId: conv.channel_id,
+        waitingSince,
+        conversationId: conv.id,
+      };
     });
 
     if ('error' in result) {
@@ -1473,6 +1573,20 @@ app.post<{
       }
       return reply.code(409).send(result);
     }
+
+    /*
+     * События для отчётов. После ответа клиенту, а не до: отчёт важен,
+     * но не настолько, чтобы из-за него не уйти сообщению. По той же
+     * причине ошибка здесь только пишется в лог.
+     */
+    recordReply({
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      conversationId: result.conversationId,
+      channelId: result.channelId,
+      messageId: result.messageId,
+      waitingSince: result.waitingSince,
+    }).catch((err: unknown) => app.log.warn({ err }, 'Событие ответа не записано'));
 
     // jobId = messageId. Повторный вызов с тем же сообщением не создаст
     // вторую задачу: BullMQ отбросит дубликат по идентификатору.

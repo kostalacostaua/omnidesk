@@ -11,6 +11,8 @@ import {
   QUEUE_SCENARIO,
   computeResponseWindow,
   createPool,
+  messageEventKey,
+  recordEvent,
   defaultJobOptions,
   jobKey,
   createStorage,
@@ -243,7 +245,7 @@ async function persistMessage(
     // 2. Диалог + окно ответа
     const window = computeResponseWindow(msg.channelType, msg.sentAt);
 
-    const { rows: convRows } = await db.query<{ id: string }>(
+    const { rows: convRows } = await db.query<{ id: string; created: boolean }>(
       `INSERT INTO conversations
          (tenant_id, channel_id, contact_id, status,
           window_expires_at, window_type, last_message_at, unread_count)
@@ -256,7 +258,10 @@ async function persistMessage(
              unread_count      = conversations.unread_count + $7::int,
              status            = CASE WHEN $7::int = 1 AND conversations.status = 'resolved'
                                       THEN 'open' ELSE conversations.status END
-       RETURNING id`,
+       -- xmax = 0 у строки, которая только что вставлена: у изменённой
+       -- там номер транзакции. Другого способа отличить вставку от
+       -- обновления в одном запросе Postgres не даёт.
+       RETURNING id, (xmax = 0) AS created`,
       [
         msg.tenantId,
         msg.channelId,
@@ -271,6 +276,7 @@ async function persistMessage(
       ],
     );
     const conversationId = convRows[0]!.id;
+    const conversationCreated = Boolean(convRows[0]!.created);
 
     // 3. Сообщение
     const { rowCount, rows: msgRows } = await db.query<{ id: string }>(
@@ -299,6 +305,34 @@ async function persistMessage(
         msg.sentAt,
       ],
     );
+
+    /*
+     * События для отчётов. Пишутся здесь, внутри той же транзакции, что
+     * и само сообщение: событие о сообщении, которого нет, — это
+     * строка, из-за которой отчёт покажет обращение без переписки.
+     *
+     * Только для входящих и только для действительно вставленных:
+     * повторная доставка той же задачи не должна удваивать числа.
+     */
+    const insertedId = msgRows[0]?.id ?? null;
+    if (insertedId && msg.direction === 'in') {
+      if (conversationCreated) {
+        await recordEvent(db, msg.tenantId, {
+          type: 'conversation.new',
+          conversationId,
+          channelId: msg.channelId,
+          at: msg.sentAt ? new Date(msg.sentAt) : null,
+          dedupeKey: 'conversation.new:' + conversationId,
+        });
+      }
+      await recordEvent(db, msg.tenantId, {
+        type: 'message.in',
+        conversationId,
+        channelId: msg.channelId,
+        at: msg.sentAt ? new Date(msg.sentAt) : null,
+        dedupeKey: messageEventKey('message.in', insertedId),
+      });
+    }
 
     // Аватара может не быть у совсем нового контакта и у старого,
     // заведённого до появления этой возможности. Проверка одна на оба

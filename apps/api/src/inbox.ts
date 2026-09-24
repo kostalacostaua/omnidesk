@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  recordEvent,
   systemStatusFor,
   validateSteps,
   withTenant,
@@ -347,12 +348,46 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       // Изменять диалог можно только в своём канале: иначе оператор,
       // который его не видит, всё равно мог бы закрыть его по ссылке.
       const uid = push(auth.userId);
-      const { rowCount } = await db.query(
+      const { rows: done } = await db.query<{ channel_id: string; status: string }>(
         `UPDATE conversations c SET ${sets.join(', ')}
-          WHERE c.id = $1 AND ${channelScope('c.channel_id', uid)}`,
+          WHERE c.id = $1 AND ${channelScope('c.channel_id', uid)}
+          RETURNING c.channel_id, c.status`,
         params,
       );
-      return (rowCount ?? 0) > 0;
+      const row = done[0];
+      if (!row) return false;
+
+      /*
+       * События для отчётов — в той же транзакции, что и сама правка:
+       * «закрыл, но в отчёт не попало» и «в отчёте закрыл, а диалог
+       * открыт» одинаково плохи, и различать их потом нечем.
+       *
+       * Ключа повтора здесь нет намеренно: передать чат дважды — это
+       * два разных события, а не повтор одного.
+       */
+      if (b.assigneeId !== undefined) {
+        await recordEvent(db, auth.tenantId, {
+          type: 'assign',
+          conversationId: req.params.id,
+          channelId: row.channel_id,
+          userId: auth.userId,
+          payload: { to: b.assigneeId ?? null, self: b.assigneeId === auth.userId },
+        });
+      }
+      if (b.status || statusId !== undefined) {
+        await recordEvent(db, auth.tenantId, {
+          type: 'status',
+          conversationId: req.params.id,
+          channelId: row.channel_id,
+          userId: auth.userId,
+          payload: {
+            status: row.status,
+            statusId: statusId ?? null,
+            resolved: row.status === 'resolved',
+          },
+        });
+      }
+      return true;
     });
 
     if (updated === 'bad_status_id') return reply.code(400).send({ error: 'bad_status_id' });

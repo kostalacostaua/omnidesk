@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   WORK_HOURS_DEFAULT,
+  workedSeconds,
   dayLabel,
   fromHhmm,
   hhmm,
@@ -120,5 +121,104 @@ describe('запись времени', () => {
     expect(dayLabel({ on: true, allDay: false, from: 540, to: 1080 })).toBe('09:00–18:00');
     expect(dayLabel({ on: true, allDay: true, from: 0, to: 1440 })).toBe('00:00–24:00');
     expect(dayLabel({ on: false, allDay: false, from: 540, to: 1080 })).toBe('');
+  });
+});
+
+/**
+ * Рабочее время между двумя моментами — та самая величина, ради
+ * которой расписание и заведено. Ошибка здесь не видна глазами: она
+ * просто делает отчёт о времени ответа неправдой, и заметить это
+ * можно только сверив с часами вручную.
+ */
+describe('рабочее время между двумя моментами', () => {
+  const h = (n: number) => n * 3600;
+
+  it('внутри одного рабочего дня — просто разница', () => {
+    // Среда, 10:00 → 12:30 по Киеву (07:00 → 09:30 UTC летом).
+    const out = workedSeconds(
+      new Date('2026-09-23T07:00:00Z'),
+      new Date('2026-09-23T09:30:00Z'),
+      office,
+    );
+    expect(out).toBe(h(2) + 1800);
+  });
+
+  it('ночь между двумя днями не считается', () => {
+    // Среда 17:00 → четверг 10:00 по Киеву: час до закрытия и час
+    // после открытия, а не семнадцать часов.
+    const out = workedSeconds(
+      new Date('2026-09-23T14:00:00Z'),
+      new Date('2026-09-24T07:00:00Z'),
+      office,
+    );
+    expect(out).toBe(h(2));
+  });
+
+  it('выходные выпадают целиком', () => {
+    // Пятница 17:00 → понедельник 10:00: час в пятницу и час в
+    // понедельник.
+    const out = workedSeconds(
+      new Date('2026-09-25T14:00:00Z'),
+      new Date('2026-09-28T07:00:00Z'),
+      office,
+    );
+    expect(out).toBe(h(2));
+  });
+
+  it('написали ночью, ответили утром — считается только утро', () => {
+    // Ночь со среды на четверг, 02:00 → 09:30 по Киеву.
+    const out = workedSeconds(
+      new Date('2026-09-22T23:00:00Z'),
+      new Date('2026-09-23T06:30:00Z'),
+      office,
+    );
+    expect(out).toBe(1800);
+  });
+
+  it('целиком нерабочий промежуток — ноль, а не длительность', () => {
+    const out = workedSeconds(
+      new Date('2026-09-26T09:00:00Z'),
+      new Date('2026-09-27T09:00:00Z'),
+      office,
+    );
+    expect(out).toBe(0);
+  });
+
+  it('круглосуточно — вся разница до секунды', () => {
+    const out = workedSeconds(
+      new Date('2026-09-23T07:00:00Z'),
+      new Date('2026-09-24T07:00:30Z'),
+      WORK_HOURS_DEFAULT,
+    );
+    expect(out).toBe(h(24) + 30);
+  });
+
+  it('переход на зимнее время не добавляет и не крадёт час', () => {
+    // В Европе часы переводят в ночь на 25 октября 2026. Промежуток
+    // с пятницы 23-го 17:00 до понедельника 26-го 10:00 по местному
+    // времени: час в пятницу и час в понедельник, сколько бы часов ни
+    // было в ночи между ними.
+    const out = workedSeconds(
+      new Date('2026-10-23T14:00:00Z'),
+      new Date('2026-10-26T08:00:00Z'),
+      office,
+    );
+    expect(out).toBe(h(2));
+  });
+
+  it('обратный порядок и совпадение — ноль, а не отрицательное число', () => {
+    const at = new Date('2026-09-23T07:00:00Z');
+    expect(workedSeconds(at, at, office)).toBe(0);
+    expect(workedSeconds(new Date('2026-09-23T09:00:00Z'), at, office)).toBe(0);
+  });
+
+  it('неизвестный пояс считает всё время, а не ноль', () => {
+    const wh = parseWorkHours({ tz: 'Europe/Атлантида', days: office.days });
+    const out = workedSeconds(
+      new Date('2026-09-23T07:00:00Z'),
+      new Date('2026-09-23T08:00:00Z'),
+      wh,
+    );
+    expect(out).toBe(h(1));
   });
 });

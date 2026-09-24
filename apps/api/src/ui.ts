@@ -422,6 +422,24 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
   .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
   .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
+  /* Отчёты. Полоса отбора и столбики по дням — всё, что здесь своего;
+     таблицы берут вид у матрицы доступов. */
+  .rpbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .rpbar .grow{flex:1}
+  .rpbar button.on{border-color:var(--brand1);color:var(--brand1);font-weight:600}
+  .bars{display:flex;gap:8px;align-items:flex-end;overflow-x:auto;padding-bottom:4px}
+  /* Не .col: это имя уже занято общим правилом с колонкой по
+     вертикали, и столбики от него вставали друг под друга. */
+  .bar{display:flex;flex-direction:column;align-items:center;gap:5px;flex:0 0 38px}
+  .bar .bcol{display:flex;flex-direction:row;gap:3px;align-items:flex-end;height:110px;
+    width:100%;justify-content:center}
+  .bar i{width:13px;border-radius:3px 3px 0 0;min-height:2px;display:block}
+  /* Два цвета и никакой легенды внутри столбика: подпись под графиком
+     объясняет их один раз, а не двадцать. */
+  .bar i.in,b.in{background:var(--brand1);color:var(--brand1)}
+  .bar i.out,b.out{background:var(--ok, #16a34a);color:var(--ok, #16a34a)}
+  .bar span{font-size:10px;color:var(--t3);white-space:nowrap}
+
   /* Матрица доступов: люди по строкам, каналы и папки по столбцам.
      Первый столбец не уезжает при прокрутке вбок — без имени строка
      галочек не значит ничего. */
@@ -896,6 +914,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1" data-t>Сценарії</button>
     <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
     <button class="rbtn" data-view="statuses" data-icon="tag" data-admin="1" data-t>Статуси</button>
+    <button class="rbtn" data-view="reports" data-icon="chart" data-admin="1" data-t>Звіти</button>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
     <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
     <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
@@ -4990,6 +5009,151 @@ function kindSelect(id, value){
       L('Закритий') + '</option></select>';
 }
 
+/* ══════════════ Звіти ══════════════
+
+   Считаются по ленте событий, а не по нынешнему состоянию диалогов:
+   состояние знает только последнее значение, а спрашивают всегда про
+   прошлое. Диалог переназначили — и весь июнь задним числом стал бы
+   заслугой того, кто взял его вчера.
+
+   Среднее показано рядом с медианой и девятым децилем не для полноты.
+   Среднее время ответа сдвигает вдвое один забытый на ночь диалог, и
+   человек делает вывод о смене, которая работала нормально. Медиана
+   говорит про обычный день, девятый дециль — про худшее, что
+   случается регулярно. */
+
+var RP = { days: 7, channelId: [], userId: [], data: null };
+
+function rpFrom(){
+  var d = new Date();
+  d.setDate(d.getDate() - RP.days);
+  return d;
+}
+
+/** Секунды человеческими словами: «12 хв», «2 год 5 хв», «—». */
+function dur(sec){
+  if (sec == null) return '—';
+  var s = Math.max(0, Math.round(sec));
+  if (s < 60) return s + L(' с');
+  var m = Math.round(s / 60);
+  if (m < 60) return m + L(' хв');
+  var h = Math.floor(m / 60);
+  return h + L(' год ') + (m % 60) + L(' хв');
+}
+
+function tabReports(){
+  var p = ['from=' + encodeURIComponent(rpFrom().toISOString())];
+  if (RP.channelId.length) p.push('channelId=' + encodeURIComponent(RP.channelId.join(',')));
+  if (RP.userId.length) p.push('userId=' + encodeURIComponent(RP.userId.join(',')));
+
+  api('/analytics?' + p.join('&')).then(function(d){
+    RP.data = d;
+    var t = d.totals || {};
+    var days = d.byDay || [];
+    var top = Math.max.apply(null, [1].concat(days.map(function(x){
+      return Math.max(x.messagesIn, x.messagesOut);
+    })));
+
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead(L('Звіти'), L('Рахуються за стрічкою подій: те, що сталося, а не те, як воно виглядає зараз. ') +
+        L('Час відповіді — у робочих годинах компанії.')) +
+
+      '<div class="rpbar">' +
+      [[7, L('7 днів')], [30, L('30 днів')], [90, L('90 днів')]].map(function(x){
+        return '<button class="ghost mini' + (RP.days === x[0] ? ' on' : '') +
+          '" data-days="' + x[0] + '">' + esc(x[1]) + '</button>';
+      }).join('') +
+      '<span class="grow"></span>' +
+      '<button class="fbtn" id="rpCh" style="flex:0 0 190px"></button>' +
+      '<button class="fbtn" id="rpUs" style="flex:0 0 190px"></button>' +
+      '</div>' +
+
+      '<div class="nums">' +
+      num(t.conversations, L('нових діалогів')) +
+      num(t.messagesIn, L('вхідних')) +
+      num(t.messagesOut, L('вихідних')) +
+      num(t.resolved, L('закрито')) +
+      '</div>' +
+
+      L('<div class="pg-sec"><h3>Час першої відповіді</h3><div class="card">') +
+      '<div class="nums">' +
+      num(dur(t.medianWait), L('медіана')) +
+      num(dur(t.avgWait), L('середнє')) +
+      num(dur(t.p90Wait), L('9 з 10 швидше ніж')) +
+      num(t.replies, L('відповідей у строк')) +
+      '</div>' +
+      L('<div class="hint">Медіана — про звичайний день: половина клієнтів дочекалась швидше. ') +
+      L('Середнє один забутий на ніч діалог зсуває вдвічі, тому дивіться на обидва числа.</div>') +
+      '</div></div>' +
+
+      (days.length
+        ? L('<div class="pg-sec"><h3>По днях</h3><div class="card"><div class="bars">') +
+          days.map(function(x){
+            return '<div class="bar" title="' + esc(x.day) + ': ' + x.messagesIn +
+              L(' вхідних, ') + x.messagesOut + L(' вихідних">') +
+              '<div class="bcol"><i class="in" style="height:' +
+                Math.round(x.messagesIn / top * 100) + '%"></i>' +
+              '<i class="out" style="height:' + Math.round(x.messagesOut / top * 100) + '%"></i>' +
+              '</div><span>' + esc(x.day.slice(5)) + '</span></div>';
+          }).join('') + '</div>' +
+          L('<div class="hint"><b class="in">■</b> вхідні · <b class="out">■</b> вихідні</div>') +
+          '</div></div>'
+        : '') +
+
+      L('<div class="pg-sec"><h3>По каналах</h3><div class="card">') +
+      ((d.byChannel || []).length
+        ? '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+          L('<th>Канал</th><th>Діалогів</th><th>Вхідних</th><th>Вихідних</th><th>Медіана</th>') +
+          '</tr></thead><tbody>' +
+          d.byChannel.map(function(c){
+            return '<tr><td>' + esc(c.name || CH[c.type] || c.type) + '</td><td>' +
+              c.conversations + '</td><td>' + c.messagesIn + '</td><td>' + c.messagesOut +
+              '</td><td>' + esc(dur(c.medianWait)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : L('<div class="hint">За цей період подій не було.</div>')) + '</div></div>' +
+
+      L('<div class="pg-sec"><h3>По співробітниках</h3><div class="card">') +
+      ((d.byUser || []).length
+        ? '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+          L('<th>Співробітник</th><th>Відповідей</th><th>Повідомлень</th><th>Закрито</th><th>Медіана</th>') +
+          '</tr></thead><tbody>' +
+          d.byUser.map(function(u){
+            return '<tr><td>' + esc(u.name) + '</td><td>' + u.replies + '</td><td>' +
+              u.messagesOut + '</td><td>' + u.resolved + '</td><td>' +
+              esc(dur(u.medianWait)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : L('<div class="hint">За цей період ніхто не відповідав.</div>')) + '</div></div>' +
+      '</div>';
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-days]'), function(b){
+      b.onclick = function(){ RP.days = Number(b.dataset.days); tabReports() };
+    });
+
+    function paintRp(){
+      el('rpCh').textContent = RP.channelId.length
+        ? L('Каналів: ') + RP.channelId.length : L('Усі канали');
+      el('rpUs').textContent = RP.userId.length
+        ? L('Співробітників: ') + RP.userId.length : L('Усі співробітники');
+      el('rpCh').classList.toggle('on', RP.channelId.length > 0);
+      el('rpUs').classList.toggle('on', RP.userId.length > 0);
+    }
+    paintRp();
+
+    el('rpCh').onclick = function(ev){
+      ev.stopPropagation();
+      pickMany(el('rpCh'), CHANNELS.map(function(c){
+        return { v:c.id, t:c.display_name || CH[c.type] || c.type };
+      }), RP.channelId, L('Усі канали'), function(out){ RP.channelId = out; tabReports() });
+    };
+    el('rpUs').onclick = function(ev){
+      ev.stopPropagation();
+      pickMany(el('rpUs'), (USERS.length ? USERS : MATES).map(function(u){
+        return { v:u.id, t:u.full_name || u.name || u.email };
+      }), RP.userId, L('Усі співробітники'), function(out){ RP.userId = out; tabReports() });
+    };
+  }).catch(sErr);
+}
+
 function tabStatuses(){
   api('/statuses').then(function(d){
     STATUSES = d.statuses || [];
@@ -5464,6 +5628,7 @@ var ICONS = {
   plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.4 3.4l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.6 20.6l1.7-1.7"/>',
   team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  chart:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
   tag:'<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0l-7.2-7.2a2 2 0 0 1-.6-1.4V4.8A1.8 1.8 0 0 1 4.6 3h7.2a2 2 0 0 1 1.4.6l7.4 7.4a2 2 0 0 1 0 2.4"/><path d="M7.5 7.5h.01"/>',
   smile:'<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -5748,24 +5913,28 @@ function paintFilters(){
   });
 }
 
-function openFilter(anchor, key, all){
-  var opts = filterOptions(key);
+/**
+ * Выбор нескольких значений из списка.
+ *
+ * Вынесено из фильтров чатов, потому что тот же выбор нужен отчётам, а
+ * две копии одного окошка разъезжаются в мелочах — и человек привыкает
+ * к одному поведению, чтобы наткнуться на другое через экран.
+ */
+function pickMany(anchor, opts, selected, all, onChange){
   var box = popBox(anchor, 'fpick');
   box.innerHTML = opts.map(function(o){
     return '<label class="fopt"><input type="checkbox" value="' + esc(o.v) + '"' +
-      (F[key].indexOf(o.v) >= 0 ? ' checked' : '') + '><span>' + esc(o.t) + '</span></label>';
+      (selected.indexOf(o.v) >= 0 ? ' checked' : '') + '><span>' + esc(o.t) + '</span></label>';
   }).join('') +
     '<div class="fact"><button class="ghost mini" id="fClr">' + esc(all) + '</button></div>';
   popAt(box, anchor);
 
   function apply(){
-    F[key] = [];
+    var out = [];
     Array.prototype.forEach.call(box.querySelectorAll('input'), function(i){
-      if (i.checked) F[key].push(i.value);
+      if (i.checked) out.push(i.value);
     });
-    paintFilters();
-    lastList = null;
-    refresh();
+    onChange(out);
   }
 
   Array.prototype.forEach.call(box.querySelectorAll('input'), function(i){
@@ -5777,6 +5946,15 @@ function openFilter(anchor, key, all){
     apply();
     box.remove();
   };
+}
+
+function openFilter(anchor, key, all){
+  pickMany(anchor, filterOptions(key), F[key], all, function(out){
+    F[key] = out;
+    paintFilters();
+    lastList = null;
+    refresh();
+  });
 }
 
 function fillChannelFilter(){ paintFilters() }
@@ -5855,6 +6033,7 @@ var VIEWS = {
   bots: renderBots,
   replies: tabReplies,
   statuses: tabStatuses,
+  reports: tabReports,
   users: tabUsers,
   profile: tabProfile,
   integrations: pageIntegrations,
