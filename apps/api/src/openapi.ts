@@ -476,6 +476,55 @@ export function buildOpenApi(appUrl: string): Record<string, unknown> {
           responses: { 200: json({ type: 'object' }, 'Принято'), 401: ERR },
         },
       },
+      '/channels/custom/messages': {
+        post: {
+          tags: ['Свой канал'],
+          summary: 'Входящее сообщение из вашего кода',
+          description: [
+            'Канал без платформы: на той стороне ваш бот или любой другой код.',
+            'Ключ канала передаётся заголовком `Authorization: Bearer chan_live_…`',
+            'и выдаётся при подключении канала.',
+            '',
+            'Собственные ответы оператора мы отправим POST-запросом на адрес,',
+            'указанный при подключении. Тело подписано заголовком',
+            '`x-rozmovio-signature` — это HMAC-SHA256 от тела целиком на секрете канала.',
+            'Проверяйте его: адрес может узнать кто угодно, секрет — нет.',
+            '',
+            'Поле `externalId` — ваш идентификатор сообщения. Если он повторится,',
+            'сообщение не задвоится, поэтому повторные вызовы безопасны.',
+          ].join(' '),
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['peerId'],
+                  properties: {
+                    peerId: {
+                      type: 'string',
+                      description: 'Кто написал: ваш идентификатор собеседника',
+                    },
+                    name: { type: 'string', description: 'Имя собеседника, если известно' },
+                    text: { type: 'string' },
+                    externalId: {
+                      type: 'string',
+                      description: 'Ваш идентификатор сообщения: ключ дедупликации',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            202: json({ type: 'object' }, 'Принято в обработку'),
+            400: ERR,
+            401: ERR,
+            409: ERR,
+            429: ERR,
+          },
+        },
+      },
       '/settings/ai': {
         get: {
           tags: ['ИИ'],

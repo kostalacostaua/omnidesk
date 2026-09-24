@@ -24,6 +24,7 @@ const SOURCES = [
   'apps/api/src/zoho.ts',
   'apps/api/src/widget.ts',
   'apps/api/src/ai.ts',
+  'apps/api/src/custom.ts',
   // Адрес приёма обновлений живёт в отдельном сервисе.
   'apps/ingress/src/main.ts',
 ].map((f) => readFileSync(join(ROOT, f), 'utf8'));

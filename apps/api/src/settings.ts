@@ -18,6 +18,9 @@ import {
   canSendWhatsapp,
   wabaFromDebug,
   type DebugTokenReply,
+  CUSTOM_CHANNEL,
+  newCustomKey,
+  newCustomSecret,
   WEBCHAT_CHANNEL,
   WEBCHAT_DEFAULTS,
   embedSnippet,
@@ -495,6 +498,122 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         snippet: embedSnippet(appUrl, siteKey),
         iframe: iframeSnippet(appUrl, siteKey),
       };
+    },
+  );
+
+  /**
+   * Свой канал.
+   *
+   * Даём ключ и берём адрес — на этом подключение заканчивается. Всё
+   * остальное на стороне клиента: чем доставлены сообщения, как устроен
+   * его бот и что он делает между нашими вызовами, нас не касается.
+   *
+   * Ключ показываем в интерфейсе и потом: в отличие от токена чужой
+   * платформы, он наш собственный, и прятать его от владельца канала
+   * значило бы заставлять пересоздавать канал при каждой потере.
+   */
+  app.post<{ Body: { displayName?: string; outUrl?: string } }>(
+    '/settings/channels/custom',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const outUrl = String(req.body?.outUrl ?? '').trim();
+      const bad = badOutUrl(outUrl);
+      if (bad) return reply.code(400).send({ error: 'bad_url', detail: bad });
+
+      const key = newCustomKey();
+      const secret = newCustomSecret();
+      const channelId = randomUUID();
+      const title = req.body?.displayName?.trim().slice(0, 80) || 'Власний канал';
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+          [
+            channelId,
+            auth.tenantId,
+            CUSTOM_CHANNEL,
+            title,
+            key,
+            encryptJson(masterKey, auth.tenantId, { outUrl, secret }),
+            JSON.stringify({ outUrl }),
+          ],
+        );
+      });
+
+      return { channelId, key, secret, outUrl, inUrl: `${appUrl}/channels/custom/messages` };
+    },
+  );
+
+  /** Ключ, секрет подписи и адрес: их показывают и меняют после подключения. */
+  app.get<{ Params: { id: string } }>('/channels/:id/custom', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ external_id: string; credentials_enc: Buffer }>(
+        `SELECT external_id, credentials_enc FROM channels
+          WHERE id = $1 AND type = $2 LIMIT 1`,
+        [req.params.id, CUSTOM_CHANNEL],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    const creds = decryptJson<{ outUrl?: string; secret?: string }>(
+      masterKey,
+      auth.tenantId,
+      row.credentials_enc,
+    );
+    return {
+      key: row.external_id,
+      secret: creds.secret ?? '',
+      outUrl: creds.outUrl ?? '',
+      inUrl: `${appUrl}/channels/custom/messages`,
+    };
+  });
+
+  app.patch<{ Params: { id: string }; Body: { outUrl?: string } }>(
+    '/channels/:id/custom',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const outUrl = String(req.body?.outUrl ?? '').trim();
+      const bad = badOutUrl(outUrl);
+      if (bad) return reply.code(400).send({ error: 'bad_url', detail: bad });
+
+      const updated = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows } = await db.query<{ credentials_enc: Buffer }>(
+          `SELECT credentials_enc FROM channels WHERE id = $1 AND type = $2 LIMIT 1`,
+          [req.params.id, CUSTOM_CHANNEL],
+        );
+        const row = rows[0];
+        if (!row) return false;
+
+        const creds = decryptJson<{ outUrl?: string; secret?: string }>(
+          masterKey,
+          auth.tenantId,
+          row.credentials_enc,
+        );
+        await db.query(
+          `UPDATE channels
+              SET credentials_enc = $2, meta = meta || $3::jsonb
+            WHERE id = $1`,
+          [
+            req.params.id,
+            encryptJson(masterKey, auth.tenantId, { ...creds, outUrl }),
+            JSON.stringify({ outUrl }),
+          ],
+        );
+        return true;
+      });
+      if (!updated) return reply.code(404).send({ error: 'not_found' });
+
+      return { outUrl };
     },
   );
 
@@ -1636,6 +1755,40 @@ async function resolveWaba(
       /* портфолио тоже не подошло — остаётся следующая связь */
     }
   }
+
+  return null;
+}
+
+/**
+ * Адрес, на который мы будем стучаться.
+ *
+ * Проверка здесь не про опечатки, а про то, куда именно мы пойдём с
+ * сервера. Адрес задаёт клиент, а запрос уходит из нашей сети — значит
+ * этим полем можно попросить нас постучаться во внутренний адрес,
+ * которого снаружи не видно. Поэтому только https и только наружу.
+ */
+function badOutUrl(raw: string): string | null {
+  if (!raw) return 'Вкажіть адресу для вихідних повідомлень';
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return 'Адреса має бути повною, разом з https://';
+  }
+  if (u.protocol !== 'https:') return 'Адреса має починатися з https://';
+
+  const host = u.hostname.toLowerCase();
+  const local =
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^(127|10)\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    host === '0.0.0.0' ||
+    host === '[::1]';
+  if (local) return 'Адреса має бути доступною ззовні, а не внутрішньою';
 
   return null;
 }

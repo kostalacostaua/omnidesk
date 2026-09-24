@@ -597,6 +597,17 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
+  .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
+  /* Окно с ключами своего канала. Отдельное, а не общая модалка: здесь
+     три длинные строки, которые человек будет выделять и копировать, и
+     им нужна ширина, а не аккуратность. */
+  .cuwrap{position:fixed;inset:0;z-index:70;display:flex;align-items:center;
+    justify-content:center;padding:20px;background:rgba(11,16,34,.5)}
+  .cubox{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    box-shadow:var(--lift);padding:20px;max-width:620px;width:100%;
+    max-height:86vh;overflow-y:auto}
+  .cubox h3{margin:0 0 4px}
+  .cubox .lbl{margin-top:12px;width:auto}
   /* Настройки виджета и его превью стоят рядом: подобрать цвет, глядя
      только на поле выбора цвета, нельзя. На узком экране превью уходит
      вниз — иначе не останется места ни тому, ни другому. */
@@ -958,7 +969,7 @@ var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
   messenger:'Messenger', viber_business:L('Viber для бізнесу'), webchat:L('Чат на сайті'),
-  viber_user:L('Viber номерний') };
+  viber_user:L('Viber номерний'), custom:L('Власний канал') };
 
 var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
 
@@ -2659,7 +2670,31 @@ function editRow(id, value, save, errId){
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
   whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB',
-  webchat:'WEB' };
+  webchat:'WEB', custom:'API' };
+
+/* Ключи своего канала. Показываются при подключении и потом на странице
+   канала: это наши собственные секреты, а не чужой платформы, и прятать
+   их от владельца значит заставлять пересоздавать канал при потере. */
+function cuKeys(d){
+  var box = document.createElement('div');
+  box.className = 'cuwrap';
+  box.innerHTML =
+    '<div class="cubox">' +
+    L('<h3>Власний канал підключено</h3>') +
+    L('<div class="sub" style="white-space:normal">Ці три рядки потрібні вашому боту. ') +
+    L('Ключ і секрет можна подивитися пізніше на сторінці каналу.</div>') +
+    L('<div class="lbl" style="margin-top:12px">Куди бот надсилає вхідні</div>') +
+    '<pre class="snip">' + esc(d.inUrl || (location.origin + '/channels/custom/messages')) + '</pre>' +
+    L('<div class="lbl">Ключ каналу (заголовок Authorization: Bearer)</div>') +
+    '<pre class="snip">' + esc(d.key) + '</pre>' +
+    L('<div class="lbl">Секрет підпису наших вихідних (заголовок x-rozmovio-signature)</div>') +
+    '<pre class="snip">' + esc(d.secret) + '</pre>' +
+    L('<div class="acts"><button id="cuClose">Готово</button>') +
+    L('<a class="ghost mini" href="/docs" target="_blank" rel="noopener">Документація</a></div>') +
+    '</div>';
+  document.body.appendChild(box);
+  el('cuClose').onclick = function(){ box.remove() };
+}
 
 function chPill(c){
   return c.status === 'active' ? L('<span class="pill ok">працює</span>')
@@ -2755,6 +2790,17 @@ function tabChannels(){
       L('вони підтягнуться з вашого акаунта самі.</div>') +
       '<div class="err" id="waErr"></div></div>' +
 
+      '<div class="tile"><div class="t1"><div class="chico custom">API</div>' +
+      L('<div><div class="ttl">Власний канал</div><div class="sub">Ваш бот або будь-який інший код</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Якщо у вас уже є свій бот Telegram чи Viber ') +
+      L('зі сценаріями — не віддавайте нам його вебхук, він у бота один. Замість цього бот надсилає ') +
+      L('нам вхідні, а ми надсилаємо йому відповіді оператора. Сценарії працюють як працювали.</div>') +
+      '<div class="row2"><input id="cuName" placeholder="' + L('Назва каналу') + '" maxlength="80">' +
+      '<input id="cuUrl" placeholder="https://..." autocomplete="off"></div>' +
+      L('<div class="hint">Адреса, на яку ми надсилатимемо відповіді оператора.</div>') +
+      L('<div class="acts"><button id="cuGo">Підключити</button></div>') +
+      '<div class="err" id="cuErr"></div></div>' +
+
       ['whatsapp_user','viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
@@ -2812,6 +2858,26 @@ function tabChannels(){
         .catch(function(e){
           el('waErr').textContent = ((e.payload||{}).detail) || L('Не вдалося підключити');
           busy(el('waGo'), false);
+        });
+    };
+
+    if (el('cuGo')) el('cuGo').onclick = function(){
+      el('cuErr').textContent = '';
+      busy(el('cuGo'), true);
+      api('/settings/channels/custom', { method:'POST', body:{
+        displayName: el('cuName').value.trim(), outUrl: el('cuUrl').value.trim()
+      }})
+        .then(function(d){
+          /* Ключ и секрет показываем сразу и целиком: без них канал
+             бесполезен, а идти за ними второй раз человеку некуда —
+             он ещё не знает, что они где-то есть. */
+          toast(L('Власний канал підключено'));
+          cuKeys(d);
+          tabChannels();
+        })
+        .catch(function(e){
+          el('cuErr').textContent = ((e.payload||{}).detail) || L('Не вдалося підключити');
+          busy(el('cuGo'), false);
         });
     };
 

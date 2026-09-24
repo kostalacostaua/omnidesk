@@ -12,6 +12,7 @@ export * from './ai.js';
 export * from './crm-simple.js';
 export * from './viber.js';
 export * from './whatsapp.js';
+export * from './custom.js';
 export * from './webchat.js';
 export * from './routing.js';
 export * from './notify.js';

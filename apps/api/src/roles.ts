@@ -59,6 +59,10 @@ export function requiredLevel(method: string, path: string): Level {
   // пользователю: роли там нет и быть не может.
   if (path.startsWith('/webhooks/')) return 'any';
 
+  // Свой канал присылает входящие с ключом канала в заголовке. Это тот
+  // же случай, что и вебхук: пользователя за запросом нет.
+  if (path === '/channels/custom/messages') return 'any';
+
   const clean = path.split('?')[0] ?? path;
   for (const prefix of ADMIN_PREFIXES) {
     if (clean === prefix || clean.startsWith(prefix + '/')) return 'admin';

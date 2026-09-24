@@ -37,6 +37,9 @@ import {
   pickScenario,
   parseRouting,
   pickAssignee,
+  CUSTOM_CHANNEL,
+  signCustom,
+  type CustomOutgoing,
   VIBER_CHANNEL,
   ViberError,
   waKind,
@@ -685,17 +688,18 @@ async function handleInbound(job: InboundJob): Promise<void> {
   if (job.provider === 'mtproto') return handleMtprotoInbound(job);
 
   /*
-   * Чат на сайте. Сообщение приходит уже приведённым к общему виду:
-   * разбирать там нечего, поле ввода наше собственное. Остальное —
-   * ровно как в любом канале: запись, CRM, бот и оповещения.
+   * Чат на сайте и свой канал. Сообщение приходит уже приведённым к
+   * общему виду: в первом случае поле ввода наше собственное, во втором
+   * разбор сделал приёмник, проверивший ключ. Остальное — ровно как в
+   * любом канале: запись, CRM, бот и оповещения.
    */
-  if (job.provider === 'webchat') {
+  if (job.provider === 'webchat' || job.provider === 'custom') {
     const payload = job.payload as Omit<UnifiedMessage, 'sentAt'> & { sentAt: string };
     const m: UnifiedMessage = { ...payload, sentAt: new Date(payload.sentAt) };
 
     const { inserted, conversationId, contactId } = await persistMessage(m);
     log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
-      channelId: job.channelId, externalId: m.externalId, channelType: 'webchat',
+      channelId: job.channelId, externalId: m.externalId, channelType: m.channelType,
     });
     if (inserted && contactId) await enqueueCrm(m, contactId, conversationId);
     if (inserted && conversationId) {
@@ -2128,6 +2132,79 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
       );
     });
     log('info', 'Ответ в чат на сайте записан', { messageId: job.messageId });
+    return;
+  }
+
+  /*
+   * Свой канал. Платформы нет: на той стороне код клиента, и наше дело
+   * постучаться к нему по указанному адресу.
+   *
+   * Тело подписываем секретом канала. Адрес клиент знает и сам, а вот
+   * подпись подделать нельзя — иначе любой, кто адрес узнал, слал бы
+   * ему сообщения от нашего имени.
+   *
+   * Отказ считаем временным и даём очереди повторить: чужой сервер
+   * может лежать минуту, терять из-за этого ответ оператора незачем.
+   * Несуществующий адрес отличается тем, что повторами не чинится, —
+   * его помечаем окончательно.
+   */
+  if (row.channel_type === CUSTOM_CHANNEL) {
+    const creds = decryptJson<{ outUrl?: string; secret?: string }>(
+      masterKey,
+      job.tenantId,
+      row.credentials_enc,
+    );
+    const url = String(creds.outUrl ?? '');
+    if (!url) {
+      await markFailed(job, { reason: 'no_out_url', channelType: CUSTOM_CHANNEL });
+      throw new UnrecoverableError('У своего канала не указан адрес для исходящих');
+    }
+
+    const payload: CustomOutgoing = {
+      messageId: job.messageId,
+      channelId: job.channelId,
+      peerId: row.peer_id ?? '',
+      text: row.text ?? '',
+      attachments: [],
+      sentAt: new Date().toISOString(),
+    };
+    const body = JSON.stringify(payload);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-rozmovio-signature': signCustom(String(creds.secret ?? ''), body),
+        },
+        body,
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (err) {
+      throw new Error(
+        'Свой канал не ответил: ' + (err instanceof Error ? err.message : String(err)),
+      );
+    }
+
+    if (res.status === 404 || res.status === 410) {
+      await markFailed(job, {
+        reason: 'out_url_gone',
+        channelType: CUSTOM_CHANNEL,
+        status: res.status,
+      });
+      throw new UnrecoverableError('Адрес своего канала не существует: ' + res.status);
+    }
+    if (!res.ok) throw new Error('Свой канал отказал: ' + res.status);
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2
+          WHERE id = $1 AND status = 'pending'`,
+        [job.messageId, `cu_out_${job.messageId}`],
+      );
+    });
+    log('info', 'Ответ отдан своему каналу', { messageId: job.messageId });
     return;
   }
 

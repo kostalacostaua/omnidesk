@@ -42,6 +42,7 @@ import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
+import { registerCustom } from './custom.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -394,6 +395,12 @@ registerWebchat(app, {
   inboundQueue,
   storage,
   appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+registerCustom(app, {
+  pool,
+  inboundQueue,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 
