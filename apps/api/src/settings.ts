@@ -1207,10 +1207,29 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
      */
     const groups = groupByFolder(rows);
 
-    return {
-      quickReplies: groups.flatMap((g) => g.items),
-      folders: folderNames(rows),
-    };
+    /*
+     * Пустая папка существует: человек заводит её заранее, чтобы было
+     * куда класть. Поэтому список папок — это список, а не то, что
+     * удалось вычитать из шаблонов. Имена с шаблонов всё равно
+     * подмешиваем: если строка в списке когда-нибудь потеряется, папка
+     * не должна пропасть из настроек вместе с ней.
+     */
+    const list = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ name: string }>(`SELECT name FROM reply_folders`);
+      return rows.map((r) => r.name);
+    });
+
+    const seen = new Set<string>();
+    const folders: string[] = [];
+    for (const name of [...list, ...folderNames(rows)]) {
+      const key = replyFolder(name).toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      folders.push(replyFolder(name));
+    }
+    folders.sort((a, b) => a.localeCompare(b, 'uk'));
+
+    return { quickReplies: groups.flatMap((g) => g.items), folders };
   });
 
   app.post<{ Body: { shortcut?: string; body?: string; folder?: string } }>(
@@ -1235,12 +1254,87 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
            RETURNING id`,
           [auth.tenantId, shortcut, body, folder],
         );
+        if (folder) {
+          await db.query(
+            `INSERT INTO reply_folders (tenant_id, name) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING`,
+            [auth.tenantId, folder],
+          );
+        }
         return rows[0]!.id;
       });
 
       return reply.code(201).send({ id, shortcut, folder });
     },
   );
+
+  /**
+   * Заведение пустой папки.
+   *
+   * Пустая папка — это не недоделанная папка, а нормальное начало: люди
+   * раскладывают по папкам так же, как бумаги, — сперва подписывают
+   * ящик, потом кладут. Без этого «создать папку» означало бы «создать
+   * шаблон», и человек не нашёл бы, где вообще создаются папки.
+   */
+  app.post<{ Body: { name?: string } }>('/quick-replies/folders', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const name = replyFolder(req.body?.name);
+    if (!name) return reply.code(400).send({ error: 'folder_required' });
+
+    const made = await withTenant(pool, auth.tenantId, async (db) => {
+      try {
+        await db.query(`INSERT INTO reply_folders (tenant_id, name) VALUES ($1, $2)`, [
+          auth.tenantId,
+          name,
+        ]);
+        return true;
+      } catch (err) {
+        if ((err as { code?: string }).code === '23505') return false;
+        throw err;
+      }
+    });
+
+    if (!made) return reply.code(409).send({ error: 'duplicate' });
+    return reply.code(201).send({ folder: name });
+  });
+
+  /**
+   * Удаление папки.
+   *
+   * Шаблоны остаются. Папку убрали — они выходят из неё и лежат дальше
+   * сами по себе. Удалять переписку заготовок заодно с ящиком, в
+   * котором они лежали, — не то, чего ждут от кнопки «видалити папку»,
+   * и не то, что можно потом вернуть.
+   *
+   * Имя приходит телом, а не в адресе: в имени бывает косая черта, и
+   * маршрут с ней разбирается по-разному в разных местах.
+   */
+  app.delete<{ Body: { name?: string } }>('/quick-replies/folders', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const name = replyFolder(req.body?.name);
+    if (!name) return reply.code(400).send({ error: 'folder_required' });
+
+    const out = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `DELETE FROM reply_folders WHERE lower(name) = lower($1)`,
+        [name],
+      );
+      const moved = await db.query(
+        `UPDATE quick_replies SET folder = '' WHERE lower(folder) = lower($1)`,
+        [name],
+      );
+      return { gone: (rowCount ?? 0) > 0, moved: moved.rowCount ?? 0 };
+    });
+
+    // Папки могло не быть в списке, но имя стоять на шаблонах: тогда
+    // удалять всё равно есть что, и отвечать «не найдено» — врать.
+    if (!out.gone && !out.moved) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true, moved: out.moved };
+  });
 
   /**
    * Переименование папки.
@@ -1264,18 +1358,38 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       const to = replyFolder(req.body?.to);
       if (!from) return reply.code(400).send({ error: 'folder_required' });
 
-      const moved = await withTenant(pool, auth.tenantId, async (db) => {
+      const out = await withTenant(pool, auth.tenantId, async (db) => {
         // Сравнение без регистра: человек переименовывает ту папку,
         // которую видит, а видит он её в том виде, в каком показали.
         const { rowCount } = await db.query(
           `UPDATE quick_replies SET folder = $2 WHERE lower(folder) = lower($1)`,
           [from, to],
         );
+
+        /*
+         * Список папок правится тем же запросом. Пустое новое имя
+         * означает «вынести всё из папки», и сама папка при этом
+         * удаляется: иначе в настройках осталась бы папка без имени.
+         */
+        if (!to) {
+          await db.query(`DELETE FROM reply_folders WHERE lower(name) = lower($1)`, [from]);
+        } else {
+          try {
+            await db.query(
+              `UPDATE reply_folders SET name = $2 WHERE lower(name) = lower($1)`,
+              [from, to],
+            );
+          } catch (err) {
+            // Переименовали в имя, которое уже занято: две папки
+            // сливаются в одну, и лишнюю строку списка просто убираем.
+            if ((err as { code?: string }).code !== '23505') throw err;
+            await db.query(`DELETE FROM reply_folders WHERE lower(name) = lower($1)`, [from]);
+          }
+        }
         return rowCount ?? 0;
       });
 
-      if (!moved) return reply.code(404).send({ error: 'not_found' });
-      return { moved, folder: to };
+      return { moved: out, folder: to };
     },
   );
 
@@ -1293,6 +1407,15 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
           `UPDATE quick_replies SET folder = $2 WHERE id = $1`,
           [req.params.id, folder],
         );
+        // Папка, названная при переносе, заводится сама: человек уже
+        // сказал, куда класть, и переспрашивать «а создать её?» незачем.
+        if ((rowCount ?? 0) > 0 && folder) {
+          await db.query(
+            `INSERT INTO reply_folders (tenant_id, name) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING`,
+            [auth.tenantId, folder],
+          );
+        }
         return (rowCount ?? 0) > 0;
       });
 

@@ -216,14 +216,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
     border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600}
   .mtools button{box-shadow:none;transition:opacity .12s ease,color .12s ease,background-color .12s ease}
   .mtools button:hover{color:var(--t1);background:var(--hover);border-color:var(--t3)}
-  .picker{position:absolute;background:var(--panel);border:1px solid var(--line2);
+  .picker{position:fixed;background:var(--panel);border:1px solid var(--line2);
     border-radius:9px;padding:5px;display:flex;gap:1px;z-index:60;
     box-shadow:0 10px 30px rgba(0,0,0,.18)}
-  .picker button{background:transparent;border:0;font-size:18px;padding:3px 5px;
+  .picker.emo button{background:transparent;border:0;font-size:18px;padding:3px 5px;
     border-radius:6px;line-height:1;color:inherit}
-  .picker button{box-shadow:none;transition:transform .08s ease,background-color .12s ease}
-  .picker button:hover{background:var(--hover);transform:scale(1.18)}
-  .picker button:active{transform:scale(.95)}
+  .picker.emo button{box-shadow:none;transition:transform .08s ease,background-color .12s ease}
+  .picker.emo button:hover{background:var(--hover);transform:scale(1.18)}
+  .picker.emo button:active{transform:scale(.95)}
   .att{margin:-2px 0 6px;display:block}
   .att img{max-width:100%;max-height:320px;border-radius:6px;display:block;cursor:zoom-in}
   .att video{max-width:100%;max-height:320px;border-radius:6px;display:block}
@@ -284,6 +284,42 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .st-b .row2{display:flex;gap:8px}
   .addrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:12px;
     border-top:1px dashed var(--line2)}
+
+  /* Кнопки действий внутри карточки настроек. Без этого правила они
+     слипались в углу: у .acts стиль был только в шапке чата и в плитке
+     канала, а в карточке — никакого. */
+  .card .acts{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .card .acts button{margin:0}
+
+  /* Выбор цвета. Квадрат самого цвета вместо списка «Колір 1…12»:
+     номер цвета не значит ничего, а цвет виден сразу. */
+  .swatch{width:34px;height:34px;padding:0;border-radius:9px;border:2px solid transparent;
+    box-shadow:var(--shadow);flex:none}
+  .pal{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:8px}
+  .pal button{width:30px;height:30px;padding:0;border-radius:8px;border:2px solid transparent;
+    box-shadow:none}
+  .pal button.on{border-color:var(--t1);transform:scale(1.06)}
+
+  /* Фильтр с галочками: несколько значений сразу, а не одно. */
+  .fbtn{background:var(--panel);border:1px solid var(--line);color:var(--t1);
+    padding:6px 8px;font-size:12px;border-radius:6px;flex:1 1 calc(50% - 3px);min-width:0;
+    box-shadow:none;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fbtn.on{border-color:var(--brand1);color:var(--brand1);font-weight:600}
+  /* Окошко непрозрачное: сквозь список с галочками не должно
+     просвечивать то, что под ним, — иначе подписи нечитаемы. */
+  .picker.fpick,.picker.pal{background:var(--solid);backdrop-filter:none;
+    -webkit-backdrop-filter:none}
+  .fpick{display:block;padding:6px;max-height:320px;overflow-y:auto;min-width:210px}
+  .fopt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;
+    font-size:13px;cursor:pointer}
+  .fopt:hover{background:var(--hover)}
+  /* Поля ввода в этом интерфейсе растянуты на всю ширину, и галочка
+     без этой строки съедала строку целиком, выталкивая подпись за край
+     окошка. */
+  .fopt input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;padding:0}
+  .fopt span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fpick .fact{border-top:1px solid var(--line);margin-top:4px;padding-top:6px;text-align:right}
+  .fpick .fact button{font-size:12px;padding:5px 10px}
 
   /* Папка в списке шаблонов — заголовок группы, а не строка списка:
      её нельзя открыть или выбрать, в неё можно только положить. */
@@ -861,14 +897,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <div class="lhead">
       <div class="top"><b data-t>Чати</b><button class="ghost mini" id="cardBtn" data-t>Клієнт</button></div>
       <div class="filters">
-        <select id="fCh"><option value="" data-t>Усі канали</option></select>
-        <select id="fAs">
-          <option value="all" data-t>Усі відповідальні</option>
-          <option value="me" data-t>Мої</option>
-          <option value="none" data-t>Без відповідального</option>
-        </select>
-        <select id="fTag"><option value="" data-t>Усі мітки</option></select>
-        <select id="fSt"><option value="" data-t>Усі статуси</option></select>
+        <button class="fbtn" id="fCh"></button>
+        <button class="fbtn" id="fAs"></button>
+        <button class="fbtn" id="fTag"></button>
+        <button class="fbtn" id="fSt"></button>
       </div>
       <div class="search"><input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off"></div>
       <div class="tabs">
@@ -942,7 +974,11 @@ var AI = { ready:false };
 // Роль вошедшего. До ответа сервера считаем оператором: показать
 // лишнее и убрать — хуже, чем показать нужное чуть позже.
 var ROLE = 'agent';
-var F = { status:'open', statusId:'', assignee:'all', channelId:'', tag:'', q:'' };
+/* В каждом фильтре — список значений, а не одно. «Что у меня в
+   Telegram и в WhatsApp» — такой же обычный вопрос, как про один
+   канал, и смотреть его в два захода значит держать первый ответ в
+   голове. Пустой список означает «все». */
+var F = { status:'open', statusId:[], assignee:[], channelId:[], tag:[], q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
 var pendingFile = null; // выбранный, но ещё не отправленный файл
@@ -1046,10 +1082,11 @@ function avatarColor(seed){
 var lastList = null;
 
 function query(){
-  var p = ['status=' + encodeURIComponent(F.status), 'assignee=' + encodeURIComponent(F.assignee)];
-  if (F.channelId) p.push('channelId=' + encodeURIComponent(F.channelId));
-  if (F.tag) p.push('tag=' + encodeURIComponent(F.tag));
-  if (F.statusId) p.push('statusId=' + encodeURIComponent(F.statusId));
+  var p = ['status=' + encodeURIComponent(F.status)];
+  if (F.assignee.length) p.push('assignee=' + encodeURIComponent(F.assignee.join(',')));
+  if (F.channelId.length) p.push('channelId=' + encodeURIComponent(F.channelId.join(',')));
+  if (F.tag.length) p.push('tag=' + encodeURIComponent(F.tag.join(',')));
+  if (F.statusId.length) p.push('statusId=' + encodeURIComponent(F.statusId.join(',')));
   if (F.q) p.push('q=' + encodeURIComponent(F.q));
   return '/conversations?' + p.join('&');
 }
@@ -1855,20 +1892,88 @@ function bindMessageTools(){
   });
 }
 
-function showPicker(anchor, messageId){
+/**
+ * Всплывающее окошко у элемента.
+ *
+ * Одно на страницу: второе открытое окошко — это всегда вопрос «какое
+ * из них слушает мои щелчки». Закрывается щелчком мимо, но не внутри:
+ * в списке с галочками внутрь щёлкают много раз подряд.
+ */
+function popBox(anchor, cls){
   var old = document.querySelector('.picker');
   if (old) old.remove();
 
   var box = document.createElement('div');
-  box.className = 'picker';
+  box.className = 'picker' + (cls ? ' ' + cls : '');
+  document.body.appendChild(box);
+  box.onclick = function(ev){ ev.stopPropagation() };
+
+  setTimeout(function(){
+    document.addEventListener('click', function once(){
+      box.remove();
+      document.removeEventListener('click', once);
+    });
+  }, 0);
+  return box;
+}
+
+/** Поставить окошко под элементом, а если внизу не помещается — над. */
+function popAt(box, anchor){
+  var r = anchor.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
+  var below = r.bottom + 6;
+  box.style.top = (below + box.offsetHeight < window.innerHeight - 8
+    ? below : Math.max(8, r.top - box.offsetHeight - 6)) + 'px';
+}
+
+/**
+ * Выбор цвета.
+ *
+ * Квадратами, а не списком: в выпадающем списке браузер рисует строки
+ * своим цветом, и выбор превращался в «Колір 7» — число, которое не
+ * значит ничего, пока не выберешь и не посмотришь.
+ */
+function openPalette(anchor, current, onPick){
+  var box = popBox(anchor, 'pal');
+  box.innerHTML = SCOLORS.map(function(c){
+    return '<button data-c="' + c + '"' + (c === current ? ' class="on"' : '') +
+      ' style="background-color:' + c + '"></button>';
+  }).join('');
+  popAt(box, anchor);
+
+  Array.prototype.forEach.call(box.children, function(btn){
+    btn.onclick = function(){
+      box.remove();
+      onPick(btn.dataset.c);
+    };
+  });
+}
+
+/** Квадрат текущего цвета: он же кнопка выбора. */
+function swatch(id, color){
+  return '<button class="swatch" id="' + id + '" data-c="' + esc(color) + '" title="' +
+    L('Колір') + '" style="background-color:' + esc(color) + '"></button>';
+}
+
+function wireSwatch(id, onPick){
+  var b = el(id);
+  if (!b) return;
+  b.onclick = function(ev){
+    ev.stopPropagation();
+    openPalette(b, b.dataset.c, function(c){
+      b.dataset.c = c;
+      b.style.backgroundColor = c;
+      if (onPick) onPick(c);
+    });
+  };
+}
+
+function showPicker(anchor, messageId){
+  var box = popBox(anchor, 'emo');
   box.innerHTML = EMOJI.map(function(x){
     return '<button data-e="' + x + '">' + x + '</button>';
   }).join('') + '<button data-e="">✖</button>';
-  document.body.appendChild(box);
-
-  var r = anchor.getBoundingClientRect();
-  box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
-  box.style.top = Math.max(8, r.top - box.offsetHeight - 6) + 'px';
+  popAt(box, anchor);
 
   Array.prototype.forEach.call(box.children, function(btn){
     btn.onclick = function(){
@@ -1885,13 +1990,6 @@ function showPicker(anchor, messageId){
       });
     };
   });
-
-  setTimeout(function(){
-    document.addEventListener('click', function once(){
-      box.remove();
-      document.removeEventListener('click', once);
-    });
-  }, 0);
 }
 
 function alertLine(text){
@@ -2727,7 +2825,7 @@ function whPanel(t){
     }).join('') +
     '</div>' +
     L('<div class="acts"><button id="whSave">Зберегти</button>') +
-    L('<button class="ghost mini" id="whCopy">Скопіювати понеділок на всі дні</button></div>') +
+    L('<button class="ghost" id="whCopy">Скопіювати понеділок на всі дні</button></div>') +
     '<div class="ok" id="whOk"></div></div></div>';
 }
 
@@ -4845,26 +4943,12 @@ function ntKeyBytes(key){
  * статуса, потому что это единственное решение, которое человек может
  * принять неправильно и не заметить.
  */
-function colorSelect(id, value){
-  return '<select class="csel" id="' + id + '" style="max-width:120px;background-color:' +
-    esc(value || SCOLORS[0]) + ';color:#fff;font-weight:600">' +
-    SCOLORS.map(function(c, i){
-      return '<option value="' + c + '"' + (c === value ? ' selected' : '') +
-        ' style="background-color:' + c + ';color:#fff">' + L('Колір ') + (i + 1) + '</option>';
-    }).join('') + '</select>';
-}
-
 function kindSelect(id, value){
   return '<select id="' + id + '" style="max-width:150px">' +
     '<option value="open"' + (value === 'closed' ? '' : ' selected') + '>' +
       L('У роботі') + '</option>' +
     '<option value="closed"' + (value === 'closed' ? ' selected' : '') + '>' +
       L('Закритий') + '</option></select>';
-}
-
-/** Цвет самого поля выбора — иначе выбранный цвет виден только в списке. */
-function paintColorSelect(sel){
-  if (sel) sel.style.backgroundColor = sel.value;
 }
 
 function tabStatuses(){
@@ -4882,7 +4966,7 @@ function tabStatuses(){
       L('<div class="card"><h3>Новий статус</h3>') +
       '<div class="row2" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
       L('<input id="stName" placeholder="назва, наприклад Чекаємо оплату" style="flex:1;min-width:200px">') +
-      kindSelect('stKind', 'open') + colorSelect('stColor', SCOLORS[0]) +
+      kindSelect('stKind', 'open') + swatch('stColor', SCOLORS[0]) +
       L('<button id="stAdd">Додати</button></div>') +
       /* Род объясняется здесь один раз и подробно: это единственное
          место, где человек решает судьбу счётчиков, и «у роботі» против
@@ -4898,7 +4982,7 @@ function tabStatuses(){
           'align-items:center;flex-wrap:wrap">' +
           '<input value="' + esc(t.name) + '" data-nm="' + t.id +
             '" style="flex:0 1 220px;min-width:130px">' +
-          kindSelect('k-' + t.id, t.kind) + colorSelect('c-' + t.id, t.color) +
+          kindSelect('k-' + t.id, t.kind) + swatch('c-' + t.id, t.color) +
           '</div>' +
           '<div style="display:flex;gap:6px;flex:none">' +
           '<button class="ghost mini" data-up="' + t.id + '"' + (i ? '' : ' disabled') +
@@ -4914,7 +4998,7 @@ function tabStatuses(){
       el('stErr').textContent = '';
       busy(el('stAdd'), true);
       api('/statuses', { method:'POST', body:{
-        name: el('stName').value, kind: el('stKind').value, color: el('stColor').value
+        name: el('stName').value, kind: el('stKind').value, color: el('stColor').dataset.c
       }}).then(function(){ tabStatuses(); toast(L('Статус додано')) })
         .catch(function(e){
           var p = e.payload || {};
@@ -4925,8 +5009,7 @@ function tabStatuses(){
         });
     };
 
-    paintColorSelect(el('stColor'));
-    el('stColor').onchange = function(){ paintColorSelect(this) };
+    wireSwatch('stColor');
 
     /* Название сохраняется по уходу из поля, а не кнопкой: иначе на
        каждой строке была бы своя кнопка «Зберегти», и их было бы
@@ -4940,8 +5023,7 @@ function tabStatuses(){
     });
 
     STATUSES.forEach(function(t){
-      var k = el('k-' + t.id), c = el('c-' + t.id);
-      paintColorSelect(c);
+      var k = el('k-' + t.id);
       k.onchange = function(){
         /* Смена рода двигает все диалоги под этим статусом — об этом
            говорим прямо, потому что человек менял слово, а получит
@@ -4950,7 +5032,7 @@ function tabStatuses(){
           ? L('Чати з цим статусом тепер у «Закритих»')
           : L('Чати з цим статусом повернулися в роботу'));
       };
-      c.onchange = function(){ paintColorSelect(c); saveStatus(t.id, { color: c.value }) };
+      wireSwatch('c-' + t.id, function(c){ saveStatus(t.id, { color: c }) });
     });
 
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-up],[data-down]'), function(b){
@@ -5020,8 +5102,16 @@ function qrFolder(v){
   return s.trim();
 }
 
-function qrGroups(){
+function qrGroups(withEmpty){
   var map = {}, order = [];
+  /* Пустые папки существуют: человек заводит их заранее, чтобы было
+     куда класть. В настройках они обязаны быть видны — иначе созданная
+     папка исчезает сразу после создания. В списке же шаблонов в поле
+     ответа их нет: там выбирают текст, а не разглядывают пустые ящики. */
+  if (withEmpty) QRF.forEach(function(f){
+    var key = qrFolder(f).toLowerCase();
+    if (key && !map[key]){ map[key] = { folder:qrFolder(f), items:[] }; order.push(key) }
+  });
   QR.forEach(function(q){
     var name = qrFolder(q.folder), key = name.toLowerCase();
     if (!map[key]){ map[key] = { folder:name, items:[] }; order.push(key) }
@@ -5120,20 +5210,27 @@ function tabReplies(){
       '<input type="file" id="qrFile" style="display:none">' +
       '<input type="file" id="qrNewFile" style="display:none"></div>' +
 
+      L('<div class="card"><h3>Папки</h3>') +
+      '<div class="acts" style="margin-top:0">' +
+      L('<input id="qfdNew" placeholder="назва папки" style="max-width:220px">') +
+      L('<button class="ghost" id="qfdAdd">Створити папку</button></div>') +
+      L('<div class="hint">Папку можна створити порожньою і скласти в неї шаблони потім. ') +
+      L('Видалення папки шаблони не чіпає: вони просто виходять з неї.</div>') +
+      '<div class="err" id="qfdErr"></div></div>' +
+
       L('<div class="card"><h3>Шаблони (') + QR.length + ')</h3>' +
-      (QR.length
-        ? qrGroups().map(function(g){
-            /* Заголовок группы — и есть папка. Отдельной сущности нет:
-               папка живёт, пока в ней что-то лежит. Кнопка переименования
-               стоит тут же, потому что это единственное действие, которое
-               у папки вообще есть. */
+      ((QR.length || QRF.length)
+        ? qrGroups(true).map(function(g){
             return '<div class="qfd">' +
               '<span class="nm">' + (g.folder ? esc(g.folder) : L('Без папки')) + '</span>' +
               '<span class="dim">' + g.items.length + '</span>' +
               (g.folder
-                ? '<button class="ghost mini" data-ren="' + esc(g.folder) + L('">Перейменувати</button>')
+                ? '<button class="ghost mini" data-ren="' + esc(g.folder) + L('">Перейменувати</button>') +
+                  '<button class="ghost mini" data-fdel="' + esc(g.folder) + L('">Видалити папку</button>')
                 : '') +
-              '</div>' + g.items.map(qrItem).join('');
+              '</div>' +
+              (g.items.length ? g.items.map(qrItem).join('')
+                : L('<div class="hint" style="padding:6px 0 10px">Порожня папка. Перекладіть сюди шаблон кнопкою «Папка».</div>'));
           }).join('')
         : L('<div class="hint">Поки порожньо.</div>')) + '</div></div>';
 
@@ -5178,6 +5275,34 @@ function tabReplies(){
     armDelete(pageBox().querySelectorAll('[data-qr]'), function(b){
       return api('/quick-replies/' + b.dataset.qr, { method:'DELETE' })
         .then(function(){ tabReplies(); renderComposer(true) });
+    });
+
+    el('qfdAdd').onclick = function(){
+      el('qfdErr').textContent = '';
+      var name = el('qfdNew').value.trim();
+      if (!name){ el('qfdErr').textContent = L('Впишіть назву папки'); return }
+      busy(el('qfdAdd'), true);
+      api('/quick-replies/folders', { method:'POST', body:{ name: name } })
+        .then(function(){ tabReplies(); toast(L('Папку створено')) })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('qfdErr').textContent = p.error === 'duplicate'
+            ? L('Така папка вже є') : L('Не вдалося створити папку');
+          busy(el('qfdAdd'), false);
+        });
+    };
+
+    /* Удаление папки шаблоны не трогает — они выходят из неё. Пишем это
+       и в сообщении после удаления: иначе человек будет гадать, куда
+       делись заготовки, которые в ней лежали. */
+    armDelete(pageBox().querySelectorAll('[data-fdel]'), function(b){
+      return api('/quick-replies/folders', { method:'DELETE', body:{ name: b.dataset.fdel } })
+        .then(function(r){
+          tabReplies();
+          renderComposer(true);
+          var n = (r && r.moved) || 0;
+          toast(n ? L('Папку видалено · шаблонів вийшло з неї: ') + n : L('Папку видалено'));
+        });
     });
 
     /* Перекладывание шаблона. Новая папка заводится прямо отсюда: иначе
@@ -5523,33 +5648,106 @@ function announce(list){
 
 /* ══════════════ Загрузка и опрос ══════════════ */
 
-function fillChannelFilter(){
-  var sel = el('fCh');
-  var want = L('<option value="">Всі канали</option>') + CHANNELS.map(function(c){
-    return '<option value="' + c.id + '">' + esc(c.display_name) + '</option>';
-  }).join('');
-  if (sel.innerHTML === want) return;
-  var keep = sel.value;
-  sel.innerHTML = want;
-  sel.value = keep;
+/**
+ * Фильтры с галочками.
+ *
+ * Значений в фильтре может быть несколько, и это главное отличие от
+ * выпадающего списка: там выбор одного отменял предыдущий, а вопросы у
+ * оператора складываются — «мои и ничьи», «в этих двух каналах».
+ *
+ * Подпись кнопки показывает не количество, а первое имя и сколько ещё:
+ * «Telegram +2» человек читает, не открывая, а «вибрано 3» — нет.
+ */
+function filterOptions(key){
+  if (key === 'channelId') {
+    return CHANNELS.map(function(c){ return { v:c.id, t:c.display_name || CH[c.type] || c.type } });
+  }
+  if (key === 'assignee') {
+    // Поимённо, а не «мои и ничьи»: чат передают конкретному человеку,
+    // и посмотреть, что у него, — первое, что делает старший смены.
+    return [{ v:'me', t:L('Мої') }, { v:'none', t:L('Без відповідального') }]
+      .concat(MATES.map(function(u){ return { v:u.id, t:u.name } })
+        .filter(function(o){ return !(ME && ME.user && o.v === ME.user.id) }));
+  }
+  if (key === 'tag') {
+    return TAGS.map(function(t){ return { v:t.tag, t:t.tag + ' (' + t.count + ')' } });
+  }
+  return [{ v:'none', t:L('Без статусу') }].concat(STATUSES.map(function(t){
+    return { v:t.id, t:t.name };
+  }));
 }
+
+function filterLabel(key, all){
+  var opts = filterOptions(key), sel = F[key];
+  if (!sel.length) return all;
+  var names = sel.map(function(v){
+    for (var i = 0; i < opts.length; i++) if (opts[i].v === v) return opts[i].t;
+    return v;
+  });
+  var first = String(names[0]).split(' (')[0];
+  return names.length > 1 ? first + ' +' + (names.length - 1) : first;
+}
+
+function paintFilters(){
+  [['fCh', 'channelId', L('Усі канали')],
+   ['fAs', 'assignee', L('Усі відповідальні')],
+   ['fTag', 'tag', L('Усі мітки')],
+   ['fSt', 'statusId', L('Усі статуси')]].forEach(function(x){
+    var b = el(x[0]);
+    if (!b) return;
+    // Фильтр, за которым нечего выбирать, не показываем вовсе: пустое
+    // окошко обещает срез, которого не существует.
+    var has = filterOptions(x[1]).length > 0;
+    b.style.display = has ? '' : 'none';
+    b.textContent = filterLabel(x[1], x[2]);
+    b.classList.toggle('on', F[x[1]].length > 0);
+    b.title = b.textContent;
+    b.onclick = function(ev){
+      ev.stopPropagation();
+      openFilter(b, x[1], x[2]);
+    };
+  });
+}
+
+function openFilter(anchor, key, all){
+  var opts = filterOptions(key);
+  var box = popBox(anchor, 'fpick');
+  box.innerHTML = opts.map(function(o){
+    return '<label class="fopt"><input type="checkbox" value="' + esc(o.v) + '"' +
+      (F[key].indexOf(o.v) >= 0 ? ' checked' : '') + '><span>' + esc(o.t) + '</span></label>';
+  }).join('') +
+    '<div class="fact"><button class="ghost mini" id="fClr">' + esc(all) + '</button></div>';
+  popAt(box, anchor);
+
+  function apply(){
+    F[key] = [];
+    Array.prototype.forEach.call(box.querySelectorAll('input'), function(i){
+      if (i.checked) F[key].push(i.value);
+    });
+    paintFilters();
+    lastList = null;
+    refresh();
+  }
+
+  Array.prototype.forEach.call(box.querySelectorAll('input'), function(i){
+    i.onchange = apply;
+  });
+  // «Усі» — это снять все галочки, а не ещё одно значение в списке.
+  el('fClr').onclick = function(){
+    Array.prototype.forEach.call(box.querySelectorAll('input'), function(i){ i.checked = false });
+    apply();
+    box.remove();
+  };
+}
+
+function fillChannelFilter(){ paintFilters() }
 
 /* Метки в фильтре подтягиваются отдельно от списка: список — это
    страница, а фильтр обязан знать про все метки, иначе нужной в нём не
    окажется ровно тогда, когда она понадобится. */
 var TAGS = [];
 
-function fillTagFilter(){
-  var sel = el('fTag');
-  if (!sel) return;
-  var want = L('<option value="">Усі мітки</option>') + TAGS.map(function(t){
-    return '<option value="' + esc(t.tag) + '">' + esc(t.tag) + ' (' + t.count + ')</option>';
-  }).join('');
-  if (sel.innerHTML === want) return;
-  var keep = sel.value;
-  sel.innerHTML = want;
-  sel.value = keep;
-}
+function fillTagFilter(){ paintFilters() }
 
 function loadTags(){
   return api('/tags').then(function(d){ TAGS = d.tags || []; fillTagFilter() }).catch(function(){});
@@ -5584,22 +5782,7 @@ function loadStatuses(){
   }).catch(function(){});
 }
 
-function fillStatusFilter(){
-  var sel = el('fSt');
-  if (!sel) return;
-  /* Пока статусов нет, фильтра тоже нет: пустой список в строке
-     фильтров обещает срез, которого не существует. */
-  sel.style.display = STATUSES.length ? '' : 'none';
-  var want = L('<option value="">Усі статуси</option>') +
-    L('<option value="none">Без статусу</option>') +
-    STATUSES.map(function(t){
-      return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>';
-    }).join('');
-  if (sel.innerHTML === want) return;
-  var keep = sel.value;
-  sel.innerHTML = want;
-  sel.value = keep;
-}
+function fillStatusFilter(){ paintFilters() }
 
 /** Цветная плашка статуса — то, за чем в список и приходят. */
 function statusChip(c){
@@ -5693,7 +5876,7 @@ function start(){
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   loadTags();
   loadStatuses();
-  api('/teammates').then(function(d){ MATES = d.users || [] }).catch(function(){});
+  api('/teammates').then(function(d){ MATES = d.users || []; paintFilters() }).catch(function(){});
   api('/quick-replies').then(function(d){
     QR = d.quickReplies || [];
     QRF = d.folders || [];
@@ -5756,10 +5939,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
   };
 });
 
-el('fCh').onchange = function(){ F.channelId = this.value; lastList = null; refresh() };
-el('fAs').onchange = function(){ F.assignee = this.value; lastList = null; refresh() };
-el('fTag').onchange = function(){ F.tag = this.value; lastList = null; refresh() };
-el('fSt').onchange = function(){ F.statusId = this.value; lastList = null; refresh() };
+paintFilters();
 
 // Поиск с задержкой: без неё каждый набранный символ уходил бы
 // отдельным запросом к базе.

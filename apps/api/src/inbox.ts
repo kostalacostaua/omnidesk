@@ -67,18 +67,45 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       return '$' + params.length;
     };
 
+    /*
+     * Фильтры принимают список значений через запятую, а не одно
+     * значение. Вопрос «что у меня в Telegram и в WhatsApp» — такой же
+     * обычный, как «что у меня в Telegram», и заставлять смотреть его
+     * в два захода значит заставлять держать первый ответ в голове.
+     *
+     * Внутри одного фильтра значения складываются через ИЛИ, разные
+     * фильтры — через И. Это единственная раскладка, которая читается
+     * как человеческая фраза: «мои или ничьи диалоги в этих двух
+     * каналах».
+     */
+    const many = (v?: string) =>
+      String(v ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+    const UUID = /^[0-9a-f-]{36}$/i;
+
     // Статус. «Закрытые» — отдельная вкладка, потому что закрытых со
     // временем становится на порядок больше, чем активных.
     if (q.status === 'closed') where.push(`c.status = 'resolved'`);
     else if (q.status === 'open') where.push(`c.status <> 'resolved'`);
     else if (q.status && q.status !== 'all') where.push(`c.status = ${push(q.status)}::text`);
 
-    // Ответственный. «Мои» и «ничьи» — самые частые срезы за смену.
-    if (q.assignee === 'me') where.push(`c.assignee_id = ${push(auth.userId)}::uuid`);
-    else if (q.assignee === 'none') where.push(`c.assignee_id IS NULL`);
-    else if (q.assignee && q.assignee !== 'all') where.push(`c.assignee_id = ${push(q.assignee)}::uuid`);
+    // Ответственный: «мои», «ничьи» и поимённо, в любом сочетании.
+    const who = many(q.assignee).filter((v) => v !== 'all');
+    if (who.length) {
+      const or: string[] = [];
+      const ids = who.map((v) => (v === 'me' ? auth.userId : v)).filter((v) => UUID.test(v));
+      if (who.includes('none')) or.push(`c.assignee_id IS NULL`);
+      if (ids.length) or.push(`c.assignee_id = ANY(${push(ids)}::uuid[])`);
+      // Прислали только мусор — показывать всё было бы обманом: человек
+      // видел бы список, не соответствующий выбранному фильтру.
+      where.push(or.length ? '(' + or.join(' OR ') + ')' : 'false');
+    }
 
-    if (q.channelId) where.push(`c.channel_id = ${push(q.channelId)}::uuid`);
+    const channels = many(q.channelId).filter((v) => UUID.test(v));
+    if (channels.length) where.push(`c.channel_id = ANY(${push(channels)}::uuid[])`);
 
     /*
      * Свой статус. Фильтр отдельный от системного намеренно: «Відкриті»
@@ -86,14 +113,23 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
      * отменять другой. Значение none — «без своего статуса»: без него
      * нельзя найти забытые диалоги, которым статус так и не поставили.
      */
-    if (q.statusId === 'none') where.push(`c.status_id IS NULL`);
-    else if (q.statusId) where.push(`c.status_id = ${push(q.statusId)}::uuid`);
+    const stats = many(q.statusId);
+    if (stats.length) {
+      const or: string[] = [];
+      const ids = stats.filter((v) => UUID.test(v));
+      if (stats.includes('none')) or.push(`c.status_id IS NULL`);
+      if (ids.length) or.push(`c.status_id = ANY(${push(ids)}::uuid[])`);
+      where.push(or.length ? '(' + or.join(' OR ') + ')' : 'false');
+    }
 
     // Доступ к каналам. Условие идёт последним, но действует раньше
     // всех фильтров: оператор с ограниченным списком не увидит чужой
     // канал ни выбрав его в фильтре, ни поиском по имени.
     where.push(channelScope('c.channel_id', push(auth.userId)));
-    if (q.tag) where.push(`${push(q.tag)}::text = ANY(c.tags)`);
+
+    // Метки: диалог подходит, если на нём есть хоть одна из выбранных.
+    const tags = many(q.tag);
+    if (tags.length) where.push(`c.tags && ${push(tags)}::text[]`);
 
     // Поиск по имени и телефону. ILIKE, а не полнотекстовый индекс:
     // на объёмах одного клиента это дешевле и не требует словарей,
