@@ -28,7 +28,14 @@ export type ChannelType =
    * Чат на сайте клиента. Собеседник — посетитель страницы: у него нет
    * ни номера, ни аккаунта, только идентификатор, выданный нами.
    */
-  | 'webchat';
+  | 'webchat'
+  /**
+   * Комментарии под постами страницы Facebook и публикациями Instagram.
+   * Отдельно от личных сообщений: ответ здесь видят все, а не один
+   * человек, и уходит он под пост, а не в переписку.
+   */
+  | 'messenger_comments'
+  | 'instagram_comments';
 
 export type Direction = 'in' | 'out';
 export type SenderType = 'customer' | 'agent' | 'bot' | 'system';
@@ -63,6 +70,19 @@ export interface MessageContent {
   contact?: { name?: string; phone?: string };
   /** Для исходящих шаблонов WhatsApp вне 24-часового окна. */
   template?: { name: string; language: string; params: unknown[] };
+  /**
+   * Комментарий: под каким постом он написан и на какой комментарий
+   * отвечает. Лежит здесь, а не в raw, потому что это нужно показать
+   * оператору и ответить туда же, а не когда-нибудь при разборе.
+   */
+  comment?: {
+    commentId?: string;
+    postId?: string;
+    parentId?: string;
+    url?: string;
+    /** Ответ ушёл в личные, а не под пост. */
+    private?: boolean;
+  };
 }
 
 export interface UnifiedMessage {
@@ -153,6 +173,11 @@ export function computeResponseWindow(
     // чужой платформы, которая ограничивала бы ответ, здесь не стоит.
     // В своём канале окно тоже не наше дело: если платформа на той
     // стороне что-то ограничивает, знает об этом клиент, а не мы.
+    // Комментарий можно написать под постом когда угодно: окна там нет.
+    // Семь дней на приватный ответ — правило не этого окна, а одной
+    // кнопки, и живут они в том месте, где кнопка.
+    case 'messenger_comments':
+    case 'instagram_comments':
     case 'webchat':
     case 'custom':
     case 'telegram_bot':

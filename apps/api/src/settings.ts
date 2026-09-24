@@ -10,6 +10,7 @@ import {
   ViberError,
   viberSenders,
   META_LOGIN_SCOPES,
+  COMMENT_SUBSCRIBED_FIELDS,
   PAGE_SUBSCRIBED_FIELDS,
   MetaApiError,
   decryptJson,
@@ -2195,7 +2196,15 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
 
   app.post<{
     Params: { id: string };
-    Body: { pages?: Array<{ id: string; messenger?: boolean; instagram?: boolean }> };
+    Body: {
+      pages?: Array<{
+        id: string;
+        messenger?: boolean;
+        instagram?: boolean;
+        messengerComments?: boolean;
+        instagramComments?: boolean;
+      }>;
+    };
   }>('/settings/channels/meta/pick/:id', async (req, reply) => {
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);
@@ -2209,7 +2218,8 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       const page = pages.find((p) => p.id === sel.id);
       if (!page) continue;
 
-      const wanted: Array<{ type: 'messenger' | 'instagram'; externalId: string; name: string }> = [];
+      type PickType = 'messenger' | 'instagram' | 'messenger_comments' | 'instagram_comments';
+      const wanted: Array<{ type: PickType; externalId: string; name: string }> = [];
       if (sel.messenger) wanted.push({ type: 'messenger', externalId: page.id, name: page.name });
       if (sel.instagram && page.ig) {
         wanted.push({
@@ -2218,13 +2228,35 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
           name: page.ig.username ? `@${page.ig.username}` : page.name,
         });
       }
+      // Комментарии — отдельный канал у той же страницы: внешний
+      // идентификатор тот же, а тип другой, и это ровно то, что
+      // разводит комментарии и личку по разным диалогам.
+      if (sel.messengerComments) {
+        wanted.push({
+          type: 'messenger_comments',
+          externalId: page.id,
+          name: `${page.name} — коментарі`,
+        });
+      }
+      if (sel.instagramComments && page.ig) {
+        wanted.push({
+          type: 'instagram_comments',
+          externalId: page.ig.id,
+          name: (page.ig.username ? `@${page.ig.username}` : page.name) + ' — коментарі',
+        });
+      }
       if (!wanted.length) continue;
 
       // Подписка страницы на вебхуки нашего приложения. Без неё Meta
       // не присылает ни Messenger, ни Instagram этой страницы.
       try {
+        // Поля подписки зависят от выбора: лента страницы нужна только
+        // тем, кто берёт комментарии, и просить её у остальных — значит
+        // получать вебхуки на каждый лайк чужой страницы.
+        const fields = [...PAGE_SUBSCRIBED_FIELDS];
+        if (sel.messengerComments || sel.instagramComments) fields.push(...COMMENT_SUBSCRIBED_FIELDS);
         await graphPost('' + page.id + '/subscribed_apps', {
-          subscribed_fields: PAGE_SUBSCRIBED_FIELDS.join(','),
+          subscribed_fields: fields.join(','),
           access_token: page.token,
         }, undefined);
       } catch (err) {
@@ -2247,7 +2279,9 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
           continue;
         }
         const creds: Record<string, string> = { pageId: page.id, pageToken: page.token };
-        if (w.type === 'instagram' && page.ig) creds['igId'] = page.ig.id;
+        if ((w.type === 'instagram' || w.type === 'instagram_comments') && page.ig) {
+          creds['igId'] = page.ig.id;
+        }
         await withTenant(pool, auth.tenantId, async (db) => {
           await db.query(
             `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
@@ -2264,7 +2298,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
               w.externalId,
               encryptJson(masterKey, auth.tenantId, creds),
               JSON.stringify(
-                w.type === 'instagram'
+                w.type === 'instagram' || w.type === 'instagram_comments'
                   ? { username: page.ig?.username ?? null, pageId: page.id, pageName: page.name }
                   : { pageName: page.name, picture: page.picture },
               ),

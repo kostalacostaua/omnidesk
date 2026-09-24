@@ -10,6 +10,7 @@ import {
   QUEUE_MTPROTO_LOGIN,
   assertRlsIntegrity,
   canSendFreeform,
+  isCommentChannel,
   createPool,
   createStorage,
   avatarKey,
@@ -1387,6 +1388,13 @@ app.post<{
       /** Вложение из шаблона: файл уже лежит в хранилище, заново его не льём. */
       fromQuickReply?: { id?: string; index?: number };
     };
+    /**
+     * Комментарии: ответить в личные, а не под постом.
+     *
+     * Отдельный признак, а не догадка по каналу: под постом и в личку —
+     * два разных ответа с разными правилами, и выбирает оператор.
+     */
+    privateReply?: boolean;
   };
 }>(
   '/conversations/:id/messages',
@@ -1399,6 +1407,7 @@ app.post<{
     if (!auth) return reply.code(401).send({ error: 'unauthorized' });
 
     const text = (req.body?.text ?? '').trim();
+    const privateReply = req.body?.privateReply === true;
 
     /*
      * Шаблон: имя и язык обязательны, остальное — значения переменных.
@@ -1496,6 +1505,17 @@ app.post<{
       const conv = rows[0];
       if (!conv) return { error: 'conversation_not_found' as const };
 
+      // Приватный ответ бывает только у комментариев: в личной
+      // переписке он означал бы то же самое, что обычный ответ.
+      if (privateReply && !isCommentChannel(conv.channel_type)) {
+        return { error: 'not_a_comment' as const };
+      }
+      // Под постом уходит текст. Файл в комментарий Graph API не примет,
+      // и обещать оператору отправку, которая не состоится, незачем.
+      if (isCommentChannel(conv.channel_type) && (attachment || template)) {
+        return { error: 'comment_text_only' as const };
+      }
+
       const verdict = canSendFreeform(conv.channel_type, {
         type: (conv.window_type as never) ?? 'none',
         expiresAt: conv.window_expires_at,
@@ -1560,6 +1580,7 @@ app.post<{
               req.body?.replyToExternalId
                 ? { replyToExternalId: req.body.replyToExternalId }
                 : {},
+              privateReply ? { comment: { private: true } } : {},
             ),
           ),
         ],

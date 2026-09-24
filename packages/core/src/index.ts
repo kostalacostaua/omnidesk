@@ -23,6 +23,7 @@ export * from './events.js';
 export * from './sla.js';
 export * from './kpi.js';
 export * from './orders.js';
+export * from './comments.js';
 export * from './routing.js';
 export * from './notify.js';
 export * from './mail.js';

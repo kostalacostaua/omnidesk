@@ -117,6 +117,17 @@ export const PAGE_SUBSCRIBED_FIELDS = [
   'messaging_postbacks',
 ];
 
+/**
+ * Поля вебхуков для комментариев.
+ *
+ * Лента страницы (feed) приносит вообще все события страницы, включая
+ * лайки и репосты, поэтому подписываемся на неё только тем, кто
+ * комментарии действительно взял. Комментарии Instagram приходят в
+ * отдельном потоке (object=instagram) и требуют подписки приложения на
+ * поля comments в кабинете Meta — подписка страницы её не заменяет.
+ */
+export const COMMENT_SUBSCRIBED_FIELDS = ['feed'];
+
 /** Разрешения, которые запрашиваем при входе через Facebook. */
 export const META_LOGIN_SCOPES = [
   'pages_show_list',
@@ -126,4 +137,8 @@ export const META_LOGIN_SCOPES = [
   'business_management',
   'instagram_basic',
   'instagram_manage_messages',
+  // Комментарии: читать чужие под своими постами и отвечать под ними.
+  'pages_read_user_content',
+  'pages_manage_engagement',
+  'instagram_manage_comments',
 ];

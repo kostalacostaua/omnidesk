@@ -701,6 +701,17 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
   .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
+  .chico.messenger_comments{background:linear-gradient(140deg,#00b2ff,#006aff)}
+  .chico.instagram_comments{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
+  /* Комментарий в ленте: под каким постом он написан и ушёл ли ответ
+     в личные. Мелко и рядом с текстом — это пометка, а не сообщение. */
+  .cmt{font-size:11px;opacity:.72;margin-bottom:4px}
+  .cmt a{color:inherit;text-decoration:underline}
+  /* Выбор страниц Facebook: галочки рядом с подписью, а не во всю
+     ширину. Общее правило input{width:100%} растягивает их и уносит
+     текст на строку ниже — здесь оно не к месту. */
+  #metaBody label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  #metaBody input[type=checkbox]{width:16px;height:16px;flex:none;margin:0}
   /* Выбор ответственного стоит среди кнопок шапки чата и не должен
      выглядеть чужеродно: тот же рост, та же сдержанность. */
   /* Расписание: семь одинаковых строк, и главное в них — чтобы день,
@@ -1095,7 +1106,12 @@ var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   telegram_user:L('Telegram номерний'), whatsapp_cloud:'WhatsApp', whatsapp:'WhatsApp',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
   messenger:'Messenger', viber_business:L('Viber для бізнесу'), webchat:L('Чат на сайті'),
-  viber_user:L('Viber номерний'), custom:L('Власний канал') };
+  viber_user:L('Viber номерний'), custom:L('Власний канал'),
+  messenger_comments:L('Facebook, коментарі'), instagram_comments:L('Instagram, коментарі') };
+
+/* Комментарии — отдельный канал у той же страницы, и отличаются они не
+   значком, а правилами: под постом отвечают всем сразу. */
+function isComments(t){ return t === 'messenger_comments' || t === 'instagram_comments' }
 
 var ROLES = { owner:L('Власник'), admin:L('Адміністратор'), agent:L('Оператор'), viewer:L('Спостерігач') };
 
@@ -1270,8 +1286,13 @@ function renderHead(){
             }).join('') +
           '</select>'
         : '') +
-      '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
-        esc(botState(c).label) + '</button>' +
+      /* Под постом бот молчит всегда: автоответ на глазах у всей ленты —
+         не та неожиданность, которую включают переключателем. Кнопки нет
+         вовсе: выключатель, который ничего не выключает, хуже её отсутствия. */
+      (isComments(c.channel_type)
+        ? ''
+        : '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
+          esc(botState(c).label) + '</button>') +
       '<button class="' + (closed ? '' : 'ghost ') + 'mini" id="aClose">' +
         (closed ? L('Відкрити заново') : L('Закрити чат')) + '</button>' +
     '</div>';
@@ -1299,7 +1320,7 @@ function renderHead(){
     });
   };
   paintAvatars();
-  el('aBot').onclick = function(){ patchConv({ botEnabled: !c.bot_enabled }) };
+  if (el('aBot')) el('aBot').onclick = function(){ patchConv({ botEnabled: !c.bot_enabled }) };
   el('aClose').onclick = function(){
     var closing = !closed;
     patchConv({ status: closing ? 'resolved' : 'open' }).then(function(){
@@ -1478,7 +1499,19 @@ function loadThread(){
         return '<span class="r' + (r.by === 'agent' ? ' mine' : '') + '">' + esc(r.emoji) + '</span>';
       }).join('');
 
-      var body = quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
+      // Пометка комментария. Оператор обязан видеть, что отвечает
+      // публично, ещё до того, как начнёт печатать.
+      var cm = c.comment
+        ? '<div class="cmt">' +
+            (c.comment.private
+              ? L('в особисті')
+              : (c.comment.url
+                  ? '<a href="' + esc(c.comment.url) + L('" target="_blank" rel="noopener">під постом</a>')
+                  : L('під постом'))) +
+          '</div>'
+        : '';
+
+      var body = cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
 
       return '<div class="mwrap ' + (isOut ? 'out' : 'in') + '" data-mid="' + m.id +
         '" data-ext="' + esc(m.external_id || '') + '" data-text="' + esc((c.text || '').slice(0,120)) + '">' +
@@ -1605,8 +1638,10 @@ function renderComposer(force){
 
   // В ключ входят цитата и выбранный файл: их появление обязано
   // перерисовать поле, иначе оператор не увидит, на что отвечает.
+  var cmt = isComments(c && c.channel_type);
   var mode = (w.open ? 'open' : 'blocked') + ':' + current + ':' + QR.length +
-    ':' + (replyTo ? replyTo.id : '') + ':' + (pendingFile ? (pendingFile.name || '') : '');
+    ':' + (replyTo ? replyTo.id : '') + ':' + (pendingFile ? (pendingFile.name || '') : '') +
+    ':' + (cmt ? 'c' : '');
   if (!force && box.dataset.mode === mode) return;
 
   // Набранный текст переживает перерисовку — его теряют только вместе
@@ -1642,16 +1677,26 @@ function renderComposer(force){
       : '') +
     '<div class="tplbox" id="tplBox" style="display:none"></div>' +
     '<div class="emobox" id="emoBox" style="display:none"></div>' +
+    /* Куда уйдёт ответ. Выбор стоит над полем, а не под кнопкой:
+       решение принимается до того, как текст набран. */
+    (cmt
+      ? '<div class="fopt" style="padding:0 2px 6px">' +
+        L('<label><input type="checkbox" id="priv"> Відповісти в особисті</label>') +
+        L('<span class="dim" style="margin-left:8px;font-size:11.5px">одне повідомлення, ') +
+        L('сім днів від коментаря</span></div>')
+      : '') +
     '<div class="row">' +
     '<input type="file" id="file" style="display:none">' +
-    L('<button class="icob" id="clip" title="Прикріпити файл">') + icon('clip') + '</button>' +
+    (cmt ? '' : L('<button class="icob" id="clip" title="Прикріпити файл">') + icon('clip') + '</button>') +
     L('<button class="icob" id="emo" title="Смайли">') + icon('smile') + '</button>' +
     L('<button class="icob" id="tpl" title="Шаблони відповідей">') + icon('bolt') + '</button>' +
     // Кнопка черновика появляется, только когда ИИ подключён: пустая
     // кнопка, которая на нажатие отвечает «не настроено», — это
     // обещание, которого интерфейс не держит.
     (AI.ready ? L('<button class="icob" id="ai" title="Чернетка відповіді від ШІ">✨</button>') : '') +
-    (narrow()
+    (cmt
+      ? L('<textarea id="txt" rows="1" placeholder="Відповідь під постом — її побачать усі"></textarea>')
+      : narrow()
       ? L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту"></textarea>')
       : L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту. Enter — надіслати, Shift+Enter — перенос"></textarea>')) +
     L('<button id="send">Надіслати</button></div><div class="err" id="sendErr"></div>');
@@ -1662,7 +1707,7 @@ function renderComposer(force){
   if (el('rCancel')) el('rCancel').onclick = function(){ replyTo = null; renderComposer(true) };
   if (el('fCancel')) el('fCancel').onclick = function(){ pendingFile = null; renderComposer(true) };
 
-  el('clip').onclick = function(){ el('file').click() };
+  if (el('clip')) el('clip').onclick = function(){ el('file').click() };
   el('file').onchange = function(){
     var f = this.files && this.files[0];
     if (!f) return;
@@ -2081,6 +2126,7 @@ function send(){
 
   var payload = { text: text };
   if (replyTo && replyTo.ext) payload.replyToExternalId = replyTo.ext;
+  if (el('priv') && el('priv').checked) payload.privateReply = true;
 
   if (pendingFile && pendingFile.qr) {
     payload.attachment = { fromQuickReply: pendingFile.qr };
@@ -2115,6 +2161,8 @@ function send(){
       el('sendErr').textContent =
         p.error === 'file_too_large' ? L('Файл більший за 20 МБ')
         : p.error === 'storage_write_failed' ? p.detail
+        : p.error === 'comment_text_only' ? L('У коментарі йде тільки текст')
+        : p.error === 'not_a_comment' ? L('В особисті відповідають лише на коментар')
         : p.reason || p.error || L('Не вдалося надіслати');
     })
     .then(function(){ busy(el('send'), false) });
@@ -3310,7 +3358,7 @@ function editRow(id, value, save, errId){
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
   whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB',
-  webchat:'WEB', custom:'API' };
+  webchat:'WEB', custom:'API', messenger_comments:'FB', instagram_comments:'IG' };
 
 /* Ключи своего канала. Показываются при подключении и потом на странице
    канала: это наши собственные секреты, а не чужой платформы, и прятать
@@ -4640,6 +4688,16 @@ function showMetaPick(id){
             ? ' &nbsp; <label><input type="checkbox" data-mp="' + esc(p.id) + '" data-k="instagram" checked> Instagram' +
               (p.instagram.username ? ' @' + esc(p.instagram.username) : '') + '</label>'
             : L(' &nbsp; <span class="muted">Instagram до сторінки не привʼязаний</span>')) +
+          /* Комментарии по умолчанию не отмечены: это отдельная лента и
+             отдельная работа, и включать её молча за человека незачем. */
+          '<div style="margin-top:4px">' +
+          L('<label><input type="checkbox" data-mp="') + esc(p.id) +
+            L('" data-k="messengerComments"> Коментарі під постами</label>') +
+          (p.instagram
+            ? L(' &nbsp; <label><input type="checkbox" data-mp="') + esc(p.id) +
+              L('" data-k="instagramComments"> Коментарі в Instagram</label>')
+            : '') +
+          '</div>' +
           '</div></div></div>';
       }).join('') +
       L('<div class="row2" style="margin-top:10px"><button id="metaSave">Підключити вибране</button></div>') +

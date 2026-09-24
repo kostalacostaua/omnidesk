@@ -27,6 +27,10 @@ import {
   normalizeMessaging,
   normalizeMessagingReactions,
   splitMessagingPayload,
+  splitCommentPayload,
+  normalizeComments,
+  isCommentChannel,
+  type CommentEntry,
   graphGet,
   graphPost,
   needsHumanAgentTag,
@@ -812,6 +816,9 @@ async function handleInbound(job: InboundJob): Promise<void> {
     const payload = job.payload as MetaWebhookPayload;
     if (payload.object === 'page' || payload.object === 'instagram') {
       for (const entry of splitMessagingPayload(payload)) await handleMessagingEntry(entry);
+      // Комментарии приходят в тех же пачках, но другими полями, и
+      // канал у них свой. Одна пачка может нести и то, и другое.
+      for (const entry of splitCommentPayload(payload)) await handleCommentEntry(entry);
       return;
     }
     const phoneNumberId = extractWhatsAppPhoneNumberId(payload);
@@ -970,6 +977,55 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
   // на сообщение, которое записывается строкой выше.
   for (const r of normalizeMessagingReactions(entry)) {
     await applyReaction(channel.tenant_id, channel.id, r);
+  }
+}
+
+/**
+ * Входящий комментарий под постом.
+ *
+ * От личного сообщения отличается тремя вещами, и все три здесь видны.
+ *
+ * Профиль у Meta не спрашиваем: имя и ник приходят прямо в вебхуке, а
+ * лишний поход в Graph API на каждый комментарий под вирусным постом —
+ * это отказ по лимитам ровно в тот момент, когда комментариев много.
+ *
+ * Бот молчит. Ответ под постом видят все, и автоматический текст,
+ * написанный для личной переписки, здесь читается как ответ невпопад на
+ * глазах у всей ленты. Оповещение и раздача ответственного при этом
+ * работают: человек должен узнать о комментарии так же быстро.
+ */
+async function handleCommentEntry(entry: CommentEntry): Promise<void> {
+  const channel = await findChannel(entry.channelType, entry.channelExternalId);
+  if (!channel) {
+    // Обычное дело: страница подключена как Messenger, а комментарии
+    // не брали. Подписка на ленту общая, поэтому событие приходит.
+    log('debug', 'Канал комментариев не подключён', {
+      type: entry.channelType,
+      id: entry.channelExternalId,
+    });
+    return;
+  }
+
+  const creds = await metaCredentials(channel.tenant_id, channel.id);
+  const messages = normalizeComments(
+    { tenantId: channel.tenant_id, channelId: channel.id },
+    entry,
+    [creds?.pageId, creds?.igId, entry.channelExternalId],
+  );
+
+  for (const m of messages) {
+    const { inserted, messageId, conversationId, contactId } = await persistMessage(m);
+    log('info', inserted ? 'Комментарий сохранён' : 'Дубликат комментария, пропущен', {
+      channelId: channel.id,
+      externalId: m.externalId,
+    });
+    if (!inserted) continue;
+    if (messageId) await enqueueMedia(m, messageId, 'meta');
+    if (contactId) await enqueueCrm(m, contactId, conversationId);
+    if (conversationId) {
+      await assignConversation(m, conversationId);
+      await announceNew(m, conversationId);
+    }
   }
 }
 
@@ -1883,11 +1939,19 @@ interface OutboundRow {
     replyToExternalId?: string;
     /** Одобренный шаблон WhatsApp: вне суточного окна разрешён только он. */
     template?: { name: string; language: string; params?: unknown[] };
+    /** Ответ в комментариях: под постом или в личные. */
+    comment?: { private?: boolean };
   } | null;
   peer_id: string | null;
   channel_type: string;
   credentials_enc: Buffer;
   window_expires_at: Date | null;
+}
+
+/** Куда отвечать в комментариях: последний комментарий собеседника в этом диалоге. */
+interface CommentTarget {
+  commentId: string;
+  at: Date;
 }
 
 interface OutAttachment {
@@ -2142,6 +2206,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
     await mtprotoOutQueue.add('send', job, { jobId: jobKey('mtp', job.messageId) });
     return;
   }
+
+  if (isCommentChannel(row.channel_type)) return sendComment(job, row, worker);
 
   if (row.channel_type === 'messenger' || row.channel_type === 'instagram') {
     return sendMeta(job, row, row.peer_id, worker);
@@ -2632,6 +2698,122 @@ async function viberTick(): Promise<void> {
         );
       });
     }
+  }
+}
+
+/**
+ * Ответ в комментариях.
+ *
+ * Отвечаем всегда на последний комментарий собеседника, а не на первый:
+ * человек написал три раза подряд, и ответ под первым из них он
+ * увидит последним. Meta всё равно уложит ответ в ту же ветку — глубже
+ * одного уровня вложенности там нет.
+ *
+ * Приватный ответ — другая ручка и другое правило: одно сообщение,
+ * семь дней от комментария, и дальше переписка живёт уже в личных.
+ * Поэтому отказ по времени объясняется отдельно: «поздно», а не
+ * «Meta отказала».
+ */
+async function sendComment(job: OutboundJob, row: OutboundRow, worker: Worker): Promise<void> {
+  const creds = decryptJson<MetaChannelCredentials>(masterKey, job.tenantId, row.credentials_enc);
+  const isIg = row.channel_type === 'instagram_comments';
+  const privately = row.content?.comment?.private === true;
+
+  const text = (row.text ?? '').trim();
+  if (!text) {
+    await markFailed(job, { reason: 'comment_needs_text' });
+    throw new UnrecoverableError('В комментариях отправляется только текст');
+  }
+
+  const target = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<CommentTarget>(
+      `SELECT m.external_id AS "commentId", m.sent_at AS at
+         FROM messages m
+         JOIN messages me ON me.id = $1 AND me.conversation_id = m.conversation_id
+        WHERE m.direction = 'in' AND m.external_id IS NOT NULL
+        ORDER BY m.sent_at DESC
+        LIMIT 1`,
+      [job.messageId],
+    );
+    return rows[0] ?? null;
+  });
+
+  if (!target) {
+    await markFailed(job, { reason: 'no_comment_to_reply' });
+    throw new UnrecoverableError('Нет комментария, на который можно ответить');
+  }
+
+  // Семь дней — правило Meta для приватного ответа, и проверяем мы его
+  // сами: отказ Graph API в этом месте выглядит как «неверный
+  // получатель» и оператору ничего не объясняет.
+  const ageDays = (Date.now() - new Date(target.at).getTime()) / 86_400_000;
+  if (privately && ageDays > 7) {
+    await markFailed(job, { reason: 'private_reply_too_late' });
+    throw new UnrecoverableError('Приватный ответ разрешён семь дней с комментария');
+  }
+
+  try {
+    let outId: string | null = null;
+
+    if (privately) {
+      // Личный ответ уходит от имени страницы или аккаунта, а получателя
+      // Meta находит сама по комментарию: идентификатора собеседника в
+      // личке у нас нет и быть не может, пока он не ответил.
+      const r = await graphPost<{ message_id?: string }>(
+        (isIg ? creds.igId ?? creds.pageId : creds.pageId) + '/messages',
+        { access_token: creds.pageToken },
+        { recipient: { comment_id: target.commentId }, message: { text } },
+      );
+      outId = r.message_id ?? null;
+    } else {
+      const edge = isIg ? '/replies' : '/comments';
+      const r = await graphPost<{ id?: string }>(
+        target.commentId + edge,
+        { access_token: creds.pageToken },
+        { message: text },
+      );
+      outId = r.id ?? null;
+    }
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2 WHERE id = $1 AND status = 'pending'`,
+        [job.messageId, outId],
+      );
+    });
+    log('info', privately ? 'Приватный ответ отправлен' : 'Ответ под постом отправлен', {
+      messageId: job.messageId,
+      channel: row.channel_type,
+    });
+  } catch (err) {
+    if (!(err instanceof MetaApiError)) throw err;
+    if (err.tokenInvalid) {
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE channels SET status = 'degraded',
+                  last_error = '{"reason":"token_revoked"}'::jsonb
+            WHERE id = $1`,
+          [job.channelId],
+        );
+      });
+      await markFailed(job, { reason: 'token_revoked', code: err.body.code });
+      await announceChannelDown(job.tenantId, job.channelId, 'Доступ до сторінки відкликано — підключіть її заново');
+      throw new UnrecoverableError('Доступ к странице отозван — подключите её заново');
+    }
+    if (err.rateLimited) {
+      await worker.rateLimit(60_000);
+      throw Worker.RateLimitError();
+    }
+    if (err.permanent) {
+      await markFailed(job, {
+        code: err.body.code,
+        subcode: err.body.error_subcode,
+        description: err.body.message,
+        ...(privately ? { reason: 'private_reply_refused' } : {}),
+      });
+      throw new UnrecoverableError(err.message);
+    }
+    throw err;
   }
 }
 
