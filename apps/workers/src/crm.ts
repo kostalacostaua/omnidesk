@@ -8,6 +8,7 @@ import {
   pipedriveFindOrCreate,
   withSystem,
   withTenant,
+  zohoAccessToken,
   type CrmKind,
   type CrmSyncJob,
   type Pool,
@@ -47,8 +48,6 @@ interface Installation {
   refresh_token_enc: Buffer;
 }
 
-const TOKEN_TTL_SEC = 50 * 60;
-
 export function createCrmSync(deps: CrmDeps) {
   const { pool, redis, masterKey, log } = deps;
 
@@ -65,42 +64,32 @@ export function createCrmSync(deps: CrmDeps) {
   }
 
   async function accessToken(tenantId: string, inst: Installation): Promise<string | null> {
-    const key = `zoho:at:${tenantId}`;
-    const cached = await redis.get(key);
-    if (cached) return cached;
-
     const { refreshToken } = decryptJson<{ refreshToken: string }>(
       masterKey,
       tenantId,
       inst.refresh_token_enc,
     );
 
-    const res = await fetch(`${inst.accounts_server}/oauth/v2/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: deps.clientId,
-        client_secret: deps.clientSecret,
-        refresh_token: refreshToken,
-      }),
-      signal: AbortSignal.timeout(20_000),
+    const out = await zohoAccessToken({
+      cache: redis,
+      tenantId,
+      accountsServer: inst.accounts_server,
+      refreshToken,
+      clientId: deps.clientId,
+      clientSecret: deps.clientSecret,
     });
-    const body = (await res.json()) as { access_token?: string; error?: string };
 
-    if (!res.ok || !body.access_token) {
+    if (!out.ok) {
       // Доступ могли отозвать в Zoho. Помечаем установку — оператор
       // увидит на странице интеграций, что нужно подключить заново,
       // а не будет гадать, почему карточки перестали находиться.
       await withTenant(pool, tenantId, async (db) => {
         await db.query(`UPDATE zoho_installations SET status = 'degraded' WHERE id = $1`, [inst.id]);
       });
-      log('warn', 'Zoho отклонила refresh-токен', { tenantId, error: body.error });
+      log('warn', 'Zoho отклонила refresh-токен', { tenantId, error: out.error });
       return null;
     }
-
-    await redis.set(key, body.access_token, 'EX', TOKEN_TTL_SEC);
-    return body.access_token;
+    return out.token;
   }
 
   /** Поиск по номеру. Zoho ищет по точному совпадению, поэтому номер идёт как есть. */

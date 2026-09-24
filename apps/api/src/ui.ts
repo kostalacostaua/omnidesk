@@ -2186,7 +2186,16 @@ function renderCard(){
     '<h4>CRM</h4>' +
     (d.crmUrl
       ? L('<div class="kv2"><div class="k">Картка</div>') +
-        '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Zoho</a></div></div>')
+        '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Zoho</a></div></div>') +
+        /* Компания. Стоит здесь, а не в «Контакті»: это поле не наше,
+           оно живёт в CRM, и меняется там же. Показываем последнее, что
+           отправляли, — переименование в CRM сюда не приедет. */
+        L('<div class="fld" style="margin-top:8px"><label>Компанія</label>') +
+        '<input id="cCo" value="' + esc((ct.attributes && ct.attributes.company) || '') + '"' +
+        L(' placeholder="назва компанії"></div>') +
+        L('<button class="ghost mini" id="cCoSave">Привʼязати компанію</button>') +
+        '<span class="ok" id="cCoOk" style="margin-left:8px"></span>' +
+        '<div class="err" id="cCoErr"></div>'
       : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
@@ -2200,6 +2209,29 @@ function renderCard(){
     '</div>';
 
   paintAvatars();
+
+  if (el('cCoSave')) el('cCoSave').onclick = function(){
+    var name = el('cCo').value.trim();
+    el('cCoErr').textContent = '';
+    el('cCoOk').textContent = '';
+    if (!name){ el('cCoErr').textContent = L('Впишіть назву компанії'); return }
+    busy(el('cCoSave'), true);
+    api('/contacts/' + ct.id + '/company', { method:'POST', body:{ name: name } })
+      .then(function(){
+        el('cCoOk').textContent = L('готово');
+        busy(el('cCoSave'), false);
+        loadCard();
+      })
+      .catch(function(e){
+        var p = e.payload || {};
+        el('cCoErr').textContent =
+          p.error === 'not_linked' ? L('Спершу надішліть клієнта в Zoho')
+          : p.error === 'zoho_not_connected' ? L('Zoho не підключена')
+          : p.error === 'token_rejected' ? L('Zoho відкликала доступ — перепідключіть на сторінці інтеграцій')
+          : L('Zoho не прийняла компанію');
+        busy(el('cCoSave'), false);
+      });
+  };
 
   el('cSave').onclick = function(){
     busy(el('cSave'), true);

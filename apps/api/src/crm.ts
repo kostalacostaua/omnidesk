@@ -13,6 +13,7 @@ import {
   parseCrmSettings,
   withSystem,
   withTenant,
+  zohoAccessToken,
   type CrmKind,
   type PipedriveTokens,
   type Pool,
@@ -50,7 +51,10 @@ interface CrmDeps {
     setex: (key: string, seconds: number, value: string) => Promise<unknown>;
     get: (key: string) => Promise<string | null>;
     del: (key: string) => Promise<unknown>;
+    set: (key: string, value: string, mode: 'EX', seconds: number) => Promise<unknown>;
   };
+  /** Ключи приложения Zoho: нужны, чтобы говорить с её API отсюда. */
+  zoho?: { clientId: string; clientSecret: string };
 }
 
 interface Creds {
@@ -166,6 +170,166 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
     return { connections: rows.map(view), settings: behaviour };
   });
+
+  /**
+   * Компания клиента в CRM.
+   *
+   * Просьба звучит как «создать компанию», но на деле их две: завести
+   * компанию, если такой ещё нет, и привязать к ней карточку человека.
+   * Вторая и есть главная — компания сама по себе в CRM не нужна
+   * никому, нужна связь «этот человек оттуда».
+   *
+   * Лид и контакт устроены по-разному, и притворяться, что одинаково,
+   * нельзя: у контакта компания — ссылка на карточку компании, у лида
+   * просто поле с текстом. Поэтому у лида мы пишем название, а карточку
+   * компании не заводим: она повиснет пустой и ни с чем не связанной, а
+   * при конвертации лида Zoho создаст свою.
+   */
+  app.post<{ Params: { id: string }; Body: { name?: string } }>(
+    '/contacts/:id/company',
+    async (req, reply) => {
+      const a = requireAuth(req);
+      if (!a) return reply.code(401).send(auth401);
+
+      const name = String(req.body?.name ?? '').trim().slice(0, 200);
+      if (!name) return reply.code(400).send({ error: 'name_required' });
+      if (!deps.redis || !deps.zoho?.clientId) {
+        return reply.code(400).send({ error: 'zoho_not_configured' });
+      }
+
+      const link = await withTenant(pool, a.tenantId, async (db) => {
+        const { rows } = await db.query<{ crm_module: string | null; crm_record_id: string | null }>(
+          `SELECT crm_module, crm_record_id FROM contacts WHERE id = $1`,
+          [req.params.id],
+        );
+        return rows[0] ?? null;
+      });
+      if (!link?.crm_record_id || !link.crm_module) {
+        return reply.code(409).send({ error: 'not_linked' });
+      }
+
+      const inst = await withTenant(pool, a.tenantId, async (db) => {
+        const { rows } = await db.query<{
+          id: string;
+          accounts_server: string;
+          api_domain: string;
+          refresh_token_enc: Buffer;
+        }>(
+          `SELECT id, accounts_server, api_domain, refresh_token_enc
+             FROM zoho_installations WHERE status = 'active'
+            ORDER BY created_at DESC LIMIT 1`,
+        );
+        return rows[0] ?? null;
+      });
+      if (!inst) return reply.code(409).send({ error: 'zoho_not_connected' });
+
+      const { refreshToken } = decryptJson<{ refreshToken: string }>(
+        masterKey,
+        a.tenantId,
+        inst.refresh_token_enc,
+      );
+      const got = await zohoAccessToken({
+        cache: deps.redis as never,
+        tenantId: a.tenantId,
+        accountsServer: inst.accounts_server,
+        refreshToken,
+        clientId: deps.zoho.clientId,
+        clientSecret: deps.zoho.clientSecret,
+      });
+      if (!got.ok) {
+        await withTenant(pool, a.tenantId, async (db) => {
+          await db.query(`UPDATE zoho_installations SET status = 'degraded' WHERE id = $1`, [
+            inst.id,
+          ]);
+        });
+        return reply.code(409).send({ error: 'token_rejected', detail: got.error });
+      }
+
+      const head = {
+        authorization: `Zoho-oauthtoken ${got.token}`,
+        'content-type': 'application/json',
+      };
+
+      // У лида компания — текстовое поле, и на этом всё.
+      if (link.crm_module === 'Leads') {
+        const res = await fetch(`${inst.api_domain}/crm/v6/Leads/${link.crm_record_id}`, {
+          method: 'PUT',
+          headers: head,
+          body: JSON.stringify({ data: [{ Company: name }] }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (!res.ok) return reply.code(502).send({ error: 'zoho_refused' });
+        await rememberCompany(a.tenantId, req.params.id, name);
+        return { company: name, module: 'Leads' };
+      }
+
+      /*
+       * Ищем компанию по точному названию, прежде чем заводить. Иначе
+       * с каждым клиентом из одной фирмы в CRM появляется ещё одна
+       * «Ромашка», и через месяц их там шесть.
+       */
+      const search = new URL(`${inst.api_domain}/crm/v6/Accounts/search`);
+      search.searchParams.set('criteria', `(Account_Name:equals:${name})`);
+      const found = await fetch(search, {
+        headers: { authorization: head.authorization },
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      let accountId: string | null = null;
+      if (found.status !== 204 && found.ok) {
+        const body = (await found.json()) as { data?: Array<{ id?: string }> };
+        accountId = body.data?.[0]?.id ?? null;
+      }
+
+      if (!accountId) {
+        const made = await fetch(`${inst.api_domain}/crm/v6/Accounts`, {
+          method: 'POST',
+          headers: head,
+          body: JSON.stringify({ data: [{ Account_Name: name }] }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        const body = (await made.json().catch(() => ({}))) as {
+          data?: Array<{ code?: string; details?: { id?: string }; message?: string }>;
+        };
+        const first = body.data?.[0];
+        if (!made.ok || first?.code !== 'SUCCESS' || !first.details?.id) {
+          return reply.code(502).send({ error: 'zoho_refused', detail: first?.message });
+        }
+        accountId = first.details.id;
+      }
+
+      const tied = await fetch(`${inst.api_domain}/crm/v6/Contacts/${link.crm_record_id}`, {
+        method: 'PUT',
+        headers: head,
+        body: JSON.stringify({ data: [{ Account_Name: { id: accountId } }] }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!tied.ok) return reply.code(502).send({ error: 'zoho_refused' });
+
+      await rememberCompany(a.tenantId, req.params.id, name);
+      return { company: name, module: 'Contacts', accountId };
+    },
+  );
+
+  /**
+   * Запоминаем название у себя — чтобы показать его в карточке, не
+   * спрашивая Zoho при каждом открытии диалога. Это кэш, а не правда:
+   * правда живёт в CRM, и переименование там сюда не приедет.
+   */
+  async function rememberCompany(
+    tenantId: string,
+    contactId: string,
+    name: string,
+  ): Promise<void> {
+    await withTenant(pool, tenantId, async (db) => {
+      await db.query(
+        `UPDATE contacts
+            SET attributes = attributes || jsonb_build_object('company', $2::text)
+          WHERE id = $1`,
+        [contactId, name],
+      );
+    });
+  }
 
   /**
    * Поведение связки: кого заводить и назначать ли ответственного.

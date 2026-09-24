@@ -503,6 +503,10 @@ registerCrm(app, {
     clientSecret: process.env['PIPEDRIVE_CLIENT_SECRET'] ?? '',
     appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
   },
+  zoho: {
+    clientId: process.env['ZOHO_CLIENT_ID'] ?? '',
+    clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
+  },
   redis,
 });
 
