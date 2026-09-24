@@ -1,5 +1,17 @@
 import type { FastifyInstance } from 'fastify';
-import { monthRange, payState, withSystem, withTenant, type Pool } from '@omnidesk/core';
+import {
+  INVOICE_CURRENCIES,
+  invoiceNumber,
+  isInvoiceCurrency,
+  isoDay,
+  monthRange,
+  nbuRate,
+  payState,
+  toUah,
+  withSystem,
+  withTenant,
+  type Pool,
+} from '@omnidesk/core';
 
 /**
  * Панель владельца платформы.
@@ -31,6 +43,8 @@ export interface AdminDeps {
   owner: (req: unknown) => Promise<Owner | null>;
   /** Токен входа под клиентом. Живёт час: это визит, а не вторая учётная запись. */
   impersonate: (tenantId: string, userId: string, actorEmail: string) => string;
+  /** Курс берём из НБУ; в проверках его подменяют. */
+  fetchImpl?: typeof fetch;
 }
 
 interface TenantRow {
@@ -230,6 +244,11 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
           WHERE sent_at >= date_trunc('month', now()) - interval '5 months'
           GROUP BY 1 ORDER BY 1`,
       );
+      const { rows: invoices } = await db.query(
+        `SELECT id, number, issued_on, due_on, amount, currency, rate, rate_day, rate_source,
+                amount_uah, period_start, period_end, subject, status, paid_at, created_at
+           FROM platform_invoices ORDER BY issued_on DESC, created_at DESC LIMIT 50`,
+      );
       const { rows: payments } = await db.query(
         `SELECT id, amount, currency, period_start, period_end, method, note, created_by, created_at
            FROM platform_payments ORDER BY created_at DESC LIMIT 50`,
@@ -238,7 +257,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         `SELECT actor_email, action, detail, created_at
            FROM admin_audit ORDER BY created_at DESC LIMIT 20`,
       );
-      return { users, channels, months, payments, audit };
+      return { users, channels, months, invoices, payments, audit };
     });
 
     return {
@@ -421,6 +440,299 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       });
       if (!ok) return reply.code(404).send({ error: 'not_found' });
       await note(req.params.id, who?.email ?? '', 'payment.delete', { paymentId: req.params.paymentId });
+      return { ok: true };
+    },
+  );
+
+
+  /**
+   * Реквизиты и нумерация счетов.
+   *
+   * Лежат одной строкой: счета выставляет один человек от одного лица.
+   * Заводить справочник продавцов ради того, чего пока нет, — верный
+   * способ получить пустую таблицу и лишний экран.
+   */
+  app.get('/admin/settings', async () => {
+    const row = await withSystem(pool, 'реквизиты', async (db) => {
+      const { rows } = await db.query(
+        `SELECT seller_name, seller_tax_id, seller_iban, seller_bank,
+                seller_address, seller_note, invoice_prefix, invoice_seq
+           FROM platform_settings WHERE id = 1`,
+      );
+      return rows[0] ?? null;
+    });
+    return { settings: row, currencies: INVOICE_CURRENCIES };
+  });
+
+  app.patch<{
+    Body: {
+      sellerName?: string;
+      sellerTaxId?: string;
+      sellerIban?: string;
+      sellerBank?: string;
+      sellerAddress?: string;
+      sellerNote?: string;
+      invoicePrefix?: string;
+    };
+  }>('/admin/settings', async (req, reply) => {
+    const b = req.body ?? {};
+    const map: Array<[string, string | undefined]> = [
+      ['seller_name', b.sellerName],
+      ['seller_tax_id', b.sellerTaxId],
+      ['seller_iban', b.sellerIban],
+      ['seller_bank', b.sellerBank],
+      ['seller_address', b.sellerAddress],
+      ['seller_note', b.sellerNote],
+      ['invoice_prefix', b.invoicePrefix],
+    ];
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [col, v] of map) {
+      if (v === undefined) continue;
+      vals.push(String(v).slice(0, 300));
+      sets.push(`${col} = $${vals.length}`);
+    }
+    if (!sets.length) return reply.code(400).send({ error: 'nothing_to_change' });
+
+    await withSystem(pool, 'правка реквизитов', async (db) => {
+      await db.query(
+        `UPDATE platform_settings SET ${sets.join(', ')}, updated_at = now() WHERE id = 1`,
+        vals,
+      );
+    });
+    return { ok: true };
+  });
+
+  /**
+   * Курс НБУ на дату.
+   *
+   * Сначала смотрим свой справочник: курс за прошедший день больше не
+   * меняется, и ходить за ним в чужой сервис на каждое открытие формы
+   * незачем. Отказ возвращается значением, а не ошибкой: НБУ может
+   * молчать, а счёт выставить надо — тогда курс вписывают руками.
+   */
+  async function rateFor(
+    code: string,
+    day: string,
+  ): Promise<{ rate: number; day: string; source: 'nbu' | 'cache' } | null> {
+    if (code === 'UAH') return { rate: 1, day, source: 'nbu' };
+
+    const cached = await withSystem(pool, 'курс из справочника', async (db) => {
+      const { rows } = await db.query<{ rate: string; day: string }>(
+        `SELECT rate, to_char(day, 'YYYY-MM-DD') AS day
+           FROM nbu_rates WHERE code = $1 AND day <= $2::date
+          ORDER BY day DESC LIMIT 1`,
+        [code, day],
+      );
+      return rows[0] ?? null;
+    });
+    // Курс из справочника годится, только если он за сам этот день:
+    // более ранний мог быть последним известным, а мог просто значить,
+    // что за свежие дни мы ещё не спрашивали.
+    if (cached && cached.day === day) {
+      return { rate: Number(cached.rate), day: cached.day, source: 'cache' };
+    }
+
+    const got = await nbuRate(code, day, deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {});
+    if (!got) return cached ? { rate: Number(cached.rate), day: cached.day, source: 'cache' } : null;
+
+    await withSystem(pool, 'запись курса', async (db) => {
+      await db.query(
+        `INSERT INTO nbu_rates (day, code, rate) VALUES ($1::date, $2, $3)
+         ON CONFLICT (day, code) DO UPDATE SET rate = EXCLUDED.rate, fetched_at = now()`,
+        [got.day, code, got.rate],
+      );
+    });
+    return { ...got, source: 'nbu' };
+  }
+
+  /** Курс для формы: видно до того, как счёт выставлен. */
+  app.get<{ Querystring: { code?: string; day?: string } }>('/admin/rate', async (req, reply) => {
+    const code = String(req.query?.code ?? 'USD').toUpperCase();
+    if (!isInvoiceCurrency(code)) return reply.code(400).send({ error: 'bad_currency' });
+    const day = isoDay(String(req.query?.day ?? '')) || isoDay(new Date());
+    const got = await rateFor(code, day);
+    if (!got) return reply.code(502).send({ error: 'no_rate', day });
+    return got;
+  });
+
+  /**
+   * Выставить счёт.
+   *
+   * Курс берётся на день выставления и остаётся в счёте навсегда: это
+   * не справочная величина, а часть обязательства. Поэтому же сумма в
+   * гривнах считается здесь и хранится, а не пересчитывается при
+   * каждом показе.
+   *
+   * Номер выдаёт счётчик в настройках. «Максимум по таблице» здесь не
+   * работает: счета лежат под RLS, и максимум виден только внутри одной
+   * организации — у второго клиента нумерация началась бы заново.
+   */
+  app.post<{
+    Params: { id: string };
+    Body: {
+      amount?: number | string;
+      currency?: string;
+      issuedOn?: string;
+      dueOn?: string;
+      periodStart?: string;
+      periodEnd?: string;
+      subject?: string;
+      /** Курс руками: когда НБУ молчит, а счёт нужен сегодня. */
+      rate?: number | string;
+    };
+  }>('/admin/tenants/:id/invoices', async (req, reply) => {
+    const who = await deps.owner(req);
+    const amount = money(req.body?.amount);
+    if (amount <= 0) return reply.code(400).send({ error: 'bad_amount' });
+
+    const currency = String(req.body?.currency ?? 'UAH').toUpperCase();
+    if (!isInvoiceCurrency(currency)) return reply.code(400).send({ error: 'bad_currency' });
+
+    const issued = day(req.body?.issuedOn) ?? isoDay(new Date());
+
+    const exists = await withSystem(pool, 'проверка организации', async (db) => {
+      const { rows } = await db.query(`SELECT 1 FROM tenants WHERE id = $1`, [req.params.id]);
+      return rows.length > 0;
+    });
+    if (!exists) return reply.code(404).send({ error: 'not_found' });
+
+    const manual = money(req.body?.rate);
+    let rate = manual > 0 ? manual : 0;
+    let rateDay = issued;
+    // Источник курса виден в счёте: «по НБУ» и «вписан руками» —
+    // разные основания, и спорить потом придётся именно об этом.
+    const source = manual > 0 ? 'manual' : 'nbu';
+
+    if (!rate) {
+      const got = await rateFor(currency, issued);
+      if (!got) {
+        // Молчание НБУ — не повод выставить счёт по выдуманному курсу.
+        return reply.code(502).send({ error: 'no_rate', day: issued });
+      }
+      rate = got.rate;
+      rateDay = got.day;
+    }
+
+    const number = await withSystem(pool, 'номер счёта', async (db) => {
+      const { rows } = await db.query<{ invoice_seq: number; invoice_prefix: string }>(
+        `UPDATE platform_settings SET invoice_seq = invoice_seq + 1 WHERE id = 1
+         RETURNING invoice_seq, invoice_prefix`,
+      );
+      const r = rows[0];
+      return invoiceNumber(r?.invoice_seq ?? 1, Number(issued.slice(0, 4)), r?.invoice_prefix ?? '');
+    });
+
+    const id = await withTenant(pool, req.params.id, async (db) => {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO platform_invoices
+           (tenant_id, number, issued_on, due_on, amount, currency, rate, rate_day, rate_source,
+            amount_uah, period_start, period_end, subject, created_by)
+         VALUES ($1,$2,$3::date,$4::date,$5,$6,$7,$8::date,$9,$10,$11::date,$12::date,$13,$14)
+         RETURNING id`,
+        [
+          req.params.id,
+          number,
+          issued,
+          day(req.body?.dueOn),
+          amount,
+          currency,
+          rate,
+          rateDay,
+          source,
+          toUah(amount, rate),
+          day(req.body?.periodStart),
+          day(req.body?.periodEnd),
+          String(req.body?.subject ?? '').slice(0, 300),
+          who?.email ?? '',
+        ],
+      );
+      return rows[0]!.id;
+    });
+
+    await note(req.params.id, who?.email ?? '', 'invoice.issue', { number, amount, currency, rate });
+    return reply.code(201).send({ id, number, rate, rateDay, amountUah: toUah(amount, rate) });
+  });
+
+  /**
+   * Счёт оплачен.
+   *
+   * Одна кнопка делает три вещи, потому что в жизни это одно событие:
+   * счёт становится оплаченным, появляется запись о деньгах, и «оплачено
+   * до» двигается на конец оплаченного периода. Разделить их значило бы
+   * заставлять человека помнить порядок.
+   */
+  app.post<{ Params: { id: string; invoiceId: string } }>(
+    '/admin/tenants/:id/invoices/:invoiceId/paid',
+    async (req, reply) => {
+      const who = await deps.owner(req);
+
+      const inv = await withTenant(pool, req.params.id, async (db) => {
+        const { rows } = await db.query<{
+          id: string;
+          number: string;
+          amount: string;
+          currency: string;
+          period_end: string | null;
+          status: string;
+        }>(
+          `SELECT id, number, amount, currency, to_char(period_end, 'YYYY-MM-DD') AS period_end, status
+             FROM platform_invoices WHERE id = $1 LIMIT 1`,
+          [req.params.invoiceId],
+        );
+        return rows[0] ?? null;
+      });
+      if (!inv) return reply.code(404).send({ error: 'not_found' });
+      if (inv.status === 'paid') return { ok: true, already: true };
+
+      await withTenant(pool, req.params.id, async (db) => {
+        await db.query(
+          `UPDATE platform_invoices SET status = 'paid', paid_at = now() WHERE id = $1`,
+          [inv.id],
+        );
+        await db.query(
+          `INSERT INTO platform_payments
+             (tenant_id, amount, currency, period_end, method, note, created_by, invoice_id)
+           VALUES ($1,$2,$3,$4::date,'','Рахунок ' || $5, $6, $7)`,
+          [req.params.id, inv.amount, inv.currency, inv.period_end, inv.number, who?.email ?? '', inv.id],
+        );
+      });
+
+      if (inv.period_end) {
+        await withSystem(pool, 'продление оплаты', async (db) => {
+          await db.query(
+            `UPDATE tenants SET paid_until = GREATEST(COALESCE(paid_until, $2::date), $2::date)
+              WHERE id = $1`,
+            [req.params.id, inv.period_end],
+          );
+        });
+      }
+
+      await note(req.params.id, who?.email ?? '', 'invoice.paid', { number: inv.number });
+      return { ok: true, paidUntil: inv.period_end };
+    },
+  );
+
+  /**
+   * Счёт отменён.
+   *
+   * Не удаление: выставленный счёт с номером уже уехал клиенту, и
+   * исчезнувший номер в нумерации выглядит как потерянный документ.
+   * Отменённый счёт остаётся видимым и перечёркнутым.
+   */
+  app.post<{ Params: { id: string; invoiceId: string } }>(
+    '/admin/tenants/:id/invoices/:invoiceId/void',
+    async (req, reply) => {
+      const who = await deps.owner(req);
+      const ok = await withTenant(pool, req.params.id, async (db) => {
+        const { rowCount } = await db.query(
+          `UPDATE platform_invoices SET status = 'void' WHERE id = $1 AND status <> 'paid'`,
+          [req.params.invoiceId],
+        );
+        return (rowCount ?? 0) > 0;
+      });
+      if (!ok) return reply.code(409).send({ error: 'cannot_void' });
+      await note(req.params.id, who?.email ?? '', 'invoice.void', { invoiceId: req.params.invoiceId });
       return { ok: true };
     },
   );

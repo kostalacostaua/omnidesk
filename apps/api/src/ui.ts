@@ -6890,17 +6890,19 @@ function tabOwner(){
   OWN.open = null;
   Promise.all([
     api('/admin/summary'),
-    api('/admin/tenants?limit=50&q=' + encodeURIComponent(OWN.q))
+    api('/admin/tenants?limit=50&q=' + encodeURIComponent(OWN.q)),
+    api('/admin/settings').catch(function(){ return { settings:null } })
   ]).then(function(r){
     OWN.summary = r[0];
     OWN.list = r[1].tenants || [];
     OWN.total = r[1].total || 0;
+    OWNSET = (r[2] && r[2].settings) || {};
     paintOwner();
   }).catch(sErr);
 }
 
 function paintOwner(){
-  var s = OWN.summary || {};
+  var s = OWN.summary || {}, st = OWNSET || {};
   pageBox().innerHTML = '<div class="pg">' +
     pageHead(L('Власник'), L('Організації, тарифи й оплати. Видно тільки вам.')) +
     '<div class="nums">' +
@@ -6923,9 +6925,51 @@ function paintOwner(){
       ? L('<div class="hint">Показано ') + OWN.list.length + L(' з ') + OWN.total +
         L('. Звузьте пошук.</div>')
       : '') +
-    '</div></div>';
+    '</div>' +
+
+    /* Реквизиты. Лежат здесь, а не в карточке клиента: они одни на все
+       счета, и повторять их у каждого клиента незачем. */
+    L('<div class="pg-sec"><h3>Реквізити для рахунків</h3><div class="card">') +
+      '<div class="row2">' +
+        L('<input id="sName" placeholder="ФОП або ТОВ" value="') + esc(st.seller_name || '') + '">' +
+        L('<input id="sTax" placeholder="ЄДРПОУ / ІПН" value="') + esc(st.seller_tax_id || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="sIban" placeholder="IBAN" value="') + esc(st.seller_iban || '') + '">' +
+        L('<input id="sBank" placeholder="банк" value="') + esc(st.seller_bank || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="sAddr" placeholder="адреса" value="') + esc(st.seller_address || '') + '">' +
+        L('<input id="sPref" placeholder="префікс номера" style="max-width:150px" value="') +
+          esc(st.invoice_prefix || '') + '">' +
+      '</div>' +
+      L('<input id="sNote" placeholder="примітка в рахунку, напр. «Без ПДВ»" style="margin-top:8px" value="') +
+        esc(st.seller_note || '') + '">' +
+      L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="sSave">Зберегти</button></div>') +
+      '<span class="ok" id="sOk"></span>' +
+      L('<div class="hint">Це видно клієнту в друкованому рахунку. Номер виглядає як ') +
+        esc((st.invoice_prefix || '') + new Date().getFullYear() + '-0001') + '.</div>' +
+    '</div></div>' +
+    '</div>';
 
   el('ofind').onclick = function(){ OWN.q = el('oq').value.trim(); tabOwner() };
+  el('sSave').onclick = function(){
+    busy(el('sSave'), true);
+    api('/admin/settings', { method:'PATCH', body:{
+      sellerName: el('sName').value, sellerTaxId: el('sTax').value,
+      sellerIban: el('sIban').value, sellerBank: el('sBank').value,
+      sellerAddress: el('sAddr').value, sellerNote: el('sNote').value,
+      invoicePrefix: el('sPref').value
+    }}).then(function(){
+      el('sOk').textContent = L('збережено');
+      OWNSET = {
+        seller_name: el('sName').value, seller_tax_id: el('sTax').value,
+        seller_iban: el('sIban').value, seller_bank: el('sBank').value,
+        seller_address: el('sAddr').value, seller_note: el('sNote').value,
+        invoice_prefix: el('sPref').value
+      };
+    }).catch(showErr).then(function(){ busy(el('sSave'), false) });
+  };
   el('oq').onkeydown = function(e){ if (e.key === 'Enter') el('ofind').click() };
   Array.prototype.forEach.call(document.querySelectorAll('[data-org]'), function(b){
     b.onclick = function(){ ownOpen(b.dataset.org) };
@@ -6999,6 +7043,31 @@ function paintOrg(){
       '<span class="ok" id="ook"></span><div class="err" id="oerr"></div>' +
     '</div></div>' +
 
+    /* Счета. Стоят выше оплат: сначала выставляют, потом платят, и
+       порядок на экране повторяет порядок в жизни. */
+    L('<div class="pg-sec"><h3>Рахунки</h3><div class="card">') +
+      '<div class="row2">' +
+        L('<input id="iamt" placeholder="сума">') +
+        '<select id="icur">' + INV_CUR.map(function(c){
+          return '<option value="' + c + '">' + c + '</option>';
+        }).join('') + '</select>' +
+        '<input id="iday" type="date" value="' + esc(today()) + '">' +
+        L('<button class="ghost mini" id="iadd">Виставити</button>') +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="ips" type="date" title="період з">') +
+        L('<input id="ipe" type="date" title="період до">') +
+        L('<input id="isub" placeholder="призначення платежу">') +
+      '</div>' +
+      '<div class="hint" id="irate"></div>' +
+      '<div style="margin-top:10px">' +
+        ((d.invoices || []).length
+          ? d.invoices.map(invRow).join('')
+          : L('<div class="dim" style="font-size:12.5px">Рахунків ще не було.</div>')) +
+      '</div>' +
+      '<div class="err" id="ierr"></div>' +
+    '</div></div>' +
+
     L('<div class="pg-sec"><h3>Оплати</h3><div class="card">') +
       '<div class="row2">' +
         L('<input id="pamt" placeholder="сума">') +
@@ -7066,6 +7135,31 @@ function paintOrg(){
 
   el('oback').onclick = tabOwner;
   el('osave').onclick = ownSave;
+  el('iadd').onclick = invIssue;
+  el('icur').onchange = invRate;
+  el('iday').onchange = invRate;
+  el('iamt').onblur = invRate;
+  invRate();
+  Array.prototype.forEach.call(document.querySelectorAll('[data-iprint]'), function(x){
+    x.onclick = function(){
+      var v = (OWN.open.invoices || []).filter(function(i){ return i.id === x.dataset.iprint })[0];
+      if (v) invPrint(v);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ipaid]'), function(x){
+    x.onclick = function(){
+      busy(x, true);
+      api('/admin/tenants/' + OWN.open.tenant.id + '/invoices/' + x.dataset.ipaid + '/paid',
+        { method:'POST' }).then(function(){ ownOpen(OWN.open.tenant.id) }).catch(showErr);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ivoid]'), function(x){
+    x.onclick = function(){
+      busy(x, true);
+      api('/admin/tenants/' + OWN.open.tenant.id + '/invoices/' + x.dataset.ivoid + '/void',
+        { method:'POST' }).then(function(){ ownOpen(OWN.open.tenant.id) }).catch(showErr);
+    };
+  });
   el('ologin').onclick = ownLogin;
   el('padd').onclick = ownPay2;
   Array.prototype.forEach.call(document.querySelectorAll('[data-pay]'), function(x){
@@ -7074,6 +7168,156 @@ function paintOrg(){
         .then(function(){ ownOpen(OWN.open.tenant.id) }).catch(showErr);
     };
   });
+}
+
+/* ── Счета ────────────────────────────────────────────────────────── */
+
+var INV_CUR = ['UAH','USD','EUR'];
+var OWNSET = null;
+
+function today(){
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function money2(v){
+  var n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : String(v == null ? '' : v);
+}
+
+/** Курс — четыре знака: две копейки здесь означают другую сумму в счёте. */
+function rate4(v){
+  var n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(4) : String(v == null ? '' : v);
+}
+
+/**
+ * Строка счёта.
+ *
+ * Курс показан вместе с днём, за который он объявлен: на выходные курса
+ * нет, и «курс НБУ на п’ятницю» — не придирка, а то, что человек будет
+ * объяснять клиенту.
+ */
+function invRow(v){
+  var paid = v.status === 'paid', dead = v.status === 'void';
+  var cur = v.currency || 'UAH';
+  return '<div class="item"' + (dead ? ' style="opacity:.55"' : '') + '>' +
+    '<div><div class="t">' + esc(v.number) + ' · ' + esc(money2(v.amount)) + ' ' + esc(cur) +
+      (paid ? L('<span class="pill ok">оплачено</span>')
+        : dead ? L('<span class="pill crit">скасовано</span>')
+        : L('<span class="pill warn">виставлено</span>')) + '</div>' +
+    '<div class="s">' + esc(fmtDate(v.issued_on)) +
+      (cur !== 'UAH'
+        ? ' · ' + esc(money2(v.amount_uah)) + L(' грн за курсом ') + esc(rate4(v.rate)) +
+          (v.rate_day ? L(' на ') + esc(fmtDate(v.rate_day)) : '') +
+          (v.rate_source === 'manual' ? L(' (вписаний руками)') : '')
+        : '') +
+      (v.period_end ? L(' · період до ') + esc(fmtDate(v.period_end)) : '') +
+      (v.subject ? ' · ' + esc(v.subject) : '') +
+    '</div></div>' +
+    '<div style="display:flex;gap:6px;flex:none">' +
+      L('<button class="ghost mini" data-iprint="') + esc(v.id) + L('">Друк</button>') +
+      (paid || dead ? '' :
+        L('<button class="ghost mini" data-ipaid="') + esc(v.id) + L('">Оплачено</button>') +
+        L('<button class="ghost mini" data-ivoid="') + esc(v.id) + L('">Скасувати</button>')) +
+    '</div></div>';
+}
+
+/** Курс подставляется до выставления: сумма в гривнах не должна быть сюрпризом. */
+function invRate(){
+  var cur = el('icur').value, day = el('iday').value || today();
+  var box = el('irate');
+  if (!box) return;
+  if (cur === 'UAH'){ box.textContent = L('Гривня — без перерахунку.'); return }
+  box.textContent = L('Питаємо курс НБУ...');
+  api('/admin/rate?code=' + encodeURIComponent(cur) + '&day=' + encodeURIComponent(day))
+    .then(function(r){
+      var amt = Number(String(el('iamt').value).replace(',', '.')) || 0;
+      box.textContent = L('Курс НБУ ') + rate4(r.rate) + L(' на ') + fmtDate(r.day) +
+        (amt ? ' · ' + money2(amt * r.rate) + L(' грн') : '');
+    })
+    .catch(function(){
+      box.textContent = L('Курс НБУ не отримали — сума піде за курсом 1, впишіть його руками пізніше');
+    });
+}
+
+function invIssue(){
+  var t = OWN.open.tenant;
+  el('ierr').textContent = '';
+  busy(el('iadd'), true);
+  api('/admin/tenants/' + t.id + '/invoices', { method:'POST', body:{
+    amount: el('iamt').value,
+    currency: el('icur').value,
+    issuedOn: el('iday').value || today(),
+    periodStart: el('ips').value || null,
+    periodEnd: el('ipe').value || null,
+    subject: el('isub').value
+  }}).then(function(){ ownOpen(t.id) })
+    .catch(function(e){
+      var p = (e && e.payload) || {};
+      el('ierr').textContent =
+        p.error === 'bad_amount' ? L('Впишіть суму')
+        : p.error === 'no_rate' ? L('НБУ не дав курсу на цей день — спробуйте іншу дату')
+        : L('Не вдалося виставити рахунок');
+      busy(el('iadd'), false);
+    });
+}
+
+/**
+ * Печатная форма счёта.
+ *
+ * Собирается в браузере и открывается отдельным окном: серверная
+ * страница потребовала бы токена в адресе, а адрес с токеном уходит в
+ * историю браузера и в чужие руки. Печать в PDF — средствами самого
+ * браузера, ничего своего изобретать не нужно.
+ */
+function invPrint(v){
+  var s = OWNSET || {};
+  var t = OWN.open.tenant;
+  var cur = v.currency || 'UAH';
+  var rows = [
+    [L('Постачальник'), esc(s.seller_name || '—')],
+    [L('Код'), esc(s.seller_tax_id || '—')],
+    [L('Рахунок'), esc(s.seller_iban || '—')],
+    [L('Банк'), esc(s.seller_bank || '—')],
+    [L('Адреса'), esc(s.seller_address || '—')],
+    [L('Платник'), esc(t.name)],
+    [L('Призначення'), esc(v.subject || L('Послуги Rozmovio'))],
+  ];
+  if (v.period_start || v.period_end) {
+    rows.push([L('Період'), esc(fmtDate(v.period_start)) + ' — ' + esc(fmtDate(v.period_end))]);
+  }
+
+  var html =
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(v.number) + '</title>' +
+    '<style>body{font:14px/1.5 system-ui,sans-serif;color:#111;margin:40px;max-width:720px}' +
+    'h1{font-size:20px;margin:0 0 4px}.d{color:#666;font-size:13px;margin-bottom:22px}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:18px}' +
+    'td{padding:7px 0;vertical-align:top;border-bottom:1px solid #eee}' +
+    'td:first-child{color:#666;width:190px}' +
+    '.sum{font-size:22px;font-weight:700;margin:16px 0 4px}' +
+    '.note{color:#666;font-size:12.5px;margin-top:26px}' +
+    '@media print{body{margin:0}}</style></head><body>' +
+    '<h1>' + L('Рахунок № ') + esc(v.number) + '</h1>' +
+    '<div class="d">' + L('від ') + esc(fmtDate(v.issued_on)) + '</div>' +
+    '<table>' + rows.map(function(r){
+      return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
+    }).join('') + '</table>' +
+    '<div class="sum">' + esc(money2(v.amount)) + ' ' + esc(cur) + '</div>' +
+    (cur !== 'UAH'
+      ? '<div class="d">' + esc(money2(v.amount_uah)) + L(' грн за курсом НБУ ') +
+        esc(rate4(v.rate)) + L(' на ') + esc(fmtDate(v.rate_day || v.issued_on)) + '</div>'
+      : '') +
+    (s.seller_note ? '<div class="note">' + esc(s.seller_note) + '</div>' : '') +
+    '</body></html>';
+
+  var w = window.open('', '_blank');
+  if (!w){ el('ierr').textContent = L('Браузер заблокував вікно друку'); return }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  // Печать сразу: окно открыто ради неё одной.
+  setTimeout(function(){ try { w.print() } catch(e){} }, 200);
 }
 
 function ownSave(){
