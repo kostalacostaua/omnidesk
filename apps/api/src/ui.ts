@@ -640,6 +640,28 @@ export const INBOX_HTML = `<!DOCTYPE html>
     box-shadow:var(--shadow);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
   .modal{border-radius:22px;box-shadow:var(--lift);background:var(--panel);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  /* ─── Окно заказа ──────────────────────────────────────────────── */
+  /* Каталог и собранный заказ рядом: выбирают глядя на то, что уже
+     набрано. Узкая колонка карточки для этого мала, поэтому окно
+     шире обычного, а на телефоне колонки просто встают друг под
+     друга. */
+  .sheet.wide{max-width:900px}
+  .orow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .ocols{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+  .ocol{flex:1 1 320px;min-width:0}
+  .olist{margin-top:8px;max-height:44vh;overflow-y:auto;
+    border:1px solid var(--line);border-radius:12px}
+  .oitem{display:flex;gap:10px;align-items:center;padding:7px 10px;cursor:pointer;
+    font-size:12.5px;border-bottom:1px solid var(--line)}
+  .oitem:last-child{border-bottom:0}
+  .oitem:hover{background:var(--hover)}
+  .oitem .on,.oline .on{flex:1;min-width:0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .oline{display:flex;gap:6px;align-items:center;margin-top:5px;font-size:12.5px}
+  .ochk{display:flex;gap:7px;align-items:center;margin-top:7px;font-size:12.5px}
+  .ochk input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;padding:0}
+  .req{color:var(--crit)}
+
   .stab{border-radius:10px 10px 0 0;padding:10px 12px}
   .stab.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
   .item{border-radius:12px}
@@ -2339,12 +2361,8 @@ function renderCard(){
            собирается в разговоре, глядя на то, что человек пишет. */
         L('<h4>Замовлення</h4>') +
         (ct.crm_module === 'Contacts'
-          ? '<div class="row2">' +
-              L('<input id="oQ" placeholder="товар або артикул" style="font-size:12.5px;padding:6px 9px">') +
-              L('<button class="ghost mini" id="oFind">Знайти</button>') +
-            '</div>' +
-            '<div id="oFound" style="margin-top:6px"></div>' +
-            '<div id="oCart"></div>' +
+          ? L('<button class="ghost mini" id="oOpen">Зібрати замовлення</button>') +
+            '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
             '<span class="ok" id="oDone"></span>' +
             '<div class="err" id="oErr"></div>'
           : L('<div class="hint">Клієнт у Zoho — лід, а замовлення робиться на контакт. ') +
@@ -2461,16 +2479,35 @@ function renderCard(){
 /* ══════════════ Заказ из разговора ══════════════ */
 
 /**
- * Корзина живёт в браузере, пока оператор её собирает.
+ * Окно заказа: слева каталог, справа собранный заказ.
  *
- * Черновик заказа нигде не сохраняется намеренно: недособранный заказ
- * не нужен ни отчётам, ни второму оператору, а таблица «черновики
- * заказов» потребовала бы чистки и объяснений, зачем она есть.
+ * Раньше в карточке была строка поиска: впиши две буквы — спросим у
+ * Zoho, что на них начинается. Это работает, только если человек
+ * помнит, как товар записан в CRM. В разговоре он помнит «та сама
+ * сироватка», а в прайсе это HYDRAFUSION-50, и поиск по началу
+ * названия не находит ничего.
  *
- * Привязана к разговору: переключился на другого клиента — корзина
- * пустая. Иначе товары из чужого разговора уедут не тому человеку.
+ * Поэтому каталог тянется целиком и лежит в окне: искать можно по
+ * любому куску строки, а можно просто листать глазами. Узкая колонка
+ * карточки для этого мала — отсюда окно во весь экран.
+ *
+ * Поля заказа спрашиваются у самой Zoho: в каждой организации разметка
+ * своя, и обязательное «Кому доставити» мы бы не угадали. Свой список
+ * обязательных полей устарел бы в день, когда клиент добавил своё.
+ *
+ * Корзина живёт в браузере, пока оператор её собирает, и привязана к
+ * разговору: переключился на другого клиента — начинаем заново. Иначе
+ * товары из чужого разговора уедут не тому человеку. Нигде не
+ * сохраняется намеренно: недособранный заказ не нужен ни отчётам, ни
+ * второму оператору.
  */
-var ORD = { conv:null, lines:[], found:[], subject:'' };
+var ORD = { conv:null, lines:[], subject:'', vals:{},
+  cat:[], truncated:false, fields:[], ready:false, q:'', all:false, err:'' };
+
+function ordFresh(){
+  ORD = { conv:current, lines:[], subject:'', vals:{},
+    cat:[], truncated:false, fields:[], ready:false, q:'', all:false, err:'' };
+}
 
 /** Сумма — только для глаз оператора. Настоящую считает Zoho. */
 function ordTotal(){
@@ -2481,87 +2518,269 @@ function ordMoney(n){
   return (Math.round(n * 100) / 100).toFixed(2);
 }
 
-function paintOrder(){
-  var found = el('oFound'), cart = el('oCart');
-  if (!found || !cart) return;
+function ordEsc(ev){ if (ev.key === 'Escape') ordClose() }
 
-  found.innerHTML = ORD.found.map(function(p, i){
-    return '<div class="note" style="cursor:pointer;display:flex;gap:8px;align-items:center" ' +
-      'data-oadd="' + i + '">' +
-      '<span style="flex:1;min-width:0">' + esc(p.name || L('без назви')) +
-      (p.code ? ' <span class="dim">' + esc(p.code) + '</span>' : '') + '</span>' +
-      '<span class="dim">' + esc(ordMoney(p.price)) + '</span></div>';
-  }).join('');
+function ordOpen(){
+  if (ORD.conv !== current) ordFresh();
+  if (el('oVeil')) return;
+  var v = document.createElement('div');
+  v.className = 'veil';
+  v.id = 'oVeil';
+  v.innerHTML = '<div class="sheet wide" id="oSheet"></div>';
+  document.body.appendChild(v);
+  // Нажатие мимо окна закрывает его, нажатие внутри — нет.
+  v.onclick = function(ev){ if (ev.target === v) ordClose() };
+  document.addEventListener('keydown', ordEsc);
+  ordPaint();
+  if (!ORD.ready) ordLoad();
+}
 
-  if (!ORD.lines.length){ cart.innerHTML = ''; return }
+function ordClose(){
+  var v = el('oVeil');
+  if (v) v.parentNode.removeChild(v);
+  document.removeEventListener('keydown', ordEsc);
+  ordCount();
+}
 
-  cart.innerHTML =
-    ORD.lines.map(function(l, i){
-      return '<div style="display:flex;gap:5px;align-items:center;margin-top:5px">' +
-        '<span style="flex:1;min-width:0;font-size:12.5px;overflow:hidden;' +
-          'text-overflow:ellipsis;white-space:nowrap">' + esc(l.name) + '</span>' +
-        '<input data-oqty="' + i + '" value="' + esc(String(l.qty)) + '" ' +
-          'style="width:42px;font-size:12.5px;padding:5px 6px;text-align:center">' +
-        '<input data-oprc="' + i + '" value="' + esc(ordMoney(l.price)) + '" ' +
-          'style="width:68px;font-size:12.5px;padding:5px 6px;text-align:right">' +
-        '<span class="x" data-odel="' + i + '" style="cursor:pointer">×</span>' +
-      '</div>';
-    }).join('') +
-    L('<div class="kv2" style="margin-top:9px"><div class="k">Разом</div><div>') +
-      esc(ordMoney(ordTotal())) + '</div></div>' +
-    L('<div class="fld" style="margin-top:7px"><label>Назва замовлення</label>') +
+/** Сколько собрано — видно и после закрытия окна. */
+function ordCount(){
+  var s = el('oCnt');
+  if (s) s.textContent = ORD.lines.length ? L('у замовленні: ') + ORD.lines.length : '';
+}
+
+/**
+ * Каталог и поля тянутся один раз на разговор.
+ *
+ * Поля — необязательная часть: если Zoho не дала их описание, заказ
+ * всё равно собирается, просто без своих полей. Каталог — обязательная:
+ * без него собирать нечего, и отказ показывается прямо в окне.
+ */
+function ordLoad(){
+  api('/crm/products').then(function(r){
+    ORD.cat = r.products || [];
+    ORD.truncated = !!r.truncated;
+    for (var i = 0; i < ORD.cat.length; i++) ORD.cat[i].i = i;
+    return api('/crm/order-fields')
+      .then(function(f){ ORD.fields = f.fields || [] })
+      .catch(function(){ ORD.fields = [] });
+  }).then(function(){
+    ORD.ready = true;
+    ordPaint();
+  }).catch(function(e){
+    ORD.ready = true;
+    ORD.err = ordWhy(e);
+    ordPaint();
+  });
+}
+
+function ordPaint(){
+  var sh = el('oSheet');
+  if (!sh) return;
+
+  sh.innerHTML =
+    '<div class="orow">' +
+      L('<b>Замовлення</b>') +
+      '<span class="x" id="oX" style="cursor:pointer;font-size:18px">×</span>' +
+    '</div>' +
+    (ORD.err
+      ? '<div class="err" style="margin-top:10px">' + esc(ORD.err) + '</div>'
+      : !ORD.ready
+        ? L('<div class="empty">Тягнемо каталог із Zoho...</div>')
+        : '<div class="ocols">' +
+            '<div class="ocol">' +
+              L('<input id="oQ" placeholder="пошук: назва або артикул">') +
+              '<div class="hint" id="oNum" style="margin-top:6px"></div>' +
+              '<div id="oList" class="olist"></div>' +
+            '</div>' +
+            '<div class="ocol">' +
+              '<div id="oCart"></div>' +
+              '<div id="oFlds"></div>' +
+              '<span class="ok" id="oDone2"></span>' +
+              '<div class="err" id="oErr2"></div>' +
+            '</div>' +
+          '</div>');
+
+  el('oX').onclick = ordClose;
+  if (ORD.err || !ORD.ready) return;
+
+  el('oQ').value = ORD.q;
+  el('oQ').oninput = function(){ ORD.q = el('oQ').value; ordList() };
+  ordList();
+  ordCart();
+  ordFlds();
+  el('oQ').focus();
+}
+
+/** Сколько строк каталога показываем разом. */
+var ORD_SHOW = 200;
+
+function ordList(){
+  var box = el('oList');
+  if (!box) return;
+
+  var q = ORD.q.trim().toLowerCase();
+  var hit = ORD.cat.filter(function(p){
+    if (!q) return true;
+    return (p.name + ' ' + p.code).toLowerCase().indexOf(q) >= 0;
+  });
+  var shown = hit.slice(0, ORD_SHOW);
+
+  // Сколько всего товаров — ответ на немой вопрос «а всё ли подтянулось».
+  el('oNum').textContent = ORD.cat.length
+    ? (q ? hit.length + L(' з ') + ORD.cat.length : L('товарів у каталозі: ') + ORD.cat.length)
+    : '';
+
+  box.innerHTML = (!ORD.cat.length
+    ? L('<div class="empty">У Zoho немає жодного товару.</div>')
+    : !hit.length
+      ? L('<div class="empty">Нічого не знайшли.</div>')
+      : shown.map(function(p){
+          return '<div class="oitem" data-oadd="' + p.i + '">' +
+            '<span class="on">' + esc(p.name || p.code) +
+              (p.name && p.code ? ' <span class="dim">' + esc(p.code) + '</span>' : '') +
+              (p.active ? '' : L(' <span class="dim">· неактивний</span>')) +
+            '</span>' +
+            '<span class="dim">' + esc(ordMoney(p.price)) + '</span>' +
+          '</div>';
+        }).join('') +
+        (hit.length > shown.length
+          ? L('<div class="hint" style="padding:8px 10px">Показані перші 200 — уточніть пошук.</div>')
+          : '') +
+        (ORD.truncated
+          ? L('<div class="hint" style="padding:8px 10px">Каталог великий: взяли перші 2000 товарів.</div>')
+          : ''));
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-oadd]'), function(x){
+    x.onclick = function(){ ordAdd(ORD.cat[Number(x.dataset.oadd)]) };
+  });
+}
+
+/**
+ * Один товар — одна строка. Повтор увеличивает количество, а не
+ * заводит вторую строку того же товара: вторая строка в заказе
+ * означает другую цену, а не нажатие дважды.
+ */
+function ordAdd(p){
+  if (!p) return;
+  var same = ORD.lines.filter(function(l){ return l.id === p.id })[0];
+  if (same) same.qty += 1;
+  else ORD.lines.push({ id:p.id, name:p.name || p.code, qty:1, price:p.price || 0 });
+  ordCart();
+}
+
+function ordCart(){
+  var cart = el('oCart');
+  if (!cart) return;
+
+  cart.innerHTML = (!ORD.lines.length
+    ? L('<div class="hint">Натисніть товар зліва — він стане рядком замовлення.</div>')
+    : ORD.lines.map(function(l, i){
+        return '<div class="oline">' +
+          '<span class="on">' + esc(l.name) + '</span>' +
+          '<input data-oqty="' + i + '" value="' + esc(String(l.qty)) + '" ' +
+            'style="width:48px;text-align:center">' +
+          '<input data-oprc="' + i + '" value="' + esc(ordMoney(l.price)) + '" ' +
+            'style="width:78px;text-align:right">' +
+          '<span class="x" data-odel="' + i + '" style="cursor:pointer">×</span>' +
+        '</div>';
+      }).join('') +
+      L('<div class="kv2" style="margin-top:9px"><div class="k">Разом</div><div>') +
+        esc(ordMoney(ordTotal())) + '</div></div>') +
+    L('<div class="fld" style="margin-top:9px"><label>Назва замовлення</label>') +
       '<input id="oSub" value="' + esc(ORD.subject || '') + '"' +
-      L(' placeholder="залишіть пустим — назвемо самі"></div>') +
-    L('<button class="ghost mini" id="oMake">Створити замовлення</button>');
+      L(' placeholder="залишіть пустим — назвемо самі"></div>');
 
   Array.prototype.forEach.call(cart.querySelectorAll('[data-oqty]'), function(x){
     x.onchange = function(){
       var n = Math.round(Number(x.value) || 0);
       ORD.lines[x.dataset.oqty].qty = n > 0 ? n : 1;
-      paintOrder();
+      ordCart();
     };
   });
   Array.prototype.forEach.call(cart.querySelectorAll('[data-oprc]'), function(x){
     x.onchange = function(){
       var n = Number(String(x.value).split(',').join('.'));
       ORD.lines[x.dataset.oprc].price = n > 0 ? n : 0;
-      paintOrder();
+      ordCart();
     };
   });
   Array.prototype.forEach.call(cart.querySelectorAll('[data-odel]'), function(x){
-    x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); paintOrder() };
+    x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); ordCart() };
   });
-
-  if (el('oSub')) el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
-  if (el('oMake')) el('oMake').onclick = ordCreate;
+  el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
 }
 
-function ordFind(){
-  var q = el('oQ').value.trim();
-  el('oErr').textContent = '';
-  if (q.length < 2){ el('oErr').textContent = L('Впишіть хоча б дві літери'); return }
-  busy(el('oFind'), true);
-  api('/crm/products?q=' + encodeURIComponent(q))
-    .then(function(r){
-      ORD.found = r.products || [];
-      if (!ORD.found.length) el('oErr').textContent = L('Нічого не знайшли в Zoho');
-      paintOrder();
-      // Найденное показано на один подбор: список из прошлого поиска
-      // рядом с новым — это добавленный не тот товар.
-      Array.prototype.forEach.call(el('oFound').querySelectorAll('[data-oadd]'), function(x){
-        x.onclick = function(){
-          var p = ORD.found[Number(x.dataset.oadd)];
-          var same = ORD.lines.filter(function(l){ return l.id === p.id })[0];
-          if (same) same.qty += 1;
-          else ORD.lines.push({ id:p.id, name:p.name || p.code, qty:1, price:p.price || 0 });
-          ORD.found = [];
-          el('oQ').value = '';
-          paintOrder();
-        };
-      });
-    })
-    .catch(function(e){ el('oErr').textContent = ordWhy(e) })
-    .then(function(){ busy(el('oFind'), false) });
+/**
+ * Поля заказа. Обязательные видны всегда, остальные — по нажатию.
+ *
+ * Показать разом все тридцать полей Sales_Orders значило бы спрятать
+ * те три, без которых Zoho заказ не примет.
+ */
+function ordFlds(){
+  var box = el('oFlds');
+  if (!box) return;
+
+  var need = ORD.fields.filter(function(f){ return f.required });
+  var rest = ORD.fields.filter(function(f){ return !f.required });
+  var show = need.concat(ORD.all ? rest : []);
+
+  box.innerHTML =
+    show.map(ordFld).join('') +
+    (rest.length
+      ? '<button class="ghost mini" id="oMoreF" style="margin-top:6px">' +
+        (ORD.all ? L('Сховати решту полів') : L('Решта полів Zoho') + ' (' + rest.length + ')') +
+        '</button>'
+      : '') +
+    L('<div style="margin-top:10px"><button class="primary" id="oMake">Створити замовлення</button></div>');
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-off]'), function(x){
+    x.onchange = function(){ ORD.vals[x.dataset.off] = x.value };
+  });
+  Array.prototype.forEach.call(box.querySelectorAll('[data-ofb]'), function(x){
+    x.onchange = function(){ ORD.vals[x.dataset.ofb] = x.checked };
+  });
+  Array.prototype.forEach.call(box.querySelectorAll('[data-ofm]'), function(x){
+    x.onchange = function(){
+      ORD.vals[x.dataset.ofm] = Array.prototype.filter
+        .call(x.options, function(o){ return o.selected })
+        .map(function(o){ return o.value });
+    };
+  });
+  if (el('oMoreF')) el('oMoreF').onclick = function(){ ORD.all = !ORD.all; ordFlds() };
+  el('oMake').onclick = ordCreate;
+}
+
+function ordFld(f){
+  var v = ORD.vals[f.api];
+  var lab = esc(f.label) + (f.required ? ' <span class="req">*</span>' : '');
+
+  if (f.kind === 'bool')
+    return '<label class="ochk"><input type="checkbox" data-ofb="' + esc(f.api) + '"' +
+      (v === true ? ' checked' : '') + '> ' + lab + '</label>';
+
+  var body =
+    f.kind === 'pick'
+      ? '<select data-off="' + esc(f.api) + '"><option value=""></option>' +
+        f.options.map(function(o){
+          return '<option value="' + esc(o) + '"' + (v === o ? ' selected' : '') + '>' +
+            esc(o) + '</option>';
+        }).join('') + '</select>'
+      : f.kind === 'multi'
+        ? '<select multiple size="3" data-ofm="' + esc(f.api) + '">' +
+          f.options.map(function(o){
+            var on = Array.isArray(v) && v.indexOf(o) >= 0;
+            return '<option value="' + esc(o) + '"' + (on ? ' selected' : '') + '>' +
+              esc(o) + '</option>';
+          }).join('') + '</select>'
+        : f.kind === 'long'
+          ? '<textarea rows="2" data-off="' + esc(f.api) + '">' +
+            esc(v == null ? '' : String(v)) + '</textarea>'
+          : '<input data-off="' + esc(f.api) + '"' +
+            (f.kind === 'date' ? ' type="date"' : '') +
+            (f.kind === 'num' ? ' inputmode="decimal"' : '') +
+            ' value="' + esc(v == null ? '' : String(v)) + '">';
+
+  return '<div class="fld"><label>' + lab + '</label>' + body + '</div>';
 }
 
 /**
@@ -2578,37 +2797,47 @@ function ordWhy(e){
     : p.error === 'no_company' ? L('У картці клієнта в Zoho не вказана компанія')
     : p.error === 'zoho_not_connected' ? L('Zoho не підключена')
     : p.error === 'zoho_not_configured' ? L('Zoho не налаштована')
+    : p.error === 'zoho_scope' ? L('Zoho видала менше прав, ніж потрібно для товарів і замовлень — перепідключіть Zoho на сторінці інтеграцій')
+    : p.error === 'zoho_no_permission' ? L('У вашого користувача Zoho немає доступу до товарів або замовлень — увімкніть модуль у правах профілю Zoho')
+    : p.error === 'fields_required' ? L('Заповніть обовʼязкові поля: ') + (p.detail || '')
     : p.error === 'token_rejected' ? L('Zoho відкликала доступ — перепідключіть на сторінці інтеграцій')
     : p.detail ? L('Zoho відмовила: ') + p.detail
     : L('Zoho не прийняла запит');
 }
 
 function ordCreate(){
-  el('oErr').textContent = '';
-  el('oDone').textContent = '';
+  if (!ORD.lines.length){ el('oErr2').textContent = L('Замовлення порожнє'); return }
+  el('oErr2').textContent = '';
+  el('oDone2').textContent = '';
   busy(el('oMake'), true);
+
   api('/conversations/' + current + '/order', { method:'POST', body:{
     subject: ORD.subject || '',
+    fields: ORD.vals,
     items: ORD.lines.map(function(l){
       return { productId: l.id, quantity: l.qty, price: l.price };
     })
   }}).then(function(r){
-    ORD = { conv:current, lines:[], found:[], subject:'' };
-    paintOrder();
-    el('oDone').innerHTML = r.url
+    // Каталог и поля оставляем: следующий заказ тому же клиенту
+    // собирается сразу, без похода в Zoho.
+    ORD.lines = [];
+    ORD.subject = '';
+    ORD.vals = {};
+    ORD.q = '';
+    ordClose();
+    if (el('oDone')) el('oDone').innerHTML = r.url
       ? '<a href="' + esc(r.url) + L('" target="_blank" rel="noopener">замовлення створено</a>')
       : L('замовлення створено');
   }).catch(function(e){
-    el('oErr').textContent = ordWhy(e);
+    if (el('oErr2')) el('oErr2').textContent = ordWhy(e);
   }).then(function(){ if (el('oMake')) busy(el('oMake'), false) });
 }
 
 function wireOrder(){
-  if (!el('oFind')) return;
-  if (ORD.conv !== current) ORD = { conv:current, lines:[], found:[], subject:'' };
-  el('oFind').onclick = ordFind;
-  el('oQ').onkeydown = function(ev){ if (ev.key === 'Enter') ordFind() };
-  paintOrder();
+  if (!el('oOpen')) return;
+  if (ORD.conv !== current) ordFresh();
+  el('oOpen').onclick = ordOpen;
+  ordCount();
 }
 
 /* ══════════════ Сценарии ══════════════ */
@@ -4434,7 +4663,16 @@ function pageIntegrations(){
         ? list.map(function(z){
             return '<div class="int-row"><div style="min-width:0">' +
               '<div class="int-n">' + esc(z.org_name || L('Організація Zoho')) + '</div>' +
-              '<div class="int-s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div></div>' +
+              '<div class="int-s">' + esc(z.api_domain || '') + ' · id ' + esc(z.zgid) + '</div>' +
+              /* Прав не хватает. Подключение при этом рабочее, и «активно»
+                 напротив него — правда, из-за которой человек ищет причину
+                 где угодно, кроме этого места. */
+              (z.stale
+                ? L('<div class="int-s" style="white-space:normal;color:var(--warn)">Ця організація ') +
+                  L('підключена до появи товарів і замовлень: Zoho видала менше прав, ніж треба. ') +
+                  L('Натисніть «Увійти через Zoho» тим самим акаунтом — права оновляться.</div>')
+                : '') +
+              '</div>' +
               '<div class="int-rb">' +
               '<button class="ghost mini" data-zcheck="' + z.id + L('">Перевірити</button>') +
               '<button class="ghost mini" data-zdel="' + z.id + L('">Відключити</button></div></div>');

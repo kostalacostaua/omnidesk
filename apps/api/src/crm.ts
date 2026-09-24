@@ -12,6 +12,14 @@ import {
   pipedriveRoot,
   orderItems,
   orderSubject,
+  orderFields,
+  orderValues,
+  catalogPage,
+  sortCatalog,
+  CATALOG_PAGE,
+  CATALOG_MAX,
+  type CatalogItem,
+  type OrderField,
   parseCrmSettings,
   withSystem,
   withTenant,
@@ -238,6 +246,75 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   }
 
   /**
+   * Отказ Zoho, разобранный по причине.
+   *
+   * Одна причина здесь важнее прочих. Права закреплены за
+   * refresh-токеном в момент согласия, и тот, кто подключил Zoho до
+   * появления товаров и заказов, живёт со старым коротким списком
+   * прав: запросы к товарам она встречает отказом
+   * OAUTH_SCOPE_MISMATCH. Лечится это одним действием — подключить
+   * Zoho заново, — но угадать его по «Zoho не приняла запрос»
+   * невозможно, и человек идёт искать ошибку у себя в CRM.
+   *
+   * NO_PERMISSION — другое: прав у приложения хватает, а у самого
+   * пользователя Zoho нет доступа к модулю. Это чинится в правах
+   * профиля внутри CRM, и путать эти два отказа нельзя.
+   */
+  function whyBody(raw: unknown): { error: string; detail?: string } {
+    const body = (raw ?? {}) as { code?: unknown; message?: unknown };
+    const code = typeof body.code === 'string' ? body.code : '';
+    const detail = typeof body.message === 'string' ? body.message : undefined;
+    if (code === 'OAUTH_SCOPE_MISMATCH') return { error: 'zoho_scope' };
+    if (code === 'NO_PERMISSION') return { error: 'zoho_no_permission' };
+    if (code === 'INVALID_TOKEN' || code === 'AUTHENTICATION_FAILURE') {
+      return { error: 'token_rejected' };
+    }
+    return { error: 'zoho_refused', detail };
+  }
+
+  async function zohoWhy(res: Response): Promise<{ error: string; detail?: string }> {
+    return whyBody(await res.json().catch(() => ({})));
+  }
+
+  /**
+   * Каталог и описание полей — в памяти процесса.
+   *
+   * Не в Redis намеренно: это не состояние, а избавление от повторного
+   * похода в чужой API. Каждый процесс сходит за ним сам, и при
+   * перезапуске ничего не теряется.
+   */
+  const CATALOG_TTL = 5 * 60_000;
+  const FIELDS_TTL = 10 * 60_000;
+  const catalogs = new Map<string, { at: number; items: CatalogItem[]; truncated: boolean }>();
+  const orderMeta = new Map<string, { at: number; fields: OrderField[] }>();
+
+  /**
+   * Описание полей заказа. Спрашивается и при показе окна, и при
+   * создании заказа.
+   *
+   * Второе место важнее первого: процессов у api несколько, окно могло
+   * спросить поля у одного, а заказ уехать к другому. Если бы создание
+   * полагалось на память своего процесса, у второго её бы не было — и
+   * заполненные человеком поля тихо пропали бы по дороге.
+   */
+  async function fieldsFor(
+    tenantId: string,
+    z: { inst: { api_domain: string }; head: Record<string, string> },
+  ): Promise<{ fields: OrderField[] } | { error: string; detail?: string }> {
+    const fresh = orderMeta.get(tenantId);
+    if (fresh && Date.now() - fresh.at < FIELDS_TTL) return { fields: fresh.fields };
+
+    const url = new URL(`${z.inst.api_domain}/crm/v6/settings/fields`);
+    url.searchParams.set('module', 'Sales_Orders');
+    const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return zohoWhy(res);
+
+    const fields = orderFields(await res.json());
+    orderMeta.set(tenantId, { at: Date.now(), fields });
+    return { fields };
+  }
+
+  /**
    * Лид, которого сконвертировали в контакт.
    *
    * Лида конвертируют в Zoho, а не у нас: там нажимают Convert, и лид
@@ -437,53 +514,78 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   );
 
   /**
-   * Товары из CRM.
+   * Каталог товаров.
    *
-   * Поиск идёт в Zoho, а не по нашей копии: копии нет и не будет.
-   * Прайс живёт у клиента, меняется без нас, и список товаров,
-   * устаревший на неделю, — это заказ по неверной цене.
+   * Раньше здесь был поиск: оператор писал две буквы, мы спрашивали
+   * Zoho «что начинается на эти буквы». Это работает, только если
+   * человек помнит, как товар называется в CRM. В жизни он помнит
+   * «фильтр для второй модели», а в прайсе это FLT-220-B, и поиск по
+   * началу названия не находит ничего.
    *
-   * Ищем по началу названия и по артикулу: в разговоре человек называет
-   * либо одно, либо другое.
+   * Поэтому тянем весь список и отдаём его окну заказа целиком: искать
+   * по любому куску строки, листать глазами и выбирать — всё это
+   * делается на месте и без похода в чужой API на каждую букву.
+   *
+   * Список живёт в памяти пять минут. Прайс не меняется в течение
+   * разговора, а без кэша каждое открытие окна — это десяток запросов
+   * к Zoho, которые она считает.
    */
-  app.get<{ Querystring: { q?: string } }>('/crm/products', async (req, reply) => {
+  app.get('/crm/products', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
 
-    const q = String(req.query?.q ?? '').trim().slice(0, 100);
-    if (q.length < 2) return { products: [] };
+    const fresh = catalogs.get(a.tenantId);
+    if (fresh && Date.now() - fresh.at < CATALOG_TTL) {
+      return { products: fresh.items, truncated: fresh.truncated, cached: true };
+    }
 
     const z = await zohoFor(a.tenantId);
     if ('error' in z) return reply.code(409).send(z);
 
-    const url = new URL(`${z.inst.api_domain}/crm/v6/Products/search`);
-    url.searchParams.set(
-      'criteria',
-      `((Product_Name:starts_with:${q})or(Product_Code:starts_with:${q}))`,
-    );
-    const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+    const items: CatalogItem[] = [];
+    let truncated = false;
 
-    // 204 — ничего не нашлось. Это нормальный ответ, а не сбой.
-    if (res.status === 204) return { products: [] };
-    if (!res.ok) return reply.code(502).send({ error: 'zoho_refused' });
+    for (let page = 1; page * CATALOG_PAGE <= CATALOG_MAX; page += 1) {
+      const url = new URL(`${z.inst.api_domain}/crm/v6/Products`);
+      url.searchParams.set('fields', 'Product_Name,Product_Code,Unit_Price,Product_Active');
+      url.searchParams.set('per_page', String(CATALOG_PAGE));
+      url.searchParams.set('page', String(page));
+      const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
 
-    const body = (await res.json()) as {
-      data?: Array<{
-        id?: string;
-        Product_Name?: string;
-        Product_Code?: string;
-        Unit_Price?: number;
-      }>;
-    };
+      // 204 — товаров нет вовсе. Это ответ, а не сбой.
+      if (res.status === 204) break;
+      if (!res.ok) return reply.code(502).send(await zohoWhy(res));
 
-    return {
-      products: (body.data ?? []).slice(0, 25).map((p) => ({
-        id: p.id,
-        name: p.Product_Name ?? '',
-        code: p.Product_Code ?? '',
-        price: typeof p.Unit_Price === 'number' ? p.Unit_Price : 0,
-      })),
-    };
+      const got = catalogPage(await res.json());
+      for (const item of got.items) items.push(item);
+      if (!got.more) break;
+      if ((page + 1) * CATALOG_PAGE > CATALOG_MAX) truncated = true;
+    }
+
+    const sorted = sortCatalog(items);
+    catalogs.set(a.tenantId, { at: Date.now(), items: sorted, truncated });
+    return { products: sorted, truncated, cached: false };
+  });
+
+  /**
+   * Поля заказа — те, что есть в этой организации.
+   *
+   * Разметку Sales_Orders правят: где-то обязателен срок поставки,
+   * где-то свой «Менеджер», где-то ничего сверх названия. Спрашиваем
+   * Zoho, какие поля у заказа есть и какие она считает обязательными,
+   * и показываем их в окне. Свой список обязательных полей устарел бы
+   * в тот же день, когда клиент добавил своё.
+   */
+  app.get('/crm/order-fields', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    const got = await fieldsFor(a.tenantId, z);
+    if ('error' in got) return reply.code(502).send(got);
+    return got;
   });
 
   /**
@@ -508,6 +610,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     Body: {
       subject?: string;
       items?: Array<{ productId?: string; quantity?: number; price?: number }>;
+      fields?: Record<string, unknown>;
     };
   }>('/conversations/:id/order', async (req, reply) => {
     const a = requireAuth(req);
@@ -560,7 +663,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       `${z.inst.api_domain}/crm/v6/Contacts/${recordId}?fields=Account_Name,Last_Name`,
       { headers: z.head, signal: AbortSignal.timeout(20_000) },
     );
-    if (!who.ok) return reply.code(502).send({ error: 'zoho_refused' });
+    if (!who.ok) return reply.code(502).send(await zohoWhy(who));
     const whoBody = (await who.json()) as {
       data?: Array<{ Account_Name?: { id?: string; name?: string } }>;
     };
@@ -568,12 +671,36 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
     const subject = orderSubject(req.body?.subject, conv.display_name);
 
+    /*
+     * Поля заказа. Принимаем только те, что Zoho назвала сама, и
+     * заранее проверяем обязательные: отказ «поле такое-то обязательно»
+     * приходит от Zoho её словами и её именами полей, а человек видел
+     * в окне подписи. Свои подписи мы знаем — ими и отвечаем.
+     */
+    const meta = await fieldsFor(a.tenantId, z);
+    let extra: Record<string, unknown> = {};
+    if ('error' in meta) {
+      // Описание полей не пришло. Заказ без своих полей уедет и так —
+      // он и раньше уезжал. А вот молча выбросить то, что человек
+      // заполнил в окне, нельзя: он увидит «создано» и недостающее
+      // поле в Zoho.
+      const sent = req.body?.fields && Object.keys(req.body.fields).length > 0;
+      if (sent) return reply.code(502).send(meta);
+    } else {
+      const picked = orderValues(meta.fields, req.body?.fields);
+      if (picked.missing.length) {
+        return reply.code(400).send({ error: 'fields_required', detail: picked.missing.join(', ') });
+      }
+      extra = picked.values;
+    }
+
     const res = await fetch(`${z.inst.api_domain}/crm/v6/Sales_Orders`, {
       method: 'POST',
       headers: z.head,
       body: JSON.stringify({
         data: [
           {
+            ...extra,
             Subject: subject,
             ...(accountId ? { Account_Name: { id: accountId } } : {}),
             Contact_Name: { id: recordId },
@@ -589,11 +716,16 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     });
 
     const body = (await res.json().catch(() => ({}))) as {
+      code?: string;
+      message?: string;
       data?: Array<{ code?: string; details?: { id?: string }; message?: string }>;
     };
     const first = body.data?.[0];
     if (!res.ok || first?.code !== 'SUCCESS' || !first.details?.id) {
-      return reply.code(502).send({ error: 'zoho_refused', detail: first?.message });
+      // Отказ по правам приходит не в data, а сам по себе: у него нет
+      // ни строки заказа, ни сообщения про поле.
+      const why = body.data ? { error: 'zoho_refused', detail: first?.message } : whyBody(body);
+      return reply.code(502).send(why);
     }
 
     return {

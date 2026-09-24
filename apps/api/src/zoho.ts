@@ -25,12 +25,34 @@ import { decryptJson, encryptJson, withTenant, type Pool } from '@omnidesk/core'
  * человек читает на экране согласия и каждый лишний вызывает вопрос.
  *
  *   modules.contacts / leads — искать клиента и создавать нового,
+ *   modules.accounts         — привязать контакт к компании,
+ *   modules.products         — каталог товаров для заказа, только чтение,
+ *   modules.salesorders      — сам заказ,
+ *   settings.fields          — поля заказа: какие есть и какие обязательны,
  *   users.READ               — сопоставить оператора с пользователем Zoho,
  *   org.READ                 — узнать название организации и её id.
+ *
+ * Права просим по модулям, а не одним ZohoCRM.modules.ALL. «Доступ ко
+ * всем модулям» на экране согласия — это и переписка, и счета, и всё,
+ * что клиент когда-нибудь заведёт; список из шести строк честнее и
+ * читается за те же пять секунд.
+ *
+ * Имена модулей в правах пишутся слитно — salesorders, а не
+ * Sales_Orders: в адресах API одно написание, в правах другое, и
+ * перепутанное Zoho молча превращает в отказ на каждом запросе.
+ *
+ * Важно: права закреплены за refresh-токеном в момент согласия. Кто
+ * подключил Zoho раньше — живёт со старым списком, пока не подключит
+ * заново. Поэтому нехватку прав ловим отдельно и говорим прямо, что
+ * делать (см. zohoFor в crm.ts).
  */
 const SCOPES = [
   'ZohoCRM.modules.contacts.ALL',
   'ZohoCRM.modules.leads.ALL',
+  'ZohoCRM.modules.accounts.ALL',
+  'ZohoCRM.modules.products.READ',
+  'ZohoCRM.modules.salesorders.ALL',
+  'ZohoCRM.settings.fields.READ',
   'ZohoCRM.users.READ',
   'ZohoCRM.org.READ',
 ];
@@ -163,14 +185,31 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
     if (!auth) return reply.code(401).send({ error: 'unauthorized' });
 
     const rows = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query(
-        `SELECT id, zgid, org_name, location, api_domain, status, created_at
+      const { rows } = await db.query<{ scopes: string[] | null }>(
+        `SELECT id, zgid, org_name, location, api_domain, status, scopes, created_at
            FROM zoho_installations ORDER BY created_at DESC`,
       );
       return rows;
     });
 
-    return { configured: Boolean(opts.clientId && opts.clientSecret), installations: rows };
+    /*
+     * Права закреплены за refresh-токеном в момент согласия. Кто
+     * подключил Zoho раньше, чем появились товары и заказы, живёт со
+     * старым коротким списком: подключение при этом рабочее, а
+     * половина кнопок отвечает отказом.
+     *
+     * Поэтому нехватку видно здесь, а не только в момент отказа:
+     * человек открывает страницу интеграций сам, когда что-то не
+     * работает, и должен увидеть, что делать, а не ровное «активно».
+     */
+    return {
+      configured: Boolean(opts.clientId && opts.clientSecret),
+      installations: rows.map((r) => ({
+        ...r,
+        scopes: undefined,
+        stale: SCOPES.some((s) => !(r.scopes ?? []).includes(s)),
+      })),
+    };
   });
 
   // ── Начало подключения ────────────────────────────────────────────
