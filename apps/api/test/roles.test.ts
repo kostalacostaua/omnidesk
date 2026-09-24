@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { requiredLevel, roleAllows } from '../src/roles.js';
+import { requiredLevel, roleAllows, isPlatformPath } from '../src/roles.js';
 
 /**
  * Права — единственное место, где ошибка не видна глазом. Оператор,
@@ -78,5 +78,33 @@ describe('хватает ли роли', () => {
   it('неизвестная роль не получает ничего сверх чтения', () => {
     expect(roleAllows('', 'write')).toBe(false);
     expect(roleAllows('kладовщик', 'admin')).toBe(false);
+  });
+});
+
+/**
+ * Панель владельца платформы закрыта не ролью, а отдельной проверкой:
+ * администратор клиента не должен увидеть список всех организаций
+ * даже обычным GET, которому роли не задают вопросов.
+ */
+describe('путь панели владельца', () => {
+  it('сама панель и всё под ней', () => {
+    expect(isPlatformPath('/admin')).toBe(true);
+    expect(isPlatformPath('/admin/')).toBe(true);
+    expect(isPlatformPath('/admin/tenants')).toBe(true);
+    expect(isPlatformPath('/admin/tenants/abc/login')).toBe(true);
+    expect(isPlatformPath('/admin/tenants?q=ромашка')).toBe(true);
+  });
+
+  it('похожие пути к ней не относятся', () => {
+    expect(isPlatformPath('/administrative')).toBe(false);
+    expect(isPlatformPath('/adminx/tenants')).toBe(false);
+    expect(isPlatformPath('/users/admin')).toBe(false);
+    expect(isPlatformPath('/')).toBe(false);
+    expect(isPlatformPath('')).toBe(false);
+  });
+
+  it('обычные ручки правами владельца не закрываются', () => {
+    expect(isPlatformPath('/conversations')).toBe(false);
+    expect(isPlatformPath('/settings/channels')).toBe(false);
   });
 });

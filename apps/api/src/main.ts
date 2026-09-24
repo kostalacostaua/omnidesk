@@ -11,6 +11,8 @@ import {
   assertRlsIntegrity,
   canSendFreeform,
   isCommentChannel,
+  isPlatformOwner,
+  parsePlatformOwners,
   createPool,
   createStorage,
   avatarKey,
@@ -49,10 +51,11 @@ import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
+import { registerAdmin } from './admin.js';
 import { registerAnalytics } from './analytics.js';
 import { backfillEvents } from './backfill.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
-import { denial, requiredLevel, roleAllows } from './roles.js';
+import { denial, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
@@ -64,6 +67,14 @@ const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
 const TELEGRAM_API_ROOT = process.env.TELEGRAM_API_ROOT ?? 'https://api.telegram.org';
 const ZOHO_WIDGET_SHARED_SECRET = process.env.ZOHO_WIDGET_SHARED_SECRET ?? '';
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
+
+/**
+ * Владельцы платформы: почты через запятую в PLATFORM_OWNERS.
+ *
+ * Пусто — панели нет ни у кого, и это нормальное состояние: сервис
+ * работает, просто владелец в него не заходит.
+ */
+const PLATFORM_OWNERS = parsePlatformOwners(process.env['PLATFORM_OWNERS']);
 
 const pool = createPool(DATABASE_URL);
 const masterKey = parseMasterKey(process.env.ENCRYPTION_MASTER_KEY);
@@ -225,27 +236,66 @@ app.delete('/auth/session', async (req, reply) =>
  * Чтобы не ходить в базу на каждый запрос, ответ держится минуту —
  * этого хватает, чтобы смена роли применилась почти сразу.
  */
-const roleCache = new Map<string, { role: string; until: number }>();
+const roleCache = new Map<string, { role: string; email: string; until: number }>();
 const ROLE_TTL_MS = 60_000;
 
-async function roleOf(tenantId: string, userId: string): Promise<string> {
+async function whoIs(tenantId: string, userId: string): Promise<{ role: string; email: string }> {
   const hit = roleCache.get(userId);
-  if (hit && hit.until > Date.now()) return hit.role;
+  if (hit && hit.until > Date.now()) return { role: hit.role, email: hit.email };
 
-  const role = await withTenant(pool, tenantId, async (db) => {
-    const { rows } = await db.query<{ role: string }>(
-      `SELECT role FROM users WHERE id = $1 AND is_active LIMIT 1`,
+  const found = await withTenant(pool, tenantId, async (db) => {
+    const { rows } = await db.query<{ role: string; email: string }>(
+      `SELECT role, email FROM users WHERE id = $1 AND is_active LIMIT 1`,
       [userId],
     );
-    return rows[0]?.role ?? '';
+    return rows[0] ?? { role: '', email: '' };
   });
 
-  roleCache.set(userId, { role, until: Date.now() + ROLE_TTL_MS });
-  return role;
+  roleCache.set(userId, { ...found, until: Date.now() + ROLE_TTL_MS });
+  return found;
+}
+
+async function roleOf(tenantId: string, userId: string): Promise<string> {
+  return (await whoIs(tenantId, userId)).role;
+}
+
+/**
+ * Владелец платформы за этим запросом.
+ *
+ * Почта берётся из базы, а не из токена: выпав из списка владельцев,
+ * человек обязан потерять доступ сразу, а не когда истечёт его токен.
+ */
+async function platformOwnerOf(req: {
+  headers: Record<string, unknown>;
+}): Promise<{ tenantId: string; userId: string; email: string } | null> {
+  if (!PLATFORM_OWNERS.length) return null;
+  const auth = requireAuth(req);
+  if (!auth) return null;
+  const who = await whoIs(auth.tenantId, auth.userId);
+  if (!isPlatformOwner(who.email, PLATFORM_OWNERS)) return null;
+  return { ...auth, email: who.email };
 }
 
 app.addHook('preHandler', async (req, reply) => {
   const path = (req.raw.url ?? '').split('?')[0] ?? '';
+
+  /*
+   * Панель владельца платформы. Проверка стоит перед разбором ролей и
+   * не зависит от метода: обычное правило «GET можно всем вошедшим»
+   * здесь означало бы, что список всех организаций читает любой
+   * наблюдатель любого клиента.
+   *
+   * Ответ 404, а не 403: постороннему незачем знать, что такая панель
+   * вообще существует.
+   */
+  if (isPlatformPath(path)) {
+    if (!(await platformOwnerOf(req as never))) {
+      app.log.warn({ path, ip: req.ip }, 'Чужой запрос к панели владельца');
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    return;
+  }
+
   const level = requiredLevel(req.method, path);
   if (level === 'any') return;
 
@@ -424,6 +474,10 @@ registerSettings(app, {
   pool,
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
+  platform: async (req) => ({
+    owner: !!(await platformOwnerOf(req as never)),
+    impersonatedBy: impersonatedBy(req as never),
+  }),
   telegramApiRoot: TELEGRAM_API_ROOT,
   publicUrl: PUBLIC_URL,
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
@@ -491,6 +545,24 @@ registerStatuses(app, {
 registerAnalytics(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
+});
+
+/** Отметка входа под клиентом из самого токена: кто вошёл, а не под кем. */
+function impersonatedBy(req: { headers: Record<string, unknown> }): string | null {
+  const header = req.headers['authorization'];
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+  const payload = verifyJwt(header.slice(7));
+  const imp = payload?.['imp'];
+  return typeof imp === 'string' && imp ? imp : null;
+}
+
+registerAdmin(app, {
+  pool,
+  owner: (req) => platformOwnerOf(req as never),
+  // Час, а не неделя: это визит к клиенту, а не вторая учётная запись.
+  // Отметка imp остаётся в токене — по ней видно, чей это вход.
+  impersonate: (tenantId, userId, actorEmail) =>
+    signJwt({ sub: userId, tid: tenantId, imp: actorEmail }, 3600),
 });
 
 registerCrm(app, {

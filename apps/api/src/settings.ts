@@ -72,6 +72,14 @@ export interface SettingsDeps {
   telegramWebhookSecret: string;
   mtproto?: { redis: Redis; loginQueue: Queue<MtprotoLoginJob> };
   meta?: { appId: string; appSecret: string; appUrl: string; stateSecret: string; redis: Redis; configId?: string };
+  /**
+   * Кто смотрит: владелец платформы и не под клиентом ли он сейчас.
+   *
+   * Отдаётся в /me, потому что интерфейс решает по этому два вопроса:
+   * показывать ли панель владельца и рисовать ли полосу «вы под
+   * клиентом». Оба ответа нужны на первом же экране.
+   */
+  platform?: (req: unknown) => Promise<{ owner: boolean; impersonatedBy: string | null }>;
 }
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
@@ -121,7 +129,11 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [auth.userId]);
     });
 
-    return { tenant, ...data };
+    const platform = deps.platform
+      ? await deps.platform(req)
+      : { owner: false, impersonatedBy: null };
+
+    return { tenant, ...data, platform };
   });
 
   /**

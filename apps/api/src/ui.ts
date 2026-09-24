@@ -707,6 +707,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
      в личные. Мелко и рядом с текстом — это пометка, а не сообщение. */
   .cmt{font-size:11px;opacity:.72;margin-bottom:4px}
   .cmt a{color:inherit;text-decoration:underline}
+  /* Полоса «вы под клиентом». Висит поверх всего и не двигает вёрстку:
+     забыть, от чьего имени пишешь, — самая дорогая ошибка в этой панели. */
+  #impbar{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:300;
+    display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;
+    background:var(--crit);color:#fff;font-size:12.5px;font-weight:600;
+    box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  #impbar button{background:rgba(255,255,255,.18);color:#fff;border:0}
   /* Выбор страниц Facebook: галочки рядом с подписью, а не во всю
      ширину. Общее правило input{width:100%} растягивает их и уносит
      текст на строку ниже — здесь оно не к месту. */
@@ -935,6 +942,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   </div>
 </div>
 
+<div id="impbar" style="display:none"></div>
 <div id="app" data-view="chats">
   <nav id="rail">
     <div class="logo" id="logo" title="До чатів" data-tt style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
@@ -947,6 +955,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
     <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
     <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
+    <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <div class="grow"></div>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
@@ -6718,7 +6727,320 @@ function showErr(e){
   if (e && e.status === 401){ logout(); el('gateErr').textContent = L('Токен недійсний або застарів'); }
 }
 
+
+/* ══════════════ Панель владельца платформы ══════════════ */
+
+/**
+ * Панель видна только владельцу сервиса — тому, чья почта стоит в
+ * PLATFORM_OWNERS. Это не роль внутри организации: администратор
+ * клиента здесь не имеет никаких прав, и сервер отвечает ему «нет
+ * такой страницы», а не «нельзя».
+ *
+ * Список сознательно короткий: организация, тариф, оплата, сколько
+ * сообщений прошло за месяц. Всё, что нужно, чтобы понять, кому писать
+ * счёт и кто перестал пользоваться.
+ */
+var OWN = { summary:null, list:[], total:0, q:'', open:null };
+
+function ownPill(state){
+  if (state === 'paid') return L('<span class="pill ok">оплачено</span>');
+  if (state === 'due') return L('<span class="pill warn">спливає</span>');
+  return L('<span class="pill crit">не оплачено</span>');
+}
+
+function ownMoney(v){
+  return v == null ? '—' : String(v);
+}
+
+function tabOwner(){
+  OWN.open = null;
+  Promise.all([
+    api('/admin/summary'),
+    api('/admin/tenants?limit=50&q=' + encodeURIComponent(OWN.q))
+  ]).then(function(r){
+    OWN.summary = r[0];
+    OWN.list = r[1].tenants || [];
+    OWN.total = r[1].total || 0;
+    paintOwner();
+  }).catch(sErr);
+}
+
+function paintOwner(){
+  var s = OWN.summary || {};
+  pageBox().innerHTML = '<div class="pg">' +
+    pageHead(L('Власник'), L('Організації, тарифи й оплати. Видно тільки вам.')) +
+    '<div class="nums">' +
+      num(s.tenants, L('організацій')) +
+      num(s.fresh, L('нових цього місяця')) +
+      num(s.active, L('писали цього місяця')) +
+      num(s.paying, L('платять')) +
+      num(s.mrr, L('на місяць')) +
+      num(s.messages, L('повідомлень за місяць')) +
+    '</div>' +
+
+    L('<div class="pg-sec"><h3>Організації</h3>') +
+    '<div class="row2" style="margin-bottom:10px">' +
+      L('<input id="oq" placeholder="назва або адреса" value="') + esc(OWN.q) + '">' +
+      L('<button class="ghost mini" id="ofind">Знайти</button></div>') +
+    (OWN.list.length
+      ? OWN.list.map(ownRow).join('')
+      : L('<div class="empty">Нічого не знайшли</div>')) +
+    (OWN.total > OWN.list.length
+      ? L('<div class="hint">Показано ') + OWN.list.length + L(' з ') + OWN.total +
+        L('. Звузьте пошук.</div>')
+      : '') +
+    '</div></div>';
+
+  el('ofind').onclick = function(){ OWN.q = el('oq').value.trim(); tabOwner() };
+  el('oq').onkeydown = function(e){ if (e.key === 'Enter') el('ofind').click() };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-org]'), function(b){
+    b.onclick = function(){ ownOpen(b.dataset.org) };
+  });
+}
+
+function ownRow(t){
+  var last = t.lastAt ? L('останнє ') + fmtDate(t.lastAt) : L('без повідомлень');
+  return '<div class="item" data-org="' + esc(t.id) + '" style="cursor:pointer">' +
+    '<div><div class="t">' + esc(t.name) + ' ' + ownPill(t.pay) +
+      (t.status === 'suspended' ? L('<span class="pill crit">призупинено</span>') : '') + '</div>' +
+    '<div class="s">' + esc(t.plan) + ' · ' +
+      L('людей: ') + t.users + ' · ' + L('каналів: ') + t.channels + ' · ' +
+      L('повідомлень за місяць: ') + t.messagesMonth + ' · ' + esc(last) + '</div></div>' +
+    '<div style="flex:none;text-align:right">' +
+      '<div style="font-weight:700">' +
+        (t.priceMonth == null ? '—' : esc(t.priceMonth) + ' ' + esc(t.currency)) + '</div>' +
+      '<div class="s">' + (t.paidUntil ? L('до ') + esc(fmtDate(t.paidUntil)) : L('без оплати')) + '</div>' +
+    '</div></div>';
+}
+
+var PLANS = ['trial','start','pro','custom'];
+
+function ownOpen(id){
+  api('/admin/tenants/' + id).then(function(d){
+    OWN.open = d;
+    paintOrg();
+  }).catch(sErr);
+}
+
+function paintOrg(){
+  var d = OWN.open, t = d.tenant, c = d.counts || {};
+  var months = d.months || [];
+  var top = Math.max.apply(null, [1].concat(months.map(function(m){
+    return Number(m.msg_in) + Number(m.msg_out);
+  })));
+
+  pageBox().innerHTML = '<div class="pg">' +
+    pageHead(t.name, esc(t.slug) + ' · ' + L('з ') + esc(fmtDate(t.createdAt)) + ' · ' +
+      esc(t.source) + ' ' + ownPill(t.pay)) +
+    L('<button class="ghost mini" id="oback">← До списку</button>') +
+
+    '<div class="nums" style="margin-top:12px">' +
+      num(c.users, L('людей')) +
+      num(c.channels, L('каналів')) +
+      num(c.conversations, L('діалогів')) +
+      num(c.messagesMonth, L('повідомлень за місяць')) +
+    '</div>' +
+
+    L('<div class="pg-sec"><h3>Тариф</h3><div class="card">') +
+      '<div class="row2">' +
+        '<select id="oplan">' + PLANS.map(function(p){
+          return '<option value="' + p + '"' + (t.plan === p ? ' selected' : '') + '>' + p + '</option>';
+        }).join('') + '</select>' +
+        '<select id="ostatus">' +
+          L('<option value="active">працює</option>') +
+          '<option value="suspended"' + (t.status === 'suspended' ? ' selected' : '') + '>' +
+            L('призупинено') + '</option>' +
+        '</select>' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="oseats" type="number" min="1" placeholder="місць" value="') + esc(t.seatsLimit) + '">' +
+        L('<input id="oprice" placeholder="ціна на місяць" value="') + esc(t.priceMonth == null ? '' : t.priceMonth) + '">' +
+        '<input id="ocur" value="' + esc(t.currency) + '" style="max-width:90px">' +
+        '<input id="opaid" type="date" value="' + esc(t.paidUntil || '') + '">' +
+      '</div>' +
+      L('<textarea id="onote" rows="2" placeholder="Нотатка про клієнта" style="margin-top:8px">') +
+        esc(t.note || '') + '</textarea>' +
+      L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="osave">Зберегти</button>') +
+      L('<button class="ghost mini" id="ologin">Увійти як клієнт</button></div>') +
+      '<span class="ok" id="ook"></span><div class="err" id="oerr"></div>' +
+    '</div></div>' +
+
+    L('<div class="pg-sec"><h3>Оплати</h3><div class="card">') +
+      '<div class="row2">' +
+        L('<input id="pamt" placeholder="сума">') +
+        '<input id="pend" type="date">' +
+        L('<input id="pmet" placeholder="спосіб">') +
+        L('<button class="ghost mini" id="padd">Внести</button>') +
+      '</div>' +
+      L('<div class="hint">Дата — кінець оплаченого періоду. «Оплачено до» посунеться сама, ') +
+      L('але тільки вперед.</div>') +
+      '<div style="margin-top:10px">' +
+        ((d.payments || []).length
+          ? d.payments.map(function(p){
+              return '<div class="item"><div><div class="t">' + esc(p.amount) + ' ' + esc(p.currency) +
+                (p.period_end ? L(' — до ') + esc(fmtDate(p.period_end)) : '') + '</div>' +
+                '<div class="s">' + esc(fmtDate(p.created_at)) +
+                (p.method ? ' · ' + esc(p.method) : '') +
+                (p.created_by ? ' · ' + esc(p.created_by) : '') + '</div></div>' +
+                '<span class="x" data-pay="' + esc(p.id) + '" style="cursor:pointer">×</span></div>';
+            }).join('')
+          : L('<div class="dim" style="font-size:12.5px">Оплат ще не було.</div>')) +
+      '</div>' +
+    '</div></div>' +
+
+    L('<div class="pg-sec"><h3>Повідомлення по місяцях</h3><div class="card">') +
+      (months.length
+        ? '<div class="kv2">' + months.map(function(m){
+            var total = Number(m.msg_in) + Number(m.msg_out);
+            return '<div class="k">' + esc(m.month) + '</div><div>' +
+              '<span style="display:inline-block;height:8px;border-radius:4px;background:var(--accent);' +
+              'width:' + Math.round(total / top * 160) + 'px;vertical-align:middle"></span> ' +
+              esc(total) + L(' (вх. ') + esc(m.msg_in) + L(', вих. ') + esc(m.msg_out) + ')</div>';
+          }).join('') + '</div>'
+        : L('<div class="dim" style="font-size:12.5px">Повідомлень ще не було.</div>')) +
+    '</div></div>' +
+
+    L('<div class="pg-sec"><h3>Хто всередині</h3><div class="card">') +
+      (d.users || []).map(function(u){
+        return '<div class="item"><div><div class="t">' + esc(u.full_name || u.email) +
+          (u.is_active ? '' : L('<span class="pill warn">відключений</span>')) + '</div>' +
+          '<div class="s">' + esc(u.email) + ' · ' + esc(u.role) +
+          (u.last_seen_at ? ' · ' + L('був ') + esc(fmtDate(u.last_seen_at)) : L(' · ще не заходив')) +
+          '</div></div></div>';
+      }).join('') +
+      L('<h4 style="margin-top:12px">Канали</h4>') +
+      ((d.channels || []).length
+        ? '<div class="kv2">' + d.channels.map(function(ch){
+            return '<div class="k">' + esc(CH[ch.type] || ch.type) + '</div><div>' +
+              esc(ch.display_name || '') + ' · ' + esc(ch.status) + '</div>';
+          }).join('') + '</div>'
+        : L('<div class="dim" style="font-size:12.5px">Каналів немає.</div>')) +
+    '</div></div>' +
+
+    /* Журнал: сюда попадают входы под клиентом и правки тарифа. Он и
+       есть плата за право войти в чужую переписку. */
+    L('<div class="pg-sec"><h3>Журнал</h3><div class="card">') +
+      ((d.audit || []).length
+        ? d.audit.map(function(a){
+            return '<div class="note">' + esc(a.action) +
+              '<div class="who">' + esc(a.actor_email) + ' · ' + esc(fmtTime(a.created_at)) +
+              ' · ' + esc(JSON.stringify(a.detail || {})) + '</div></div>';
+          }).join('')
+        : L('<div class="dim" style="font-size:12.5px">Записів немає.</div>')) +
+    '</div></div>' +
+    '</div>';
+
+  el('oback').onclick = tabOwner;
+  el('osave').onclick = ownSave;
+  el('ologin').onclick = ownLogin;
+  el('padd').onclick = ownPay2;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pay]'), function(x){
+    x.onclick = function(){
+      api('/admin/tenants/' + OWN.open.tenant.id + '/payments/' + x.dataset.pay, { method:'DELETE' })
+        .then(function(){ ownOpen(OWN.open.tenant.id) }).catch(showErr);
+    };
+  });
+}
+
+function ownSave(){
+  var t = OWN.open.tenant;
+  el('oerr').textContent = '';
+  busy(el('osave'), true);
+  api('/admin/tenants/' + t.id, { method:'PATCH', body:{
+    plan: el('oplan').value,
+    status: el('ostatus').value,
+    seatsLimit: Number(el('oseats').value) || 1,
+    priceMonth: el('oprice').value,
+    currency: el('ocur').value,
+    paidUntil: el('opaid').value || null,
+    note: el('onote').value
+  }}).then(function(){
+    el('ook').textContent = L('збережено');
+    ownOpen(t.id);
+  }).catch(function(e){
+    el('oerr').textContent = ((e && e.payload) || {}).error || L('Не вдалося зберегти');
+  }).then(function(){ busy(el('osave'), false) });
+}
+
+function ownPay2(){
+  var t = OWN.open.tenant;
+  el('oerr').textContent = '';
+  busy(el('padd'), true);
+  api('/admin/tenants/' + t.id + '/payments', { method:'POST', body:{
+    amount: el('pamt').value,
+    currency: el('ocur') ? el('ocur').value : 'UAH',
+    periodEnd: el('pend').value || null,
+    method: el('pmet').value
+  }}).then(function(){ ownOpen(t.id) })
+    .catch(function(e){
+      el('oerr').textContent = ((e && e.payload) || {}).error === 'bad_amount'
+        ? L('Впишіть суму') : L('Не вдалося внести оплату');
+    })
+    .then(function(){ busy(el('padd'), false) });
+}
+
+/**
+ * Вход под клиентом.
+ *
+ * Свой токен сохраняем рядом, а не выбрасываем: выход обратно должен
+ * быть одним нажатием, иначе владелец каждый раз входит заново.
+ * Токен клиента живёт час и помечен отметкой входа — в организации
+ * остаётся запись, кто именно приходил.
+ */
+function ownLogin(){
+  var t = OWN.open.tenant;
+  // Подтверждение в самой кнопке, а не отдельным окном: вход в чужую
+  // переписку не должен случаться с одного промаха мышью, но и
+  // выпрыгивающее окно ради этого заводить незачем.
+  var b = el('ologin');
+  if (b.dataset.sure !== '1'){
+    b.dataset.sure = '1';
+    b.textContent = L('Точно увійти?');
+    setTimeout(function(){
+      if (el('ologin') && el('ologin').dataset.sure === '1'){
+        el('ologin').dataset.sure = '';
+        el('ologin').textContent = L('Увійти як клієнт');
+      }
+    }, 4000);
+    return;
+  }
+  busy(el('ologin'), true);
+  api('/admin/tenants/' + t.id + '/login', { method:'POST' })
+    .then(function(r){
+      try { localStorage.setItem('omnidesk_owner_token', TOKEN) } catch(e){}
+      TOKEN = r.token;
+      tokenWrite(r.token);
+      location.reload();
+    })
+    .catch(function(e){
+      el('oerr').textContent = ((e && e.payload) || {}).error === 'no_users'
+        ? L('В організації немає жодного активного користувача')
+        : L('Не вдалося увійти');
+      busy(el('ologin'), false);
+    });
+}
+
+/** Полоса «вы под клиентом»: без неё легко забыть, от чьего имени пишешь. */
+function ownBar(){
+  var by = ME && ME.platform && ME.platform.impersonatedBy;
+  var box = el('impbar');
+  if (!box) return;
+  if (!by){ box.style.display = 'none'; return }
+  box.style.display = 'flex';
+  box.innerHTML = L('<span>Ви працюєте як «') + esc((ME.tenant && ME.tenant.name) || '') +
+    L('» — це видно в журналі організації</span>') +
+    L('<button class="ghost mini" id="impout">Повернутись</button>');
+  el('impout').onclick = function(){
+    var mine = '';
+    try { mine = localStorage.getItem('omnidesk_owner_token') || '' } catch(e){}
+    try { localStorage.removeItem('omnidesk_owner_token') } catch(e){}
+    if (mine){ TOKEN = mine; tokenWrite(mine); location.reload() }
+    else logout();
+  };
+}
+
 var VIEWS = {
+  owner: tabOwner,
   channels: tabChannels,
   bots: renderBots,
   replies: tabReplies,
@@ -6757,6 +7079,14 @@ function applyRole(){
   Array.prototype.forEach.call(document.querySelectorAll('[data-admin]'), function(b){
     b.style.display = admin ? '' : 'none';
   });
+  // Панель владельца платформы. Признак приходит с сервера и роли в
+  // организации не касается: администратор клиента её не увидит.
+  var plat = ME && ME.platform;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-owner]'), function(b){
+    b.style.display = plat && plat.owner ? '' : 'none';
+  });
+  ownBar();
+  if (!(plat && plat.owner) && el('app').dataset.view === 'owner') setView('chats');
   // Если оператор стоял в закрытом для него разделе — возвращаем в чаты.
   if (!admin && el('app').dataset.view !== 'chats' && el('app').dataset.view !== 'profile'){
     setView('chats');
