@@ -19,6 +19,7 @@
 export const NOTIFY_EVENTS = [
   'conversation.new',
   'message.waiting',
+  'sla.warning',
   'ai.handoff',
   'channel.down',
   'lead.new',
@@ -39,6 +40,11 @@ export interface NotifyPayload {
   conversationId?: string | null;
   /** Сколько минут человек ждёт ответа. */
   waitingMinutes?: number | null;
+  /**
+   * Сколько рабочих минут осталось до конца обещанного срока.
+   * Отрицательное — обещание уже нарушено.
+   */
+  slaLeftMinutes?: number | null;
   /** Почта и телефон лида с промо-страницы. */
   email?: string | null;
   phone?: string | null;
@@ -55,6 +61,7 @@ export interface NotifyMessage {
 export const NOTIFY_TITLES: Record<NotifyEvent, string> = {
   'conversation.new': 'Новий діалог',
   'message.waiting': 'Клієнт чекає відповіді',
+  'sla.warning': 'Ось-ось порушимо обіцянку',
   'ai.handoff': 'ШІ передав людині',
   'channel.down': 'Канал відвалився',
   'lead.new': 'Заявка з сайту',
@@ -64,6 +71,8 @@ export const NOTIFY_TITLES: Record<NotifyEvent, string> = {
 export const NOTIFY_HINTS: Record<NotifyEvent, string> = {
   'conversation.new': 'Перше повідомлення від нового клієнта.',
   'message.waiting': 'Повідомлення клієнта без відповіді довше за визначений час.',
+  'sla.warning':
+    'Час на першу відповідь добігає кінця. Рахується в робочих годинах — уночі не турбує.',
   'ai.handoff': 'ШІ зупинився і чекає на оператора.',
   'channel.down': 'Канал перестав працювати: відкликаний токен, негодящий ключ.',
   'lead.new': 'Хтось залишив заявку на промо-сторінці.',
@@ -108,6 +117,21 @@ export function renderNotify(event: NotifyEvent, p: NotifyPayload): NotifyMessag
         body: `${who}: ${said}`,
         path,
       };
+    }
+
+    /*
+     * Предупреждение о нарушении. Смысл его в одном: успеть. Поэтому в
+     * заголовке не «прошло столько-то», а сколько осталось — это
+     * единственное число, по которому человек решает, бросать ли
+     * текущее дело.
+     */
+    case 'sla.warning': {
+      const left = p.slaLeftMinutes ?? 0;
+      const head =
+        left > 0
+          ? `Залишилось ${left} хв на відповідь${where}`
+          : `Прострочено на ${Math.abs(left)} хв${where}`;
+      return { title: head, body: `${who}: ${said}`, path };
     }
 
     case 'ai.handoff':

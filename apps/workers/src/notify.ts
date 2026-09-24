@@ -10,7 +10,9 @@ import {
   escapeHtml,
   isNotifyEvent,
   isWorkTime,
+  parseSla,
   parseWorkHours,
+  workedSeconds,
   jobKey,
   renderNotify,
   telegramText,
@@ -380,14 +382,29 @@ export function createNotifier(deps: NotifyDeps) {
         id: string;
         waiting_alert_minutes: number;
         work_hours: unknown;
+        sla: unknown;
       }>(
-        `SELECT id, waiting_alert_minutes, work_hours
-           FROM tenants WHERE waiting_alert_minutes > 0`,
+        `SELECT id, waiting_alert_minutes, work_hours, sla
+           FROM tenants WHERE waiting_alert_minutes > 0 OR sla <> '{}'::jsonb`,
       );
       return rows;
     });
 
     for (const tenant of tenants) {
+      const sla = parseSla(tenant.sla);
+
+      /*
+       * Есть обещание — предупреждаем по нему, а простой порог молчит.
+       *
+       * Два числа про одно и то же («через сколько напомнить» и «за
+       * сколько обещали ответить») означают два оповещения об одном
+       * диалоге с разницей в минуту. Человек выключает оба.
+       */
+      if (sla.firstReplyMinutes > 0) {
+        await slaWarnTick(tenant.id, parseWorkHours(tenant.work_hours), sla.firstReplyMinutes);
+        continue;
+      }
+      if (tenant.waiting_alert_minutes <= 0) continue;
       /*
        * Вне рабочих часов не беспокоим.
        *
@@ -446,6 +463,107 @@ export function createNotifier(deps: NotifyDeps) {
           `message.waiting:${row.message_id}`,
         );
       }
+    }
+  }
+
+  /**
+   * Предупреждение до нарушения обещания.
+   *
+   * Смысл — успеть. Узнать о просрочке из отчёта через неделю можно, но
+   * сделать с этим уже ничего нельзя: клиент ушёл. Поэтому оповещение
+   * приходит, когда срок ещё идёт, и говорит, сколько осталось.
+   *
+   * Порог — четыре пятых обещанного. Не половина: на половине ещё рано,
+   * и оповещение станет фоновым шумом, от которого отписываются. Не в
+   * последнюю минуту: за минуту человек не успеет ни прочитать, ни
+   * ответить.
+   *
+   * Считается в рабочих часах — тех же, что в отчёте. Написанное в
+   * пятницу вечером не будит в выходные и не приходит в понедельник с
+   * числом «ждёт три тысячи минут»: по рабочим часам он ждёт первую
+   * минуту понедельника.
+   */
+  const SLA_WARN_SHARE = 0.8;
+
+  async function slaWarnTick(
+    tenantId: string,
+    wh: ReturnType<typeof parseWorkHours>,
+    targetMinutes: number,
+  ): Promise<void> {
+    // Вне рабочих часов не беспокоим и не считаем: срок в это время не
+    // идёт, и предупреждать не о чем.
+    if (!isWorkTime(wh)) return;
+
+    const warnSeconds = Math.round(targetMinutes * 60 * SLA_WARN_SHARE);
+
+    const rows = await withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{
+        conversation_id: string;
+        message_id: string;
+        text: string | null;
+        contact: string | null;
+        channel_type: string;
+        since: Date;
+      }>(
+        /*
+         * Кандидаты отбираются по календарю: рабочее время никогда не
+         * больше календарного, поэтому всё, что ждёт меньше порога по
+         * часам, точно не ждёт его по рабочим часам. Точный счёт —
+         * дальше, в коде, тем же способом, что и в отчёте.
+         */
+        `SELECT c.id AS conversation_id, w.id AS message_id,
+                w.content->>'text' AS text,
+                ct.display_name AS contact, ch.type AS channel_type,
+                w.sent_at AS since
+           FROM conversations c
+           JOIN channels ch ON ch.id = c.channel_id
+           JOIN contacts ct ON ct.id = c.contact_id
+           JOIN LATERAL (
+             SELECT id, direction FROM messages
+              WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1
+           ) last ON true
+           JOIN LATERAL (
+             -- Первое сообщение клиента после нашего последнего
+             -- человеческого ответа: ждёт он с него, а не с последнего.
+             SELECT id, content, sent_at FROM messages i
+              WHERE i.conversation_id = c.id AND i.direction = 'in'
+                AND i.sent_at > COALESCE((SELECT max(o.sent_at) FROM messages o
+                                           WHERE o.conversation_id = c.id
+                                             AND o.direction = 'out'
+                                             AND o.sender_type <> 'bot'),
+                                         '-infinity'::timestamptz)
+              ORDER BY i.sent_at LIMIT 1
+           ) w ON true
+          WHERE c.status = 'open'
+            AND last.direction = 'in'
+            AND w.sent_at < now() - make_interval(secs => $1::int)
+            AND w.sent_at > now() - interval '14 days'
+          LIMIT 50`,
+        [warnSeconds],
+      );
+      return rows;
+    });
+
+    const now = new Date();
+    for (const row of rows) {
+      const waited = workedSeconds(row.since, now, wh);
+      if (waited < warnSeconds) continue;
+
+      await notify(
+        tenantId,
+        'sla.warning',
+        {
+          who: row.contact,
+          text: row.text,
+          channel: row.channel_type,
+          conversationId: row.conversation_id,
+          waitingMinutes: Math.round(waited / 60),
+          slaLeftMinutes: Math.round((targetMinutes * 60 - waited) / 60),
+        },
+        // Ключ по сообщению: одно предупреждение на одно ожидание, а не
+        // каждые полминуты до самого ответа.
+        `sla.warning:${row.message_id}`,
+      );
     }
   }
 

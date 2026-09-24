@@ -47,6 +47,29 @@ describe('текст оповещения', () => {
     expect(m.title).toContain('40');
   });
 
+  /*
+   * Предупреждение о нарушении существует ради одного: успеть. Поэтому
+   * в заголовке должно стоять оставшееся время, а не прошедшее — по
+   * нему человек решает, бросать ли текущее дело.
+   */
+  it('в предупреждении видно, сколько осталось, а не сколько прошло', () => {
+    const m = renderNotify('sla.warning', {
+      who: 'Ігор',
+      text: 'ну що там',
+      waitingMinutes: 16,
+      slaLeftMinutes: 4,
+    });
+    expect(m.title).toContain('4');
+    expect(m.title).not.toContain('16');
+  });
+
+  it('если срок уже вышел, так и сказано, а не минус в заголовке', () => {
+    const m = renderNotify('sla.warning', { who: 'Ігор', slaLeftMinutes: -7 });
+    expect(m.title).toContain('7');
+    expect(m.title).not.toContain('-7');
+    expect(m.title).toContain('Прострочено');
+  });
+
   it('упавший канал ведёт в каналы, а не в диалог', () => {
     const m = renderNotify('channel.down', { channel: 'Продажі', text: 'Токен відкликано' });
     expect(m.title).toContain('Продажі');

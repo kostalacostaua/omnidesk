@@ -11,6 +11,7 @@ import {
   defaultJobOptions,
   isNotifyEvent,
   jobKey,
+  parseSla,
   withSystem,
   withTenant,
   type NotifyEvent,
@@ -223,8 +224,8 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
            ORDER BY display_name`,
         [auth.tenantId],
       );
-      const { rows: tenant } = await db.query<{ waiting_alert_minutes: number }>(
-        `SELECT waiting_alert_minutes FROM tenants WHERE id = $1`,
+      const { rows: tenant } = await db.query<{ waiting_alert_minutes: number; sla: unknown }>(
+        `SELECT waiting_alert_minutes, sla FROM tenants WHERE id = $1`,
         [auth.tenantId],
       );
       const { rows: subs } = await db.query<{ n: string }>(
@@ -244,6 +245,13 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
         })),
         bots,
         waitingAlertMinutes: tenant[0]?.waiting_alert_minutes ?? 15,
+        /*
+         * Обещание отдаётся сюда, потому что оно отменяет этот порог.
+         * Настройка, которая молча перестала действовать, — худший вид
+         * настройки: человек её крутит и не понимает, почему ничего не
+         * меняется.
+         */
+        sla: parseSla(tenant[0]?.sla),
         pushSubscriptions: Number(subs[0]?.n ?? 0),
       };
     });

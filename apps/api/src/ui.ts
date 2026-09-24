@@ -4751,6 +4751,7 @@ function ntCard(t){
 
 function ntWaitRow(){
   var minutes = NT.data.waitingAlertMinutes;
+  var sla = NT.data.sla || {};
   var opts = [0, 5, 10, 15, 30, 60];
   if (opts.indexOf(minutes) < 0) opts.push(minutes);
   return '<div class="card" style="margin-bottom:14px"><div class="row2">' +
@@ -4760,8 +4761,13 @@ function ntWaitRow(){
       return '<option value="' + m + '"' + (m === minutes ? ' selected' : '') + '>' +
         (m === 0 ? L('не перевіряти') : m + ' ' + L('хв')) + '</option>';
     }).join('') + '</select></div>' +
-    L('<div class="hint">Стосується події «Клієнт чекає відповіді». Нагадування приходить один раз ') +
-    L('на повідомлення, а не щохвилини.</div></div>');
+    (sla && sla.firstReplyMinutes
+      ? L('<div class="hint">Зараз цей поріг не діє: у розділі «Звіти → SLA» задана обіцянка ') +
+        L('відповісти за ') + sla.firstReplyMinutes + L(' хв, і попередження приходить за нею — ') +
+        L('коли лишається п’ята частина строку. Два числа про одне й те саме дали б два ') +
+        L('сповіщення про один діалог з різницею в хвилину.</div></div>')
+      : L('<div class="hint">Стосується події «Клієнт чекає відповіді». Нагадування приходить один раз ') +
+        L('на повідомлення, а не щохвилини.</div></div>'));
 }
 
 function ntAdd(){
