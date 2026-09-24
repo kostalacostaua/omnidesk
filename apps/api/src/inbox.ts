@@ -141,6 +141,64 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     return { counts: row };
   });
 
+  /**
+   * Коллеги — для передачи чата.
+   *
+   * Отдельно от /users, который открыт только администратору. Оператору
+   * список людей нужен по работе: передать чат тому, кто разбирается, —
+   * его повседневное действие, а не управление командой. Поэтому здесь
+   * ровно то, чем подписывают выбор: имя и признак, что человек ещё
+   * работает. Ни почты, ни времени последнего входа.
+   */
+  app.get('/teammates', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const rows = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ id: string; name: string }>(
+        // Наблюдатель отвечать не может, и предлагать передать ему чат
+        // значит обещать то, чего не будет.
+        `SELECT id, coalesce(nullif(full_name, ''), email) AS name
+           FROM users
+          WHERE is_active AND role <> 'viewer'
+          ORDER BY lower(coalesce(nullif(full_name, ''), email))`,
+      );
+      return rows;
+    });
+
+    return { users: rows };
+  });
+
+  /**
+   * Метки, которые реально встречаются в диалогах.
+   *
+   * Отдельной ручкой, а не сбором из открытого списка: список показывает
+   * страницу, а фильтр обязан знать про все метки — иначе нужной в нём
+   * не окажется ровно тогда, когда она нужна.
+   *
+   * Считаем и количество: метка, поставленная однажды и забытая, не
+   * должна занимать в списке то же место, что и рабочая.
+   */
+  app.get('/tags', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const rows = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ tag: string; n: string }>(
+        `SELECT tag, count(*) AS n
+           FROM conversations c, unnest(c.tags) AS tag
+          WHERE ${channelScope('c.channel_id', '$1')}
+          GROUP BY tag
+          ORDER BY count(*) DESC, tag
+          LIMIT 200`,
+        [auth.userId],
+      );
+      return rows;
+    });
+
+    return { tags: rows.map((r) => ({ tag: r.tag, count: Number(r.n) })) };
+  });
+
   // ── Изменение диалога: статус, ответственный, теги, бот ───────────
   app.patch<{
     Params: { id: string };

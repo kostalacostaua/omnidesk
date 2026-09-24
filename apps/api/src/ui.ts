@@ -598,6 +598,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
   .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
+  /* Выбор ответственного стоит среди кнопок шапки чата и не должен
+     выглядеть чужеродно: тот же рост, та же сдержанность. */
+  .asel{max-width:170px;padding:5px 8px;font-size:12.5px;border-radius:8px;
+    background:var(--panel);border:1px solid var(--line);color:var(--t1)}
   /* Окно с ключами своего канала. Отдельное, а не общая модалка: здесь
      три длинные строки, которые человек будет выделять и копировать, и
      им нужна ширина, а не аккуратность. */
@@ -833,6 +837,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
           <option value="me" data-t>Мої</option>
           <option value="none" data-t>Без відповідального</option>
         </select>
+        <select id="fTag"><option value="" data-t>Усі мітки</option></select>
       </div>
       <div class="search"><input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off"></div>
       <div class="tabs">
@@ -898,12 +903,15 @@ var TOKEN = tokenRead();
 var NL = String.fromCharCode(10);
 var current = null, convs = [], timer = null;
 var QR = [], CHANNELS = [], USERS = [], ME = null, COUNTS = {};
+/* Коллеги для передачи чата. Отдельно от USERS: тот список админский и
+   оператору недоступен, а передавать чат должен уметь каждый. */
+var MATES = [];
 // Подключён ли ИИ: от этого зависит, показывать ли кнопку черновика.
 var AI = { ready:false };
 // Роль вошедшего. До ответа сервера считаем оператором: показать
 // лишнее и убрать — хуже, чем показать нужное чуть позже.
 var ROLE = 'agent';
-var F = { status:'open', assignee:'all', channelId:'', q:'' };
+var F = { status:'open', assignee:'all', channelId:'', tag:'', q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
 var pendingFile = null; // выбранный, но ещё не отправленный файл
@@ -1009,6 +1017,7 @@ var lastList = null;
 function query(){
   var p = ['status=' + encodeURIComponent(F.status), 'assignee=' + encodeURIComponent(F.assignee)];
   if (F.channelId) p.push('channelId=' + encodeURIComponent(F.channelId));
+  if (F.tag) p.push('tag=' + encodeURIComponent(F.tag));
   if (F.q) p.push('q=' + encodeURIComponent(F.q));
   return '/conversations?' + p.join('&');
 }
@@ -1114,6 +1123,18 @@ function renderHead(){
     '</div>' +
     '<div class="acts">' +
       (mine ? '' : L('<button class="ghost mini" id="aTake">Взяти собі</button>')) +
+      /* Передача конкретному человеку. Списком, а не поиском: операторов
+         в смене единицы, и выпадающий список честнее показывает, что
+         выбор невелик. «Взяти собі» рядом остаётся: это самое частое
+         действие, и прятать его в список из десяти имён — значит делать
+         из одного щелчка три. */
+      '<select class="asel" id="aWho" title="' + L('Відповідальний') + '">' +
+        L('<option value="">Без відповідального</option>') +
+        MATES.map(function(u){
+          return '<option value="' + u.id + '"' + (c.assignee_id === u.id ? ' selected' : '') +
+            '>' + esc(u.name) + '</option>';
+        }).join('') +
+      '</select>' +
       '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
         esc(botState(c).label) + '</button>' +
       '<button class="' + (closed ? '' : 'ghost ') + 'mini" id="aClose">' +
@@ -1122,6 +1143,13 @@ function renderHead(){
 
   if (el('aTake')) el('aTake').onclick = function(){
     if (ME && ME.user) patchConv({ assigneeId: ME.user.id });
+  };
+  if (el('aWho')) el('aWho').onchange = function(){
+    var to = this.value || null;
+    patchConv({ assigneeId: to }).then(function(){
+      var who = MATES.filter(function(u){ return u.id === to })[0];
+      toast(to ? L('Передано: ') + (who ? who.name : '') : L('Знято відповідального'));
+    });
   };
   paintAvatars();
   el('aBot').onclick = function(){ patchConv({ botEnabled: !c.bot_enabled }) };
@@ -4932,6 +4960,27 @@ function fillChannelFilter(){
   sel.value = keep;
 }
 
+/* Метки в фильтре подтягиваются отдельно от списка: список — это
+   страница, а фильтр обязан знать про все метки, иначе нужной в нём не
+   окажется ровно тогда, когда она понадобится. */
+var TAGS = [];
+
+function fillTagFilter(){
+  var sel = el('fTag');
+  if (!sel) return;
+  var want = L('<option value="">Усі мітки</option>') + TAGS.map(function(t){
+    return '<option value="' + esc(t.tag) + '">' + esc(t.tag) + ' (' + t.count + ')</option>';
+  }).join('');
+  if (sel.innerHTML === want) return;
+  var keep = sel.value;
+  sel.innerHTML = want;
+  sel.value = keep;
+}
+
+function loadTags(){
+  return api('/tags').then(function(d){ TAGS = d.tags || []; fillTagFilter() }).catch(function(){});
+}
+
 function refresh(){
   return api(query()).then(function(d){
     convs = d.conversations || [];
@@ -5014,6 +5063,8 @@ function start(){
     applyRole();
   }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
+  loadTags();
+  api('/teammates').then(function(d){ MATES = d.users || [] }).catch(function(){});
   api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
   api('/settings/ai').then(function(d){
     AI.ready = Boolean(d && d.connected && d.mode !== 'off');
@@ -5075,6 +5126,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
 
 el('fCh').onchange = function(){ F.channelId = this.value; lastList = null; refresh() };
 el('fAs').onchange = function(){ F.assignee = this.value; lastList = null; refresh() };
+el('fTag').onchange = function(){ F.tag = this.value; lastList = null; refresh() };
 
 // Поиск с задержкой: без неё каждый набранный символ уходил бы
 // отдельным запросом к базе.
