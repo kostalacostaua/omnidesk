@@ -10,15 +10,19 @@ import {
   pipedriveExchange,
   pipedrivePhone,
   pipedriveRoot,
+  orderItems,
+  orderSubject,
   parseCrmSettings,
   withSystem,
   withTenant,
   zohoAccessToken,
+  zohoRecordUrl,
   type CrmKind,
   type PipedriveTokens,
   type Pool,
 } from '@omnidesk/core';
 import { randomUUID } from 'node:crypto';
+import { channelScope } from './scope.js';
 
 /**
  * Подключение Битрикс24 и Pipedrive.
@@ -172,6 +176,67 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   });
 
   /**
+   * Доступ к Zoho для одной операции.
+   *
+   * Три ручки подряд начинались одинаково: найти установку, расшифровать
+   * refresh-токен, обменять его, разобрать отказ. Повторение здесь
+   * опаснее обычного: забыть пометить установку испорченной — значит
+   * оставить человека без объяснения, почему всё молчит.
+   */
+  async function zohoFor(
+    tenantId: string,
+  ): Promise<
+    | { inst: { id: string; api_domain: string }; head: Record<string, string> }
+    | { error: string; detail?: string }
+  > {
+    if (!deps.redis || !deps.zoho?.clientId) return { error: 'zoho_not_configured' };
+
+    const inst = await withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{
+        id: string;
+        accounts_server: string;
+        api_domain: string;
+        refresh_token_enc: Buffer;
+      }>(
+        `SELECT id, accounts_server, api_domain, refresh_token_enc
+           FROM zoho_installations WHERE status = 'active'
+          ORDER BY created_at DESC LIMIT 1`,
+      );
+      return rows[0] ?? null;
+    });
+    if (!inst) return { error: 'zoho_not_connected' };
+
+    const { refreshToken } = decryptJson<{ refreshToken: string }>(
+      masterKey,
+      tenantId,
+      inst.refresh_token_enc,
+    );
+    const got = await zohoAccessToken({
+      cache: deps.redis as never,
+      tenantId,
+      accountsServer: inst.accounts_server,
+      refreshToken,
+      clientId: deps.zoho.clientId,
+      clientSecret: deps.zoho.clientSecret,
+    });
+
+    if (!got.ok) {
+      await withTenant(pool, tenantId, async (db) => {
+        await db.query(`UPDATE zoho_installations SET status = 'degraded' WHERE id = $1`, [inst.id]);
+      });
+      return { error: 'token_rejected', detail: got.error };
+    }
+
+    return {
+      inst: { id: inst.id, api_domain: inst.api_domain },
+      head: {
+        authorization: `Zoho-oauthtoken ${got.token}`,
+        'content-type': 'application/json',
+      },
+    };
+  }
+
+  /**
    * Компания клиента в CRM.
    *
    * Просьба звучит как «создать компанию», но на деле их две: завести
@@ -208,47 +273,9 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
         return reply.code(409).send({ error: 'not_linked' });
       }
 
-      const inst = await withTenant(pool, a.tenantId, async (db) => {
-        const { rows } = await db.query<{
-          id: string;
-          accounts_server: string;
-          api_domain: string;
-          refresh_token_enc: Buffer;
-        }>(
-          `SELECT id, accounts_server, api_domain, refresh_token_enc
-             FROM zoho_installations WHERE status = 'active'
-            ORDER BY created_at DESC LIMIT 1`,
-        );
-        return rows[0] ?? null;
-      });
-      if (!inst) return reply.code(409).send({ error: 'zoho_not_connected' });
-
-      const { refreshToken } = decryptJson<{ refreshToken: string }>(
-        masterKey,
-        a.tenantId,
-        inst.refresh_token_enc,
-      );
-      const got = await zohoAccessToken({
-        cache: deps.redis as never,
-        tenantId: a.tenantId,
-        accountsServer: inst.accounts_server,
-        refreshToken,
-        clientId: deps.zoho.clientId,
-        clientSecret: deps.zoho.clientSecret,
-      });
-      if (!got.ok) {
-        await withTenant(pool, a.tenantId, async (db) => {
-          await db.query(`UPDATE zoho_installations SET status = 'degraded' WHERE id = $1`, [
-            inst.id,
-          ]);
-        });
-        return reply.code(409).send({ error: 'token_rejected', detail: got.error });
-      }
-
-      const head = {
-        authorization: `Zoho-oauthtoken ${got.token}`,
-        'content-type': 'application/json',
-      };
+      const z = await zohoFor(a.tenantId);
+      if ('error' in z) return reply.code(409).send(z);
+      const { inst, head } = z;
 
       // У лида компания — текстовое поле, и на этом всё.
       if (link.crm_module === 'Leads') {
@@ -271,7 +298,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       const search = new URL(`${inst.api_domain}/crm/v6/Accounts/search`);
       search.searchParams.set('criteria', `(Account_Name:equals:${name})`);
       const found = await fetch(search, {
-        headers: { authorization: head.authorization },
+        headers: head,
         signal: AbortSignal.timeout(20_000),
       });
 
@@ -310,6 +337,159 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       return { company: name, module: 'Contacts', accountId };
     },
   );
+
+  /**
+   * Товары из CRM.
+   *
+   * Поиск идёт в Zoho, а не по нашей копии: копии нет и не будет.
+   * Прайс живёт у клиента, меняется без нас, и список товаров,
+   * устаревший на неделю, — это заказ по неверной цене.
+   *
+   * Ищем по началу названия и по артикулу: в разговоре человек называет
+   * либо одно, либо другое.
+   */
+  app.get<{ Querystring: { q?: string } }>('/crm/products', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const q = String(req.query?.q ?? '').trim().slice(0, 100);
+    if (q.length < 2) return { products: [] };
+
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    const url = new URL(`${z.inst.api_domain}/crm/v6/Products/search`);
+    url.searchParams.set(
+      'criteria',
+      `((Product_Name:starts_with:${q})or(Product_Code:starts_with:${q}))`,
+    );
+    const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+
+    // 204 — ничего не нашлось. Это нормальный ответ, а не сбой.
+    if (res.status === 204) return { products: [] };
+    if (!res.ok) return reply.code(502).send({ error: 'zoho_refused' });
+
+    const body = (await res.json()) as {
+      data?: Array<{
+        id?: string;
+        Product_Name?: string;
+        Product_Code?: string;
+        Unit_Price?: number;
+      }>;
+    };
+
+    return {
+      products: (body.data ?? []).slice(0, 25).map((p) => ({
+        id: p.id,
+        name: p.Product_Name ?? '',
+        code: p.Product_Code ?? '',
+        price: typeof p.Unit_Price === 'number' ? p.Unit_Price : 0,
+      })),
+    };
+  });
+
+  /**
+   * Заказ из разговора.
+   *
+   * Zoho требует у заказа компанию — не мы. Поэтому без привязанной
+   * компании заказ не создать, и человеку об этом говорится прямо, а не
+   * отказом «Zoho не приняла».
+   *
+   * Компания и контакт берутся из самой CRM, а не из нашего кэша:
+   * связь могли поменять там, и заказ обязан уехать туда, где клиент
+   * числится сейчас.
+   *
+   * Цены приходят с клиента, и это намеренно: оператор договаривается о
+   * скидке в разговоре, и подставлять прайсовую цену поверх
+   * договорённости значит делать заказ, который придётся переписывать
+   * руками. Сумму считает Zoho — своё умножение здесь было бы вторым
+   * мнением о том, сколько клиент должен.
+   */
+  app.post<{
+    Params: { id: string };
+    Body: {
+      subject?: string;
+      items?: Array<{ productId?: string; quantity?: number; price?: number }>;
+    };
+  }>('/conversations/:id/order', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const items = orderItems(req.body?.items);
+    if (!items.length) return reply.code(400).send({ error: 'items_required' });
+
+    const conv = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{
+        contact_id: string;
+        crm_module: string | null;
+        crm_record_id: string | null;
+        display_name: string | null;
+      }>(
+        `SELECT c.contact_id, ct.crm_module, ct.crm_record_id, ct.display_name
+           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+          WHERE c.id = $1 AND ${channelScope('c.channel_id', '$2')}`,
+        [req.params.id, a.userId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!conv) return reply.code(404).send({ error: 'not_found' });
+    if (!conv.crm_record_id) return reply.code(409).send({ error: 'not_linked' });
+    if (conv.crm_module !== 'Contacts') {
+      // У лида компании-карточки нет, а заказ без неё Zoho не примет.
+      return reply.code(409).send({ error: 'lead_has_no_company' });
+    }
+
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    const who = await fetch(
+      `${z.inst.api_domain}/crm/v6/Contacts/${conv.crm_record_id}?fields=Account_Name,Last_Name`,
+      { headers: z.head, signal: AbortSignal.timeout(20_000) },
+    );
+    if (!who.ok) return reply.code(502).send({ error: 'zoho_refused' });
+    const whoBody = (await who.json()) as {
+      data?: Array<{ Account_Name?: { id?: string; name?: string } }>;
+    };
+    const accountId = whoBody.data?.[0]?.Account_Name?.id;
+    if (!accountId) return reply.code(409).send({ error: 'no_company' });
+
+    const subject = orderSubject(req.body?.subject, conv.display_name);
+
+    const res = await fetch(`${z.inst.api_domain}/crm/v6/Sales_Orders`, {
+      method: 'POST',
+      headers: z.head,
+      body: JSON.stringify({
+        data: [
+          {
+            Subject: subject,
+            Account_Name: { id: accountId },
+            Contact_Name: { id: conv.crm_record_id },
+            Product_Details: items.map((i) => ({
+              product: { id: i.productId },
+              quantity: i.quantity,
+              list_price: i.price,
+            })),
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ code?: string; details?: { id?: string }; message?: string }>;
+    };
+    const first = body.data?.[0];
+    if (!res.ok || first?.code !== 'SUCCESS' || !first.details?.id) {
+      return reply.code(502).send({ error: 'zoho_refused', detail: first?.message });
+    }
+
+    return {
+      orderId: first.details.id,
+      subject,
+      // В интерфейсе закладка называется иначе, чем модуль в API.
+      url: zohoRecordUrl(z.inst.api_domain, 'SalesOrders', first.details.id),
+    };
+  });
 
   /**
    * Запоминаем название у себя — чтобы показать его в карточке, не

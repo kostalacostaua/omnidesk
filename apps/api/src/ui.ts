@@ -2195,7 +2195,22 @@ function renderCard(){
         L(' placeholder="назва компанії"></div>') +
         L('<button class="ghost mini" id="cCoSave">Привʼязати компанію</button>') +
         '<span class="ok" id="cCoOk" style="margin-left:8px"></span>' +
-        '<div class="err" id="cCoErr"></div>'
+        '<div class="err" id="cCoErr"></div>' +
+
+        /* Заказ. Стоит под CRM, а не отдельной страницей: заказ
+           собирается в разговоре, глядя на то, что человек пишет. */
+        L('<h4>Замовлення</h4>') +
+        (ct.crm_module === 'Contacts'
+          ? '<div class="row2">' +
+              L('<input id="oQ" placeholder="товар або артикул" style="font-size:12.5px;padding:6px 9px">') +
+              L('<button class="ghost mini" id="oFind">Знайти</button>') +
+            '</div>' +
+            '<div id="oFound" style="margin-top:6px"></div>' +
+            '<div id="oCart"></div>' +
+            '<span class="ok" id="oDone"></span>' +
+            '<div class="err" id="oErr"></div>'
+          : L('<div class="hint">Zoho вимагає в замовленні компанію, а в ліда її немає. ') +
+            L('Сконвертуйте ліда в контакт у Zoho — після цього замовлення зʼявиться тут.</div>'))
       : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
@@ -2209,6 +2224,7 @@ function renderCard(){
     '</div>';
 
   paintAvatars();
+  wireOrder();
 
   if (el('cCoSave')) el('cCoSave').onclick = function(){
     var name = el('cCo').value.trim();
@@ -2285,6 +2301,158 @@ function renderCard(){
       api('/notes/' + x.dataset.note, { method:'DELETE' }).then(loadCard).catch(showErr);
     };
   });
+}
+
+/* ══════════════ Заказ из разговора ══════════════ */
+
+/**
+ * Корзина живёт в браузере, пока оператор её собирает.
+ *
+ * Черновик заказа нигде не сохраняется намеренно: недособранный заказ
+ * не нужен ни отчётам, ни второму оператору, а таблица «черновики
+ * заказов» потребовала бы чистки и объяснений, зачем она есть.
+ *
+ * Привязана к разговору: переключился на другого клиента — корзина
+ * пустая. Иначе товары из чужого разговора уедут не тому человеку.
+ */
+var ORD = { conv:null, lines:[], found:[], subject:'' };
+
+/** Сумма — только для глаз оператора. Настоящую считает Zoho. */
+function ordTotal(){
+  return ORD.lines.reduce(function(s, l){ return s + l.qty * l.price }, 0);
+}
+
+function ordMoney(n){
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function paintOrder(){
+  var found = el('oFound'), cart = el('oCart');
+  if (!found || !cart) return;
+
+  found.innerHTML = ORD.found.map(function(p, i){
+    return '<div class="note" style="cursor:pointer;display:flex;gap:8px;align-items:center" ' +
+      'data-oadd="' + i + '">' +
+      '<span style="flex:1;min-width:0">' + esc(p.name || L('без назви')) +
+      (p.code ? ' <span class="dim">' + esc(p.code) + '</span>' : '') + '</span>' +
+      '<span class="dim">' + esc(ordMoney(p.price)) + '</span></div>';
+  }).join('');
+
+  if (!ORD.lines.length){ cart.innerHTML = ''; return }
+
+  cart.innerHTML =
+    ORD.lines.map(function(l, i){
+      return '<div style="display:flex;gap:5px;align-items:center;margin-top:5px">' +
+        '<span style="flex:1;min-width:0;font-size:12.5px;overflow:hidden;' +
+          'text-overflow:ellipsis;white-space:nowrap">' + esc(l.name) + '</span>' +
+        '<input data-oqty="' + i + '" value="' + esc(String(l.qty)) + '" ' +
+          'style="width:42px;font-size:12.5px;padding:5px 6px;text-align:center">' +
+        '<input data-oprc="' + i + '" value="' + esc(ordMoney(l.price)) + '" ' +
+          'style="width:68px;font-size:12.5px;padding:5px 6px;text-align:right">' +
+        '<span class="x" data-odel="' + i + '" style="cursor:pointer">×</span>' +
+      '</div>';
+    }).join('') +
+    L('<div class="kv2" style="margin-top:9px"><div class="k">Разом</div><div>') +
+      esc(ordMoney(ordTotal())) + '</div></div>' +
+    L('<div class="fld" style="margin-top:7px"><label>Назва замовлення</label>') +
+      '<input id="oSub" value="' + esc(ORD.subject || '') + '"' +
+      L(' placeholder="залишіть пустим — назвемо самі"></div>') +
+    L('<button class="ghost mini" id="oMake">Створити замовлення</button>');
+
+  Array.prototype.forEach.call(cart.querySelectorAll('[data-oqty]'), function(x){
+    x.onchange = function(){
+      var n = Math.round(Number(x.value) || 0);
+      ORD.lines[x.dataset.oqty].qty = n > 0 ? n : 1;
+      paintOrder();
+    };
+  });
+  Array.prototype.forEach.call(cart.querySelectorAll('[data-oprc]'), function(x){
+    x.onchange = function(){
+      var n = Number(String(x.value).split(',').join('.'));
+      ORD.lines[x.dataset.oprc].price = n > 0 ? n : 0;
+      paintOrder();
+    };
+  });
+  Array.prototype.forEach.call(cart.querySelectorAll('[data-odel]'), function(x){
+    x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); paintOrder() };
+  });
+
+  if (el('oSub')) el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
+  if (el('oMake')) el('oMake').onclick = ordCreate;
+}
+
+function ordFind(){
+  var q = el('oQ').value.trim();
+  el('oErr').textContent = '';
+  if (q.length < 2){ el('oErr').textContent = L('Впишіть хоча б дві літери'); return }
+  busy(el('oFind'), true);
+  api('/crm/products?q=' + encodeURIComponent(q))
+    .then(function(r){
+      ORD.found = r.products || [];
+      if (!ORD.found.length) el('oErr').textContent = L('Нічого не знайшли в Zoho');
+      paintOrder();
+      // Найденное показано на один подбор: список из прошлого поиска
+      // рядом с новым — это добавленный не тот товар.
+      Array.prototype.forEach.call(el('oFound').querySelectorAll('[data-oadd]'), function(x){
+        x.onclick = function(){
+          var p = ORD.found[Number(x.dataset.oadd)];
+          var same = ORD.lines.filter(function(l){ return l.id === p.id })[0];
+          if (same) same.qty += 1;
+          else ORD.lines.push({ id:p.id, name:p.name || p.code, qty:1, price:p.price || 0 });
+          ORD.found = [];
+          el('oQ').value = '';
+          paintOrder();
+        };
+      });
+    })
+    .catch(function(e){ el('oErr').textContent = ordWhy(e) })
+    .then(function(){ busy(el('oFind'), false) });
+}
+
+/**
+ * Отказы разбираются по одному.
+ *
+ * «Не получилось» отправляет оператора спрашивать, а каждая из этих
+ * причин лечится по-разному, и лечит её сам оператор.
+ */
+function ordWhy(e){
+  var p = (e && e.payload) || {};
+  return p.error === 'not_linked' ? L('Спершу надішліть клієнта в Zoho')
+    : p.error === 'lead_has_no_company' ? L('У ліда немає компанії — сконвертуйте його в контакт')
+    : p.error === 'no_company' ? L('У картці клієнта в Zoho не вказана компанія')
+    : p.error === 'zoho_not_connected' ? L('Zoho не підключена')
+    : p.error === 'zoho_not_configured' ? L('Zoho не налаштована')
+    : p.error === 'token_rejected' ? L('Zoho відкликала доступ — перепідключіть на сторінці інтеграцій')
+    : p.detail ? L('Zoho відмовила: ') + p.detail
+    : L('Zoho не прийняла запит');
+}
+
+function ordCreate(){
+  el('oErr').textContent = '';
+  el('oDone').textContent = '';
+  busy(el('oMake'), true);
+  api('/conversations/' + current + '/order', { method:'POST', body:{
+    subject: ORD.subject || '',
+    items: ORD.lines.map(function(l){
+      return { productId: l.id, quantity: l.qty, price: l.price };
+    })
+  }}).then(function(r){
+    ORD = { conv:current, lines:[], found:[], subject:'' };
+    paintOrder();
+    el('oDone').innerHTML = r.url
+      ? '<a href="' + esc(r.url) + L('" target="_blank" rel="noopener">замовлення створено</a>')
+      : L('замовлення створено');
+  }).catch(function(e){
+    el('oErr').textContent = ordWhy(e);
+  }).then(function(){ if (el('oMake')) busy(el('oMake'), false) });
+}
+
+function wireOrder(){
+  if (!el('oFind')) return;
+  if (ORD.conv !== current) ORD = { conv:current, lines:[], found:[], subject:'' };
+  el('oFind').onclick = ordFind;
+  el('oQ').onkeydown = function(ev){ if (ev.key === 'Enter') ordFind() };
+  paintOrder();
 }
 
 /* ══════════════ Сценарии ══════════════ */
