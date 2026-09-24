@@ -1,5 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { parseSla, withSystem, withTenant, type Pool } from '@omnidesk/core';
+import {
+  parseKpi,
+  parseSla,
+  parseWorkHours,
+  withSystem,
+  withTenant,
+  workingDays,
+  type Pool,
+} from '@omnidesk/core';
 import { channelScope } from './scope.js';
 
 /**
@@ -93,14 +101,25 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
 
     // Обещание читается один раз: оно нужно и для подсчёта просрочек,
     // и интерфейсу — показать, с чем сравнивали.
-    const sla = await withSystem(pool, 'обещание для отчёта', async (db) => {
-      const { rows } = await db.query<{ sla: unknown }>(
-        `SELECT sla FROM tenants WHERE id = $1 LIMIT 1`,
+    const tenant = await withSystem(pool, 'обещание и часы для отчёта', async (db) => {
+      const { rows } = await db.query<{ sla: unknown; work_hours: unknown }>(
+        `SELECT sla, work_hours FROM tenants WHERE id = $1 LIMIT 1`,
         [auth.tenantId],
       );
-      return parseSla(rows[0]?.sla);
+      return {
+        sla: parseSla(rows[0]?.sla),
+        wh: parseWorkHours(rows[0]?.work_hours),
+      };
     });
+    const sla = tenant.sla;
     const firstTarget = sla.firstReplyMinutes * 60;
+
+    /*
+     * Рабочих дней в периоде — чтобы дневная цель превратилась в план.
+     * Считается по расписанию компании: у того, кто не работает по
+     * воскресеньям, план за неделю не должен включать воскресенье.
+     */
+    const days = workingDays(from, to, tenant.wh);
 
     const data = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows: totals } = await db.query(
@@ -149,6 +168,8 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
                 count(*) FILTER (WHERE e.type = 'reply')       AS replies,
                 count(*) FILTER (WHERE e.type = 'status'
                                    AND (e.payload->>'resolved') = 'true') AS resolved,
+                count(*) FILTER (WHERE e.type = 'reply'
+                                   AND ${wait} <= ${firstTarget})  AS in_time,
                 percentile_cont(0.5) WITHIN GROUP (ORDER BY ${wait})
                   FILTER (WHERE e.type = 'reply')              AS median_wait
            FROM events e JOIN users u ON u.id = e.user_id
@@ -201,12 +222,23 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         params,
       );
 
+      // Цели: общая и личные. Читаются здесь же, чтобы отчёт отдавал
+      // факт и план одним ответом — иначе интерфейс рисует таблицу
+      // дважды, сперва без плана.
+      const { rows: goals } = await db.query<{
+        user_id: string | null;
+        replies_per_day: number;
+        resolved_per_day: number;
+        in_time_percent: number;
+      }>(`SELECT user_id, replies_per_day, resolved_per_day, in_time_percent FROM kpi_goals`);
+
       return {
         totals: totals[0] ?? {},
         byChannel,
         byUser,
         byDay,
         resolve: resolveRows[0] ?? {},
+        goals,
       };
     });
 
@@ -243,14 +275,49 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         messagesOut: Number(r['msg_out'] ?? 0),
         medianWait: num(r['median_wait']),
       })),
-      byUser: data.byUser.map((r) => ({
-        id: r['id'],
-        name: r['name'],
-        messagesOut: Number(r['msg_out'] ?? 0),
-        replies: Number(r['replies'] ?? 0),
-        resolved: Number(r['resolved'] ?? 0),
-        medianWait: num(r['median_wait']),
-      })),
+      workingDays: days,
+      // Общая цель отдельно от разобранных по людям: интерфейсу нужно
+      // показать её в поле настройки, а по строке человека не понять,
+      // своя у него цель или общая.
+      goalDefault: parseKpi(
+        (() => {
+          const base = data.goals.find((g) => !g.user_id);
+          return {
+            repliesPerDay: base?.replies_per_day,
+            resolvedPerDay: base?.resolved_per_day,
+            inTimePercent: base?.in_time_percent,
+          };
+        })(),
+      ),
+      byUser: data.byUser.map((r) => {
+        const own = data.goals.find((g) => g.user_id === r['id']);
+        const base = data.goals.find((g) => !g.user_id);
+        const src = own ?? base;
+        const inTime = Number(r['in_time'] ?? 0);
+        const replies = Number(r['replies'] ?? 0);
+        return {
+          id: r['id'],
+          name: r['name'],
+          messagesOut: Number(r['msg_out'] ?? 0),
+          replies,
+          resolved: Number(r['resolved'] ?? 0),
+          medianWait: num(r['median_wait']),
+          inTime,
+          // Доля в срок у человека: та же величина, что у компании, но
+          // про него. Без обещания её нет — делить не на что.
+          inTimePercent: sla.firstReplyMinutes && replies
+            ? Math.round((inTime / replies) * 100)
+            : null,
+          goal: parseKpi({
+            repliesPerDay: src?.replies_per_day,
+            resolvedPerDay: src?.resolved_per_day,
+            inTimePercent: src?.in_time_percent,
+          }),
+          // Личная цель или общая — человеку важно знать, спрашивают с
+          // него как со всех или отдельно.
+          goalOwn: Boolean(own),
+        };
+      }),
       byDay: data.byDay.map((r) => ({
         day: r['day'],
         messagesIn: Number(r['msg_in'] ?? 0),

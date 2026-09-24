@@ -438,6 +438,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
      чем колонка чисел, и не занимает отдельного графика. */
   .sbar{display:block;height:7px;border-radius:4px;background:var(--panel2);overflow:hidden}
   .sbar i{display:block;height:100%;background:var(--brand1);border-radius:4px;min-width:2px}
+  /* Выполнение плана: цвет отвечает на «успеваем или нет» раньше, чем
+     человек прочитает числа. */
+  .plan{height:4px;border-radius:3px;background:var(--panel2);margin-top:4px;overflow:hidden}
+  .plan i{display:block;height:100%;border-radius:3px;min-width:2px}
+  .plan i.ok{background:var(--ok, #16a34a)}
+  .plan i.mid{background:#ca8a04}
+  .plan i.bad{background:#dc2626}
   .bars{display:flex;gap:8px;align-items:flex-end;overflow-x:auto;padding-bottom:4px}
   /* Не .col: это имя уже занято общим правилом с колонкой по
      вертикали, и столбики от него вставали друг под друга. */
@@ -5193,6 +5200,7 @@ function tabReports(){
     });
 
     if (RP.tab === 'sla') wireSla(d.sla || {});
+    if (RP.tab === 'team') wireKpi();
   }).catch(sErr);
 }
 
@@ -5267,24 +5275,64 @@ function rpChannels(d){
     L('<div class="hint">Рядок клікається: відкриється список чатів цього каналу.</div></div>');
 }
 
+/**
+ * План рядом с фактом.
+ *
+ * Голое «18 відповідей» не значит ничего: восемнадцать за неделю на
+ * одном канале — хорошо, на четырёх — беда. План считается из дневной
+ * цели и числа рабочих дней в периоде, и это число тут же написано,
+ * чтобы не гадать, откуда взялось.
+ */
+function planCell(fact, perDay, days){
+  if (!perDay) return String(fact);
+  var plan = perDay * Math.max(days, 1);
+  var p = Math.round(fact / plan * 100);
+  return fact + '<span class="dim"> / ' + plan + '</span>' +
+    '<div class="plan"><i class="' + (p >= 100 ? 'ok' : p >= 70 ? 'mid' : 'bad') +
+    '" style="width:' + Math.min(p, 100) + '%"></i></div>';
+}
+
 function rpTeam(d){
   var list = d.byUser || [];
   if (!list.length) return L('<div class="card"><div class="hint">За цей період ніхто не відповідав.</div></div>');
-  var top = Math.max.apply(null, [1].concat(list.map(function(u){ return u.messagesOut })));
+  var days = d.workingDays || 1;
+  var base = d.goalDefault || {};
 
   return '<div class="card">' +
     '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
-    L('<th>Співробітник</th><th>Відповідей</th><th>Повідомлень</th><th>Закрито</th><th>Медіана</th><th></th>') +
+    L('<th>Співробітник</th><th>Відповідей</th><th>Закрито</th><th>У строк</th><th>Медіана</th><th></th>') +
     '</tr></thead><tbody>' +
     list.map(function(u){
-      return '<tr data-drill-us="' + esc(u.id) + '" style="cursor:pointer" title="' +
-        L('Показати ці чати') + '"><td>' + esc(u.name) + '</td><td>' + u.replies + '</td><td>' +
-        u.messagesOut + '</td><td>' + u.resolved + '</td><td>' + esc(dur(u.medianWait)) + '</td>' +
-        '<td style="width:120px"><span class="sbar"><i style="width:' +
-        Math.round(u.messagesOut / top * 100) + '%"></i></span></td></tr>';
+      var g = u.goal || {};
+      return '<tr><td><span data-drill-us="' + esc(u.id) + '" style="cursor:pointer" title="' +
+        L('Показати ці чати') + '">' + esc(u.name) + '</span>' +
+        (u.goalOwn ? L(' <span class="pill">своя ціль</span>') : '') + '</td>' +
+        '<td>' + planCell(u.replies, g.repliesPerDay, days) + '</td>' +
+        '<td>' + planCell(u.resolved, g.resolvedPerDay, days) + '</td>' +
+        '<td>' + (u.inTimePercent == null ? '—'
+          : u.inTimePercent + '%' + (g.inTimePercent
+              ? '<span class="dim"> / ' + g.inTimePercent + '%</span>' : '')) + '</td>' +
+        '<td>' + esc(dur(u.medianWait)) + '</td>' +
+        '<td><button class="ghost mini" data-goal="' + esc(u.id) + '" data-name="' +
+          esc(u.name) + L('">Ціль</button></td></tr>');
     }).join('') + '</tbody></table></div>' +
-    L('<div class="hint">Рядок клікається: відкриється список чатів цієї людини. ') +
-    L('Числа — про роботу, а не про людину: у того, кому дістаються складні звернення, медіана буде гіршою.</div></div>');
+    L('<div class="hint">План — це денна ціль, помножена на робочі дні періоду: їх тут ') + days +
+    L('. Імʼя клікається — відкриється список чатів цієї людини. ') +
+    L('Числа — про роботу, а не про людину: у того, кому дістаються складні звернення, медіана буде гіршою.</div>') +
+    '</div>' +
+
+    L('<div class="pg-sec"><h3>Спільна ціль</h3><div class="card">') +
+    '<div class="acts" style="margin-top:0">' +
+    L('<label class="ntev">Відповідей на день <input id="kpiRep" type="number" min="0" max="100" style="max-width:90px"></label>') +
+    L('<label class="ntev">Закриттів на день <input id="kpiRes" type="number" min="0" max="100" style="max-width:90px"></label>') +
+    L('<label class="ntev">У строк, % <input id="kpiPct" type="number" min="0" max="100" style="max-width:90px"></label>') +
+    L('<button id="kpiSave">Зберегти</button></div>') +
+    L('<div class="hint">Нуль — цілі немає, і тоді в таблиці просто факт без плану: ') +
+    L('вигадана ціль гірша за її відсутність, бо за нею потім розмовляють з людьми. ') +
+    L('Ціль однієї людини задається кнопкою «Ціль» у її рядку.</div>') +
+    '<div class="err" id="kpiErr"></div></div></div>' +
+    '<span id="kpiBase" data-r="' + (base.repliesPerDay || 0) + '" data-c="' +
+      (base.resolvedPerDay || 0) + '" data-p="' + (base.inTimePercent || 0) + '"></span>';
 }
 
 function rpSla(d, t){
@@ -5329,6 +5377,79 @@ function rpSla(d, t){
       : L('<div class="hint">Поки обіцянки немає, рахувати прострочення нема від чого.</div>'));
 }
 
+/**
+ * Настройка целей.
+ *
+ * Общая цель — полем на странице, личная — окошком в строке человека.
+ * Личных целей обычно одна-две: раздавать их всем через таблицу из
+ * трёх полей на каждого значит показывать двадцать пустых полей ради
+ * двух заполненных.
+ */
+function wireKpi(){
+  var base = el('kpiBase');
+  if (!base) return;
+  el('kpiRep').value = base.dataset.r;
+  el('kpiRes').value = base.dataset.c;
+  el('kpiPct').value = base.dataset.p;
+
+  el('kpiSave').onclick = function(){
+    el('kpiErr').textContent = '';
+    busy(el('kpiSave'), true);
+    saveKpi(null, {
+      repliesPerDay: Number(el('kpiRep').value),
+      resolvedPerDay: Number(el('kpiRes').value),
+      inTimePercent: Number(el('kpiPct').value)
+    }).catch(function(){ busy(el('kpiSave'), false) });
+  };
+
+  Array.prototype.forEach.call(pageBox().querySelectorAll('[data-goal]'), function(b){
+    b.onclick = function(ev){
+      ev.stopPropagation();
+      var u = (RP.data.byUser || []).filter(function(x){ return x.id === b.dataset.goal })[0] || {};
+      var g = u.goalOwn ? (u.goal || {}) : {};
+      var box = popBox(b, 'fpick');
+      box.innerHTML = '<div style="padding:4px 6px;font-weight:600">' + esc(b.dataset.name) + '</div>' +
+        L('<label class="fopt">Відповідей на день <input id="gRep" type="number" min="0" max="100" style="max-width:80px"></label>') +
+        L('<label class="fopt">Закриттів на день <input id="gRes" type="number" min="0" max="100" style="max-width:80px"></label>') +
+        L('<label class="fopt">У строк, % <input id="gPct" type="number" min="0" max="100" style="max-width:80px"></label>') +
+        '<div class="fact">' +
+        L('<button class="ghost mini" id="gClr">Як у всіх</button> ') +
+        L('<button class="mini" id="gOk">Зберегти</button></div>');
+      popAt(box, b);
+      el('gRep').value = g.repliesPerDay || 0;
+      el('gRes').value = g.resolvedPerDay || 0;
+      el('gPct').value = g.inTimePercent || 0;
+
+      // «Как у всех» — это убрать личную цель, а не обнулить её: тогда
+      // человек снова попадает под общую, а не остаётся без цели вовсе.
+      el('gClr').onclick = function(){
+        box.remove();
+        saveKpi(b.dataset.goal, { repliesPerDay:0, resolvedPerDay:0, inTimePercent:0 });
+      };
+      el('gOk').onclick = function(){
+        var body = {
+          repliesPerDay: Number(el('gRep').value),
+          resolvedPerDay: Number(el('gRes').value),
+          inTimePercent: Number(el('gPct').value)
+        };
+        box.remove();
+        saveKpi(b.dataset.goal, body);
+      };
+    };
+  });
+}
+
+function saveKpi(userId, goal){
+  goal.userId = userId;
+  return api('/kpi', { method:'PUT', body: goal })
+    .then(function(){ tabReports(); toast(L('Ціль збережено')) })
+    .catch(function(e){
+      var p = e.payload || {};
+      if (el('kpiErr')) el('kpiErr').textContent = p.detail || L('Не вдалося зберегти');
+      throw e;
+    });
+}
+
 function wireSla(sla){
   el('slaFirst').value = sla.firstReplyMinutes || 0;
   el('slaResolve').value = sla.resolveMinutes || 0;
@@ -5356,9 +5477,14 @@ function rpExport(){
         return [c.name, c.conversations, c.messagesIn, c.messagesOut, c.medianWait];
       }));
   } else if (RP.tab === 'team'){
-    csvDump('komanda', [L('Співробітник'), L('Відповідей'), L('Повідомлень'), L('Закрито'), L('Медіана, с')],
+    var days = d.workingDays || 1;
+    csvDump('komanda', [L('Співробітник'), L('Відповідей'), L('План відповідей'), L('Закрито'),
+      L('План закриттів'), L('У строк, %'), L('Медіана, с')],
       (d.byUser || []).map(function(u){
-        return [u.name, u.replies, u.messagesOut, u.resolved, u.medianWait];
+        var g = u.goal || {};
+        return [u.name, u.replies, g.repliesPerDay ? g.repliesPerDay * days : '',
+          u.resolved, g.resolvedPerDay ? g.resolvedPerDay * days : '',
+          u.inTimePercent == null ? '' : u.inTimePercent, u.medianWait];
       }));
   } else if (RP.tab === 'sla'){
     csvDump('sla', [L('Клієнт'), L('Канал'), L('Хто відповів'), L('Чекав, с'), L('За годинником, с')],

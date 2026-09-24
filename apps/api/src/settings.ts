@@ -30,6 +30,7 @@ import {
   iframeSnippet,
   normalizeDomain,
   parseRouting,
+  parseKpi,
   parseSla,
   parseWorkHours,
   ROUTING_DEFAULT,
@@ -305,6 +306,105 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return { sla };
     },
   );
+
+  /**
+   * Цели сотрудников.
+   *
+   * Одна ручка на общую цель и на личные: отдаёт и то, и другое сразу,
+   * потому что в интерфейсе они стоят рядом и различить их человек
+   * должен с одного взгляда, а не открывая по очереди.
+   */
+  app.get('/kpi', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const rows = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{
+        user_id: string | null;
+        replies_per_day: number;
+        resolved_per_day: number;
+        in_time_percent: number;
+      }>(
+        `SELECT user_id, replies_per_day, resolved_per_day, in_time_percent FROM kpi_goals`,
+      );
+      return rows;
+    });
+
+    const one = (r: (typeof rows)[number] | undefined) =>
+      parseKpi({
+        repliesPerDay: r?.replies_per_day,
+        resolvedPerDay: r?.resolved_per_day,
+        inTimePercent: r?.in_time_percent,
+      });
+
+    const byUser: Record<string, ReturnType<typeof one>> = {};
+    for (const r of rows) if (r.user_id) byUser[r.user_id] = one(r);
+
+    return {
+      default: one(rows.find((r) => !r.user_id)),
+      byUser,
+    };
+  });
+
+  /**
+   * Задать цель: общую или одному человеку.
+   *
+   * Пустой userId — общая. Все нули убирают строку целиком, а не
+   * сохраняют нулевую цель: «цели нет» и «цель ноль» для отчёта разные
+   * вещи, и хранить их одинаково значит путать их навсегда.
+   */
+  app.put<{
+    Body: {
+      userId?: string | null;
+      repliesPerDay?: number;
+      resolvedPerDay?: number;
+      inTimePercent?: number;
+    };
+  }>('/kpi', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const goal = parseKpi(req.body);
+    const userId = req.body?.userId || null;
+    const empty = !goal.repliesPerDay && !goal.resolvedPerDay && !goal.inTimePercent;
+
+    await withTenant(pool, auth.tenantId, async (db) => {
+      if (empty) {
+        await db.query(
+          userId
+            ? `DELETE FROM kpi_goals WHERE user_id = $1::uuid`
+            : `DELETE FROM kpi_goals WHERE user_id IS NULL`,
+          userId ? [userId] : [],
+        );
+        return;
+      }
+
+      // Частичные уникальные индексы не подходят под ON CONFLICT без
+      // повторения их предиката, и с двумя случаями это читалось бы
+      // хуже, чем честные UPDATE и INSERT.
+      const { rowCount } = await db.query(
+        userId
+          ? `UPDATE kpi_goals SET replies_per_day = $2, resolved_per_day = $3,
+                    in_time_percent = $4, updated_at = now()
+              WHERE user_id = $1::uuid`
+          : `UPDATE kpi_goals SET replies_per_day = $1, resolved_per_day = $2,
+                    in_time_percent = $3, updated_at = now()
+              WHERE user_id IS NULL`,
+        userId
+          ? [userId, goal.repliesPerDay, goal.resolvedPerDay, goal.inTimePercent]
+          : [goal.repliesPerDay, goal.resolvedPerDay, goal.inTimePercent],
+      );
+      if (rowCount) return;
+
+      await db.query(
+        `INSERT INTO kpi_goals (tenant_id, user_id, replies_per_day, resolved_per_day, in_time_percent)
+         VALUES ($1, $2::uuid, $3, $4, $5)`,
+        [auth.tenantId, userId, goal.repliesPerDay, goal.resolvedPerDay, goal.inTimePercent],
+      );
+    });
+
+    return { goal, userId };
+  });
 
   /**
    * Подключение номера WhatsApp.
