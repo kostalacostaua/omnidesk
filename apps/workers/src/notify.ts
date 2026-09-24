@@ -9,6 +9,8 @@ import {
   defaultJobOptions,
   escapeHtml,
   isNotifyEvent,
+  isWorkTime,
+  parseWorkHours,
   jobKey,
   renderNotify,
   telegramText,
@@ -374,13 +376,31 @@ export function createNotifier(deps: NotifyDeps) {
    */
   async function waitingTick(): Promise<void> {
     const tenants = await withSystem(pool, 'пороги оповещений', async (db) => {
-      const { rows } = await db.query<{ id: string; waiting_alert_minutes: number }>(
-        `SELECT id, waiting_alert_minutes FROM tenants WHERE waiting_alert_minutes > 0`,
+      const { rows } = await db.query<{
+        id: string;
+        waiting_alert_minutes: number;
+        work_hours: unknown;
+      }>(
+        `SELECT id, waiting_alert_minutes, work_hours
+           FROM tenants WHERE waiting_alert_minutes > 0`,
       );
       return rows;
     });
 
     for (const tenant of tenants) {
+      /*
+       * Вне рабочих часов не беспокоим.
+       *
+       * Оповещение «клиент ждёт двадцать минут» в три ночи будит
+       * человека ради того, на что всё равно никто не ответит. После
+       * второй такой ночи оповещения выключают целиком — и тогда они не
+       * сработают уже и днём, когда были бы к месту.
+       *
+       * Диалог при этом никуда не девается: утром он всё так же ждёт,
+       * и оповещение придёт с первой же проверкой в рабочее время.
+       */
+      if (!isWorkTime(parseWorkHours(tenant.work_hours))) continue;
+
       const rows = await withTenant(pool, tenant.id, async (db) => {
         const { rows } = await db.query<{
           conversation_id: string;

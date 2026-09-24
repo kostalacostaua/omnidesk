@@ -600,6 +600,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
   /* Выбор ответственного стоит среди кнопок шапки чата и не должен
      выглядеть чужеродно: тот же рост, та же сдержанность. */
+  /* Расписание: семь одинаковых строк, и главное в них — чтобы день,
+     выключенный или круглосуточный, было видно сразу, без вчитывания. */
+  .whdays{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+  .whrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .whrow .ntev{min-width:130px}
+  .whrow input[type=time]{max-width:120px}
+  .whrow input[type=time]:disabled{opacity:.45}
   .asel{max-width:170px;padding:5px 8px;font-size:12.5px;border-radius:8px;
     background:var(--panel);border:1px solid var(--line);color:var(--t1)}
   /* Окно с ключами своего канала. Отдельное, а не общая модалка: здесь
@@ -2511,6 +2518,8 @@ function tabProfile(){
       '<div class="err" id="orgErr"></div>' +
       '</div></div>' +
 
+      (admin ? whPanel(t) : '') +
+
       L('<div class="pg-sec"><h3>Зараз в акаунті</h3>') +
       '<div class="nums">' +
       num(c.channels, L('каналів')) + num(c.users, L('співробітників')) +
@@ -2519,6 +2528,7 @@ function tabProfile(){
       '</div>';
 
     wirePass();
+    wireWh();
 
     el('langSel').onchange = function(){
       langSet(this.value);
@@ -2550,6 +2560,152 @@ function tabProfile(){
     };
   }).catch(sErr);
 }
+
+/* ══════════════ Робочі години ══════════════ */
+
+var WH_DAYS = ['Понеділок','Вівторок','Середа','Четвер','Пʼятниця','Субота','Неділя'];
+
+/* Список поясов короткий и намеренно: это не географический справочник,
+   а выбор из тех, где на самом деле сидят команды наших клиентов.
+   Нужного нет — впишут руками, поле принимает любой известный браузеру. */
+var WH_ZONES = ['Europe/Kyiv','Europe/Warsaw','Europe/Berlin','Europe/London',
+  'Europe/Lisbon','Europe/Bucharest','Asia/Dubai','Asia/Tbilisi','UTC'];
+
+function whOf(t){
+  var raw = (t && t.work_hours) || {};
+  var days = Array.isArray(raw.days) ? raw.days : [];
+  return {
+    tz: raw.tz || 'Europe/Kyiv',
+    days: WH_DAYS.map(function(_unused, i){
+      var d = days[i];
+      /* Дня в настройке нет — значит её ещё не трогали, и это
+         круглосуточно: ровно то же, что решает сервер. В полях времени
+         при этом показываем 9–18, чтобы при снятии галочки «цілодобово»
+         человек получил осмысленное начало, а не полночь. */
+      if (!d || typeof d !== 'object') return { on: true, allDay: true, from: 540, to: 1080 };
+      return {
+        on: d.on !== false,
+        allDay: d.allDay === true,
+        from: typeof d.from === 'number' && d.from < 1440 ? d.from : 540,
+        to: typeof d.to === 'number' && d.to <= 1440 && d.to > 0 && d.to < 1440 ? d.to : 1080
+      };
+    })
+  };
+}
+
+function hhmmOf(m){
+  var h = Math.floor(m / 60), mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+
+/**
+ * Рабочие часы компании.
+ *
+ * Стоят в профиле рядом с организацией, а не в каналах: клиент пишет в
+ * компанию, а не в Telegram, и «по будням до шести» — свойство
+ * компании. Здесь же объясняется, на что это влияет, иначе расписание
+ * выглядит украшением, которое никто не заполнит.
+ */
+function whPanel(t){
+  var wh = whOf(t);
+  var zones = WH_ZONES.slice();
+  if (zones.indexOf(wh.tz) < 0) zones.unshift(wh.tz);
+
+  return L('<div class="pg-sec"><h3>Робочі години</h3><div class="card">') +
+    L('<div class="hint" style="margin-bottom:10px">Поза цими годинами ми не турбуємо сповіщенням ') +
+    L('«клієнт чекає»: воно все одно нікого не підніме, а вимикають після нього всі сповіщення разом. ') +
+    L('Час відповіді в майбутніх звітах теж рахуватиметься за цими годинами.</div>') +
+    '<div class="row2"><div class="lbl" style="width:150px">' + L('Часовий пояс') + '</div>' +
+    '<select id="whTz" style="max-width:240px">' +
+    zones.map(function(z){
+      return '<option value="' + esc(z) + '"' + (z === wh.tz ? ' selected' : '') + '>' + esc(z) + '</option>';
+    }).join('') + '</select></div>' +
+    '<div class="whdays">' +
+    wh.days.map(function(d, i){
+      return '<div class="whrow">' +
+        '<label class="ntev"><input type="checkbox" data-wh-on="' + i + '"' + (d.on ? ' checked' : '') +
+          '> ' + L(WH_DAYS[i]) + '</label>' +
+        '<label class="ntev"><input type="checkbox" data-wh-all="' + i + '"' + (d.allDay ? ' checked' : '') +
+          '> ' + L('цілодобово') + '</label>' +
+        '<input type="time" data-wh-from="' + i + '" value="' + hhmmOf(d.from) + '">' +
+        '<input type="time" data-wh-to="' + i + '" value="' + hhmmOf(d.to) + '">' +
+      '</div>';
+    }).join('') +
+    '</div>' +
+    L('<div class="acts"><button id="whSave">Зберегти</button>') +
+    L('<button class="ghost mini" id="whCopy">Скопіювати понеділок на всі дні</button></div>') +
+    '<div class="ok" id="whOk"></div></div></div>';
+}
+
+function whRead(){
+  return {
+    tz: el('whTz').value,
+    days: WH_DAYS.map(function(_unused, i){
+      var on = document.querySelector('[data-wh-on="' + i + '"]').checked;
+      var all = document.querySelector('[data-wh-all="' + i + '"]').checked;
+      var from = document.querySelector('[data-wh-from="' + i + '"]').value;
+      var to = document.querySelector('[data-wh-to="' + i + '"]').value;
+      return { on: on, allDay: all, from: whMin(from), to: whMin(to) };
+    })
+  };
+}
+
+function whMin(v){
+  var p = String(v || '').split(':');
+  var h = Number(p[0]), m = Number(p[1] || 0);
+  if (!isFinite(h) || !isFinite(m)) return 0;
+  return h * 60 + m;
+}
+
+function wireWh(){
+  if (!el('whSave')) return;
+
+  /* Поля времени гаснут, когда день выключен или круглосуточный: иначе
+     человек правит числа, которые ни на что не влияют, и считает, что
+     настройка не работает. */
+  function paint(){
+    for (var i = 0; i < 7; i++){
+      var on = document.querySelector('[data-wh-on="' + i + '"]').checked;
+      var all = document.querySelector('[data-wh-all="' + i + '"]').checked;
+      var f = document.querySelector('[data-wh-from="' + i + '"]');
+      var t = document.querySelector('[data-wh-to="' + i + '"]');
+      f.disabled = t.disabled = !on || all;
+      document.querySelector('[data-wh-all="' + i + '"]').disabled = !on;
+    }
+  }
+  for (var i = 0; i < 7; i++){
+    document.querySelector('[data-wh-on="' + i + '"]').onchange = paint;
+    document.querySelector('[data-wh-all="' + i + '"]').onchange = paint;
+  }
+  paint();
+
+  el('whCopy').onclick = function(){
+    var on = document.querySelector('[data-wh-on="0"]').checked;
+    var all = document.querySelector('[data-wh-all="0"]').checked;
+    var from = document.querySelector('[data-wh-from="0"]').value;
+    var to = document.querySelector('[data-wh-to="0"]').value;
+    for (var i = 1; i < 7; i++){
+      document.querySelector('[data-wh-on="' + i + '"]').checked = on;
+      document.querySelector('[data-wh-all="' + i + '"]').checked = all;
+      document.querySelector('[data-wh-from="' + i + '"]').value = from;
+      document.querySelector('[data-wh-to="' + i + '"]').value = to;
+    }
+    paint();
+  };
+
+  el('whSave').onclick = function(){
+    var body = whRead();
+    busy(el('whSave'), true);
+    api('/settings/work-hours', { method:'PATCH', body: body })
+      .then(function(r){
+        if (ME && ME.tenant) ME.tenant.work_hours = r.workHours;
+        el('whOk').textContent = L('Збережено');
+      })
+      .catch(function(e){ el('whOk').textContent = ((e.payload||{}).detail) || L('Не вдалося зберегти') })
+      .then(function(){ busy(el('whSave'), false) });
+  };
+}
+
 
 /**
  * Язык интерфейса.

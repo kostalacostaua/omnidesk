@@ -27,6 +27,7 @@ import {
   iframeSnippet,
   normalizeDomain,
   parseRouting,
+  parseWorkHours,
   ROUTING_DEFAULT,
   webchatSettings,
   graphPost,
@@ -101,7 +102,8 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     // Организация лежит в tenants — таблице без RLS, читаем по явному id.
     const tenant = await withSystem(pool, 'профиль организации', async (db) => {
       const { rows } = await db.query(
-        `SELECT id, slug, name, plan, seats_limit, region, created_at, bot_pause_minutes
+        `SELECT id, slug, name, plan, seats_limit, region, created_at, bot_pause_minutes,
+                work_hours
            FROM tenants WHERE id = $1 LIMIT 1`,
         [auth.tenantId],
       );
@@ -180,6 +182,41 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     });
     return { botPauseMinutes: minutes };
   });
+
+  /**
+   * Рабочие часы организации.
+   *
+   * Живут у арендатора, а не у канала: клиент пишет в компанию, а не в
+   * Telegram, и «по будням до шести» — свойство компании. Канальные
+   * исключения, если понадобятся, лягут сверху, но начинать с них
+   * значит просить настроить семь расписаний вместо одного.
+   */
+  app.patch<{ Body: { tz?: string; days?: unknown[] } }>(
+    '/settings/work-hours',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const wh = parseWorkHours({ tz: req.body?.tz, days: req.body?.days });
+      // Проверяем пояс на существование здесь, а не в разборе: разбор
+      // обязан вернуть что-то рабочее, а форма — сказать человеку, что
+      // он выбрал несуществующее.
+      try {
+        new Intl.DateTimeFormat('en-GB', { timeZone: wh.tz });
+      } catch {
+        return reply.code(400).send({ error: 'bad_tz', detail: 'Невідомий часовий пояс' });
+      }
+
+      await withSystem(pool, 'рабочие часы', async (db) => {
+        await db.query(`UPDATE tenants SET work_hours = $2::jsonb WHERE id = $1`, [
+          auth.tenantId,
+          JSON.stringify(wh),
+        ]);
+      });
+
+      return { workHours: wh };
+    },
+  );
 
   /**
    * Подключение номера WhatsApp.
