@@ -2514,6 +2514,14 @@ function tabProfile(){
       row(L('Тариф'), esc(t.plan || 'trial') + L(' · місць: ') + esc(t.seats_limit), 'pl', false) +
       row(L('Регіон даних'), esc((t.region || 'eu').toUpperCase()), 'rg', false,
         L('Де фізично лежать листування і файли.')) +
+      /* Пояс — свойство компании, а не расписания: по нему считаются и
+         рабочие часы, и время ответа в отчётах. Поэтому он стоит здесь,
+         рядом с регионом данных, а в расписании только упоминается. */
+      (admin
+        ? '<div class="row2"><div class="lbl">' + L('Часовий пояс') + '</div>' +
+          '<select id="orgTz" style="max-width:240px">' + tzOptions(whOf(t).tz) + '</select></div>' +
+          L('<div class="hint">За ним рахуються робочі години та час відповіді у звітах.</div>')
+        : row(L('Часовий пояс'), esc(whOf(t).tz), 'tz', false)) +
       row(L('Підключена'), esc(fmtDate(t.created_at)), 'cr', false) +
       '<div class="err" id="orgErr"></div>' +
       '</div></div>' +
@@ -2571,6 +2579,14 @@ var WH_DAYS = ['Понеділок','Вівторок','Середа','Четв�
 var WH_ZONES = ['Europe/Kyiv','Europe/Warsaw','Europe/Berlin','Europe/London',
   'Europe/Lisbon','Europe/Bucharest','Asia/Dubai','Asia/Tbilisi','UTC'];
 
+function tzOptions(current){
+  var zones = WH_ZONES.slice();
+  if (zones.indexOf(current) < 0) zones.unshift(current);
+  return zones.map(function(z){
+    return '<option value="' + esc(z) + '"' + (z === current ? ' selected' : '') + '>' + esc(z) + '</option>';
+  }).join('');
+}
+
 function whOf(t){
   var raw = (t && t.work_hours) || {};
   var days = Array.isArray(raw.days) ? raw.days : [];
@@ -2608,18 +2624,12 @@ function hhmmOf(m){
  */
 function whPanel(t){
   var wh = whOf(t);
-  var zones = WH_ZONES.slice();
-  if (zones.indexOf(wh.tz) < 0) zones.unshift(wh.tz);
-
   return L('<div class="pg-sec"><h3>Робочі години</h3><div class="card">') +
     L('<div class="hint" style="margin-bottom:10px">Поза цими годинами ми не турбуємо сповіщенням ') +
     L('«клієнт чекає»: воно все одно нікого не підніме, а вимикають після нього всі сповіщення разом. ') +
     L('Час відповіді в майбутніх звітах теж рахуватиметься за цими годинами.</div>') +
-    '<div class="row2"><div class="lbl" style="width:150px">' + L('Часовий пояс') + '</div>' +
-    '<select id="whTz" style="max-width:240px">' +
-    zones.map(function(z){
-      return '<option value="' + esc(z) + '"' + (z === wh.tz ? ' selected' : '') + '>' + esc(z) + '</option>';
-    }).join('') + '</select></div>' +
+    L('<div class="hint" style="margin-bottom:10px">Години вказані за поясом компанії: ') +
+    '<b>' + esc(wh.tz) + '</b>' + L('. Змінити його можна вище, у профілі організації.</div>') +
     '<div class="whdays">' +
     wh.days.map(function(d, i){
       return '<div class="whrow">' +
@@ -2639,7 +2649,6 @@ function whPanel(t){
 
 function whRead(){
   return {
-    tz: el('whTz').value,
     days: WH_DAYS.map(function(_unused, i){
       var on = document.querySelector('[data-wh-on="' + i + '"]').checked;
       var all = document.querySelector('[data-wh-all="' + i + '"]').checked;
@@ -2658,6 +2667,19 @@ function whMin(v){
 }
 
 function wireWh(){
+  if (el('orgTz')) el('orgTz').onchange = function(){
+    var tz = this.value;
+    api('/settings/work-hours', { method:'PATCH', body:{ tz: tz } })
+      .then(function(r){
+        if (ME && ME.tenant) ME.tenant.work_hours = r.workHours;
+        toast(L('Часовий пояс збережено'));
+        // Перерисовываем: подпись в расписании называет пояс, и она
+        // должна называть новый, а не тот, что был при открытии.
+        tabProfile();
+      })
+      .catch(function(e){ el('orgErr').textContent = ((e.payload||{}).detail) || L('Не вдалося зберегти') });
+  };
+
   if (!el('whSave')) return;
 
   /* Поля времени гаснут, когда день выключен или круглосуточный: иначе

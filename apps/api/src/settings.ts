@@ -197,7 +197,24 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       const auth = requireAuth(req);
       if (!auth) return reply.code(401).send(auth401);
 
-      const wh = parseWorkHours({ tz: req.body?.tz, days: req.body?.days });
+      /*
+       * Дни можно не присылать: часовой пояс правится в профиле
+       * компании отдельно от расписания, и запрос оттуда приходит с
+       * одним полем. Без этой оговорки разбор подставил бы дни по
+       * умолчанию и молча стёр настроенное расписание.
+       */
+      const current = await withSystem(pool, 'текущие рабочие часы', async (db) => {
+        const { rows } = await db.query<{ work_hours: unknown }>(
+          `SELECT work_hours FROM tenants WHERE id = $1 LIMIT 1`,
+          [auth.tenantId],
+        );
+        return parseWorkHours(rows[0]?.work_hours);
+      });
+
+      const wh = parseWorkHours({
+        tz: req.body?.tz ?? current.tz,
+        days: req.body?.days ?? current.days,
+      });
       // Проверяем пояс на существование здесь, а не в разборе: разбор
       // обязан вернуть что-то рабочее, а форма — сказать человеку, что
       // он выбрал несуществующее.

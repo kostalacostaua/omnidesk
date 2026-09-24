@@ -5,9 +5,11 @@ import {
   WEBCHAT_CHANNEL,
   WEBCHAT_FILE_LIMIT,
   domainAllowed,
+  isWorkTime,
   jobKey,
   launcherColor,
   normalizeWebchat,
+  parseWorkHours,
   safeFileName,
   webchatFileKind,
   safeColor,
@@ -94,6 +96,24 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
       );
       return rows[0] ?? null;
     });
+  }
+
+  /**
+   * Работает ли компания прямо сейчас.
+   *
+   * Читается на каждое открытие окна — запрос копеечный, а кэш здесь
+   * означал бы, что в девять утра посетитель ещё несколько минут видит
+   * «неробочий час».
+   */
+  async function worksNow(tenantId: string): Promise<boolean> {
+    const wh = await withSystem(pool, 'рабочие часы для виджета', async (db) => {
+      const { rows } = await db.query<{ work_hours: unknown }>(
+        `SELECT work_hours FROM tenants WHERE id = $1 LIMIT 1`,
+        [tenantId],
+      );
+      return parseWorkHours(rows[0]?.work_hours);
+    });
+    return isWorkTime(wh);
   }
 
   async function settingsOf(row: ChannelRow) {
@@ -203,7 +223,17 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
         .header('cache-control', 'no-store')
         // Рамку встраивают в чужие страницы — это и есть её работа.
         .header('content-security-policy', 'frame-ancestors *')
-        .send(chatPage(req.params.key, s, req.query?.inline === '1', preview));
+        .send(
+          chatPage(
+            req.params.key,
+            s,
+            req.query?.inline === '1',
+            preview,
+            // В превью показываем как в рабочее время: настройщик
+            // смотрит на оформление, а не на текущий день недели.
+            preview ? false : !(await worksNow(row.tenant_id)),
+          ),
+        );
     },
   );
 
@@ -696,6 +726,15 @@ export function chatPage(
   s: { title: string; subtitle: string; greeting: string; color: string; logo: string },
   inline: boolean,
   preview = false,
+  /**
+   * Нерабочее время.
+   *
+   * Говорим об этом прямо в окне, а не молчим. Посетитель, написавший в
+   * воскресенье, иначе ждёт ответа сегодня — и получает не ответ, а
+   * впечатление, что его не заметили. Сообщение при этом принимаем как
+   * обычно: отвечать утром всё равно придётся.
+   */
+  offHours = false,
 ): string {
   const color = safeColor(s.color);
   const logo = safeLogo(s.logo);
@@ -765,6 +804,10 @@ export function chatPage(
   #emo button:hover{background:#f0f3fa;border-radius:8px}
   #bottom{position:relative;flex:none}
   .warn{padding:8px 16px;font-size:12.5px;color:#b42318;background:#fff4f3}
+  /* Не тревожная плашка, а спокойная строка: это не ошибка, а режим
+     работы, и пугать им посетителя незачем. */
+  .offh{align-self:center;max-width:90%;text-align:center;font-size:12.5px;color:#5c6478;
+    background:#fff;border-radius:12px;padding:8px 12px;box-shadow:0 1px 2px rgba(11,16,34,.06)}
 </style>
 </head>
 <body>
@@ -904,6 +947,12 @@ export function chatPage(
   function greet(){
     var g = ${JSON.stringify(s.greeting)};
     if (g) bubble(g, false, null);
+    if (${offHours ? 'true' : 'false'}){
+      var n = document.createElement('div');
+      n.className = 'offh';
+      n.textContent = 'Зараз неробочий час. Напишіть — відповімо, щойно почнемо роботу.';
+      log.appendChild(n);
+    }
   }
 
   function poll(){
