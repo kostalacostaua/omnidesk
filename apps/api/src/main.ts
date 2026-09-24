@@ -375,6 +375,18 @@ registerInbox(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
   markReadUpstream,
+  /*
+   * Взял чат — стал ответственным и в CRM. Задача ставится в очередь, а
+   * не выполняется на месте: поход в чужой API занимает секунды и
+   * падает по чужим причинам, а передача чата обязана быть мгновенной.
+   */
+  crmOwner: (task) => {
+    crmQueue
+      .add('owner', { ...task, kind: 'owner', channelType: '' }, {
+        jobId: jobKey('crmowner', task.conversationId ?? '-', task.ownerEmail ?? '-'),
+      })
+      .catch((err: unknown) => app.log.warn({ err }, 'Смена ответственного в CRM не поставлена'));
+  },
 });
 
 registerEmailAuth(app, {

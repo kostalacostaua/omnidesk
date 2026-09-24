@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  CRM_SETTINGS_DEFAULT,
+  parseCrmSettings,
   recordEvent,
   systemStatusFor,
+  withSystem,
   validateSteps,
   withTenant,
   zohoRecordUrl,
@@ -39,10 +42,17 @@ export interface InboxDeps {
     tenantId: string;
     conversationId: string;
   }) => void;
+  /** Записать карточку CRM на того, кто взял диалог. */
+  crmOwner?: (task: {
+    tenantId: string;
+    contactId: string;
+    conversationId: string;
+    ownerEmail: string;
+  }) => void;
 }
 
 export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
-  const { pool, requireAuth, markReadUpstream } = deps;
+  const { pool, requireAuth, markReadUpstream, crmOwner } = deps;
   const auth401 = { error: 'unauthorized' } as const;
 
   // ── Список диалогов ───────────────────────────────────────────────
@@ -288,6 +298,19 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
     const statusId = b.statusId === undefined ? undefined : b.statusId || null;
 
+    // Настройки связки с CRM читаются, только когда меняется
+    // ответственный: в остальных случаях они ни на что не влияют.
+    const settings =
+      b.assigneeId === undefined
+        ? CRM_SETTINGS_DEFAULT
+        : await withSystem(pool, 'настройки CRM', async (db) => {
+            const { rows } = await db.query<{ crm: unknown }>(
+              `SELECT crm FROM tenants WHERE id = $1 LIMIT 1`,
+              [auth.tenantId],
+            );
+            return parseCrmSettings(rows[0]?.crm);
+          });
+
     const updated = await withTenant(pool, auth.tenantId, async (db) => {
       const sets: string[] = [];
       const params: unknown[] = [req.params.id];
@@ -358,10 +381,14 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       // Изменять диалог можно только в своём канале: иначе оператор,
       // который его не видит, всё равно мог бы закрыть его по ссылке.
       const uid = push(auth.userId);
-      const { rows: done } = await db.query<{ channel_id: string; status: string }>(
+      const { rows: done } = await db.query<{
+        channel_id: string;
+        status: string;
+        contact_id: string;
+      }>(
         `UPDATE conversations c SET ${sets.join(', ')}
           WHERE c.id = $1 AND ${channelScope('c.channel_id', uid)}
-          RETURNING c.channel_id, c.status`,
+          RETURNING c.channel_id, c.status, c.contact_id`,
         params,
       );
       const row = done[0];
@@ -383,6 +410,28 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
           userId: auth.userId,
           payload: { to: b.assigneeId ?? null, self: b.assigneeId === auth.userId },
         });
+
+        /*
+         * Ответственный в CRM — по почте нового ответственного, а не
+         * того, кто передал: карточка должна попасть к тому, кто теперь
+         * ведёт разговор. Снятие ответственного в CRM не трогаем:
+         * «ничей» в чате — рабочее состояние, а «ничей» в CRM — потеря.
+         */
+        if (b.assigneeId && settings.ownerByEmail) {
+          const { rows: who } = await db.query<{ email: string }>(
+            `SELECT email FROM users WHERE id = $1::uuid LIMIT 1`,
+            [b.assigneeId],
+          );
+          const email = who[0]?.email;
+          if (email) {
+            crmOwner?.({
+              tenantId: auth.tenantId,
+              contactId: row.contact_id,
+              conversationId: req.params.id,
+              ownerEmail: email,
+            });
+          }
+        }
       }
       if (b.status || statusId !== undefined) {
         await recordEvent(db, auth.tenantId, {

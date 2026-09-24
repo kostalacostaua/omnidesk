@@ -4051,6 +4051,7 @@ function pageIntegrations(){
     api('/settings/crm').catch(function(){ return null })
   ]).then(function(res){
     var d = res[0], ai = res[1] || {}, crm = (res[2] && res[2].connections) || [];
+    var cset = (res[2] && res[2].settings) || {};
     var list = d.installations || [];
     var bx = null, pd = null;
     crm.forEach(function(c){ if (c.kind === 'bitrix24') bx = c; if (c.kind === 'pipedrive') pd = c });
@@ -4154,6 +4155,26 @@ function pageIntegrations(){
 
       '<div class="pg-sec"><h3>CRM</h3>' + zoho + bitrix + pipedrive + '</div>' +
 
+      /* Поведение связки. Стоит под самими подключениями, а не в
+         настройках: решение принимают, когда видят, куда именно
+         поедут карточки. */
+      L('<div class="pg-sec"><h3>Що робити з новим клієнтом</h3><div class="card">') +
+      '<div class="acts" style="margin-top:0">' +
+      '<select id="crmAs" style="max-width:260px">' +
+      '<option value="lead"' + (cset.createAs === 'contact' ? '' : ' selected') + '>' +
+        L('Заводити лід') + '</option>' +
+      '<option value="contact"' + (cset.createAs === 'contact' ? ' selected' : '') + '>' +
+        L('Заводити одразу контакт') + '</option></select>' +
+      '<label class="ntev"><input type="checkbox" id="crmOwn"' +
+        (cset.ownerByEmail ? ' checked' : '') + '> ' +
+        L('Ставити відповідальним того, хто взяв чат') + '</label>' +
+      L('<button id="crmSave">Зберегти</button></div>') +
+      L('<div class="hint">Лід проходить кваліфікацію і стає угодою — так працює відділ продажів. ') +
+      L('Там, де пишуть ті, хто вже купує, лід зайвий: картку все одно конвертують руками.<br>') +
+      L('Відповідальний шукається за поштою: у CRM імена пишуть як заманеться, а пошта одна. ') +
+      L('Немає співробітника з такою поштою — нічого не змінюємо і нікого не заводимо.</div>') +
+      '<div class="err" id="crmSetErr"></div></div></div>' +
+
       (list.length
         ? L('<div class="pg-sec"><h3>Віджет у картці клієнта</h3><div class="card">') +
           L('<div class="int-s" style="white-space:normal;line-height:1.7">Zoho створює віджети ') +
@@ -4172,6 +4193,19 @@ function pageIntegrations(){
 
       aiSection(ai) +
       '</div>';
+
+    el('crmSave').onclick = function(){
+      el('crmSetErr').textContent = '';
+      busy(el('crmSave'), true);
+      api('/settings/crm-behaviour', { method:'PATCH', body:{
+        createAs: el('crmAs').value, ownerByEmail: el('crmOwn').checked
+      }}).then(function(){ toast(L('Збережено')); pageIntegrations() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('crmSetErr').textContent = p.detail || L('Не вдалося зберегти');
+          busy(el('crmSave'), false);
+        });
+    };
 
     wireAi(ai);
 

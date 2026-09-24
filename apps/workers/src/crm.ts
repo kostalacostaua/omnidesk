@@ -2,8 +2,11 @@ import type { Redis } from 'ioredis';
 import {
   CrmError,
   bitrixFindOrCreate,
+  crmSource,
   decryptJson,
+  parseCrmSettings,
   pipedriveFindOrCreate,
+  withSystem,
   withTenant,
   type CrmKind,
   type CrmSyncJob,
@@ -45,15 +48,6 @@ interface Installation {
 }
 
 const TOKEN_TTL_SEC = 50 * 60;
-
-/** Названия каналов для поля «источник» в CRM: там читают люди, а не программы. */
-const SOURCE: Record<string, string> = {
-  telegram: 'Telegram',
-  telegram_bot: 'Telegram',
-  telegram_user: 'Telegram',
-  instagram: 'Instagram Direct',
-  messenger: 'Facebook Messenger',
-};
 
 export function createCrmSync(deps: CrmDeps) {
   const { pool, redis, masterKey, log } = deps;
@@ -135,34 +129,43 @@ export function createCrmSync(deps: CrmDeps) {
     return null;
   }
 
-  async function createLead(
+  /**
+   * Завести карточку: лид или контакт — как настроила компания.
+   *
+   * Поля у них почти одинаковые, и разница ровно в двух местах.
+   * Lead_Source есть только у лида; у контакта источник кладём в
+   * Description, потому что стандартного поля источника там нет, а
+   * заводить своё за клиента мы не вправе — в его CRM это чужая схема.
+   */
+  async function createRecord(
     inst: Installation,
     token: string,
     contact: { name: string | null; phone: string | null },
     job: CrmSyncJob,
+    createAs: 'lead' | 'contact',
   ): Promise<{ module: string; id: string } | null> {
-    const source = SOURCE[job.channelType] ?? job.channelType;
-    const res = await fetch(`${inst.api_domain}/crm/v6/Leads`, {
+    const source = crmSource(job.channelType);
+    const moduleName = createAs === 'contact' ? 'Contacts' : 'Leads';
+    const said = job.firstText ? `Перше повідомлення: ${job.firstText.slice(0, 500)}` : '';
+    const from = `Звернення з ${source}`;
+
+    const record: Record<string, unknown> = {
+      // Фамилия — единственное обязательное поле и у лида, и у
+      // контакта. Если человек не назвался, пишем канал: карточка «—»
+      // в списке бесполезна.
+      Last_Name: contact.name || `Клієнт з ${source}`,
+      ...(contact.phone ? { Phone: contact.phone } : {}),
+      Description: [from, said].filter(Boolean).join('\n'),
+    };
+    if (createAs === 'lead') record['Lead_Source'] = source;
+
+    const res = await fetch(`${inst.api_domain}/crm/v6/${moduleName}`, {
       method: 'POST',
       headers: {
         authorization: `Zoho-oauthtoken ${token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        data: [
-          {
-            // Фамилия — единственное обязательное поле лида в Zoho.
-            // Если человек не назвался, пишем канал: пустая карточка
-            // «—» в списке лидов бесполезна.
-            Last_Name: contact.name || `Клиент из ${source}`,
-            ...(contact.phone ? { Phone: contact.phone } : {}),
-            Lead_Source: source,
-            Description: job.firstText
-              ? `Первое сообщение: ${job.firstText.slice(0, 500)}`
-              : `Обращение из ${source}`,
-          },
-        ],
-      }),
+      body: JSON.stringify({ data: [record] }),
       signal: AbortSignal.timeout(20_000),
     });
 
@@ -171,10 +174,88 @@ export function createCrmSync(deps: CrmDeps) {
     };
     const first = body.data?.[0];
     if (!res.ok || first?.code !== 'SUCCESS' || !first.details?.id) {
-      log('warn', 'Zoho не создала лид', { status: res.status, message: first?.message });
+      log('warn', 'Zoho не создала карточку', {
+        status: res.status, module: moduleName, message: first?.message,
+      });
       return null;
     }
-    return { module: 'Leads', id: first.details.id };
+    return { module: moduleName, id: first.details.id };
+  }
+
+  /**
+   * Найти сотрудника CRM по почте.
+   *
+   * По почте, а не по имени: имена в CRM пишут как придётся, «Оля» и
+   * «Ольга Петренко» — один человек, а почта у него одна. Сравнение без
+   * регистра, потому что почту вводят руками и в обоих местах.
+   */
+  async function zohoUserByEmail(
+    inst: Installation,
+    token: string,
+    email: string,
+  ): Promise<string | null> {
+    const url = new URL(`${inst.api_domain}/crm/v6/users`);
+    url.searchParams.set('type', 'ActiveUsers');
+    const res = await fetch(url, {
+      headers: { authorization: `Zoho-oauthtoken ${token}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      log('warn', 'Zoho не отдала список сотрудников', { status: res.status });
+      return null;
+    }
+    const body = (await res.json()) as { users?: Array<{ id?: string; email?: string }> };
+    const want = email.trim().toLowerCase();
+    const hit = (body.users ?? []).find((u) => (u.email ?? '').toLowerCase() === want);
+    return hit?.id ?? null;
+  }
+
+  /**
+   * Записать карточку на того, кто взял диалог.
+   *
+   * Молчит, когда сотрудника с такой почтой в CRM нет: это нормальная
+   * жизнь — оператор чата не обязан быть пользователем CRM, и заводить
+   * его там за компанию мы не будем.
+   */
+  async function assignOwner(job: CrmSyncJob): Promise<void> {
+    if (!job.ownerEmail) return;
+
+    const link = await withTenant(pool, job.tenantId, async (db) => {
+      const { rows } = await db.query<{ crm_module: string | null; crm_record_id: string | null }>(
+        `SELECT crm_module, crm_record_id FROM contacts WHERE id = $1`,
+        [job.contactId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!link?.crm_record_id || !link.crm_module) return;
+
+    const inst = await installationFor(job.tenantId);
+    if (!inst) return;
+    const token = await accessToken(job.tenantId, inst);
+    if (!token) return;
+
+    const userId = await zohoUserByEmail(inst, token, job.ownerEmail);
+    if (!userId) {
+      log('debug', 'В Zoho нет сотрудника с такой почтой', { tenantId: job.tenantId });
+      return;
+    }
+
+    const res = await fetch(`${inst.api_domain}/crm/v6/${link.crm_module}/${link.crm_record_id}`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Zoho-oauthtoken ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ data: [{ Owner: { id: userId } }] }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      log('warn', 'Zoho не сменила ответственного', { status: res.status });
+      return;
+    }
+    log('info', 'Ответственный в Zoho обновлён', {
+      module: link.crm_module, recordId: link.crm_record_id,
+    });
   }
 
   /**
@@ -200,7 +281,7 @@ export function createCrmSync(deps: CrmDeps) {
     });
     if (!conn) return false;
 
-    const source = SOURCE[job.channelType] ?? job.channelType;
+    const source = crmSource(job.channelType);
     const person = {
       name: contact.display_name ?? '',
       phone: contact.phone_e164,
@@ -241,6 +322,13 @@ export function createCrmSync(deps: CrmDeps) {
   }
 
   return async function handleCrmSync(job: CrmSyncJob): Promise<void> {
+    // Назначение ответственного — отдельный разговор: карточка уже
+    // есть, искать и заводить нечего.
+    if (job.kind === 'owner') {
+      await assignOwner(job);
+      return;
+    }
+
     const contactRow = await withTenant(pool, job.tenantId, async (db) => {
       const { rows } = await db.query<{
         display_name: string | null;
@@ -276,11 +364,20 @@ export function createCrmSync(deps: CrmDeps) {
     const found = Boolean(link);
 
     if (!link) {
-      link = await createLead(
+      const settings = await withSystem(pool, 'настройки CRM', async (db) => {
+        const { rows } = await db.query<{ crm: unknown }>(
+          `SELECT crm FROM tenants WHERE id = $1 LIMIT 1`,
+          [job.tenantId],
+        );
+        return parseCrmSettings(rows[0]?.crm);
+      });
+
+      link = await createRecord(
         inst,
         token,
         { name: contact.display_name, phone: contact.phone_e164 },
         job,
+        settings.createAs,
       );
     }
     if (!link) return;
@@ -293,7 +390,7 @@ export function createCrmSync(deps: CrmDeps) {
       );
     });
 
-    log('info', found ? 'Контакт найден в Zoho' : 'В Zoho заведён лид', {
+    log('info', found ? 'Контакт найден в Zoho' : 'В Zoho заведена карточка', {
       contactId: job.contactId,
       module: link.module,
       recordId: link.id,

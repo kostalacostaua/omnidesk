@@ -10,6 +10,8 @@ import {
   pipedriveExchange,
   pipedrivePhone,
   pipedriveRoot,
+  parseCrmSettings,
+  withSystem,
   withTenant,
   type CrmKind,
   type PipedriveTokens,
@@ -154,8 +156,54 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       return rows;
     });
 
-    return { connections: rows.map(view) };
+    const behaviour = await withSystem(pool, 'настройки CRM', async (db) => {
+      const { rows } = await db.query<{ crm: unknown }>(
+        `SELECT crm FROM tenants WHERE id = $1 LIMIT 1`,
+        [a.tenantId],
+      );
+      return parseCrmSettings(rows[0]?.crm);
+    });
+
+    return { connections: rows.map(view), settings: behaviour };
   });
+
+  /**
+   * Поведение связки: кого заводить и назначать ли ответственного.
+   *
+   * Живёт у арендатора, а не у подключения: правило одно на компанию,
+   * какой бы CRM она ни пользовалась, и повторять его для каждой —
+   * значит однажды получить две разные настройки и вопрос, какая
+   * главнее.
+   */
+  app.patch<{ Body: { createAs?: string; ownerByEmail?: boolean } }>(
+    '/settings/crm-behaviour',
+    async (req, reply) => {
+      const a = requireAuth(req);
+      if (!a) return reply.code(401).send(auth401);
+
+      const current = await withSystem(pool, 'настройки CRM', async (db) => {
+        const { rows } = await db.query<{ crm: unknown }>(
+          `SELECT crm FROM tenants WHERE id = $1 LIMIT 1`,
+          [a.tenantId],
+        );
+        return parseCrmSettings(rows[0]?.crm);
+      });
+
+      const next = parseCrmSettings({
+        createAs: req.body?.createAs ?? current.createAs,
+        ownerByEmail: req.body?.ownerByEmail ?? current.ownerByEmail,
+      });
+
+      await withSystem(pool, 'настройки CRM', async (db) => {
+        await db.query(`UPDATE tenants SET crm = $2::jsonb WHERE id = $1`, [
+          a.tenantId,
+          JSON.stringify(next),
+        ]);
+      });
+
+      return { settings: next };
+    },
+  );
 
   /**
    * Подключить. Связь проверяется сразу же: без этого человек узнаёт об
