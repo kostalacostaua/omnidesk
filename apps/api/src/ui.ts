@@ -2562,6 +2562,18 @@ function tabProfile(){
         admin ? L('Ролі роздаються в розділі «Команда».')
               : L('Роль призначає власник або адміністратор.')) +
       row(L('У системі з'), esc(fmtDate(u.created_at)), 'sn', false) +
+      /* Конец смены. Кнопка живёт здесь, а не в списке чатов: это
+         действие раз в день, и рядом с ежедневными оно только
+         напрашивалось бы на случайное нажатие. Показываем её лишь
+         тогда, когда снимать есть что. */
+      '<div class="prow"><div class="pk">' + L('Чати на вас') + '</div>' +
+      '<div class="pv">' + (Number(COUNTS.mine || 0) || L('немає')) +
+      L('<div class="hint" style="margin-top:2px">Наприкінці зміни зніміться з усіх: ') +
+      L('інакше вони виглядають зайнятими, і наступна зміна їх не бере.</div></div>') +
+      (Number(COUNTS.mine || 0)
+        ? L('<button class="ghost mini" id="pfFree">Знятись з усіх</button>')
+        : '<span></span>') +
+      '</div>' +
       '<div class="err" id="pfErr"></div>' +
       '</div></div>' +
 
@@ -2595,6 +2607,20 @@ function tabProfile(){
 
     wirePass();
     wireWh();
+
+    if (el('pfFree')) el('pfFree').onclick = function(){
+      var b = el('pfFree');
+      busy(b, true);
+      api('/me/unassign', { method:'POST' }).then(function(r){
+        var n = (r && r.freed) || 0;
+        // Закрытые не трогаем, и об этом говорим сразу: иначе человек
+        // увидит, что число не сошлось с тем, что он помнил.
+        toast(n ? L('Знято з чатів: ') + n + L(' · закриті залишилися за вами')
+                : L('Активних чатів на вас немає'));
+        refresh();
+        tabProfile();
+      }).catch(function(e){ busy(b, false); sErr(e) });
+    };
 
     el('langSel').onchange = function(){
       langSet(this.value);

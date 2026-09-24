@@ -144,6 +144,36 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
   });
 
   /**
+   * Снять себя со всех чатов.
+   *
+   * Конец смены: оператор уходит, и десяток диалогов, где он записан
+   * ответственным, остаются «чьими-то». Следующая смена их не берёт —
+   * они выглядят занятыми, — и клиент ждёт до утра.
+   *
+   * Закрытые диалоги не трогаем. Там ответственный — не обязанность, а
+   * запись о том, кто разобрался; стереть её значит потерять ответ на
+   * вопрос «кто это вёл» ровно тогда, когда он возникнет.
+   *
+   * Уровень прав здесь любой, вплоть до наблюдателя: человек снимает
+   * себя, а не раздаёт чужую работу.
+   */
+  app.post('/me/unassign', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const freed = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rowCount } = await db.query(
+        `UPDATE conversations SET assignee_id = NULL
+          WHERE assignee_id = $1::uuid AND status <> 'resolved'`,
+        [auth.userId],
+      );
+      return rowCount ?? 0;
+    });
+
+    return { freed };
+  });
+
+  /**
    * Название организации. Оно попадает в письма и в карточку Zoho,
    * поэтому правится в одном месте — и только администратором:
    * это вывеска компании, а не подпись оператора.
