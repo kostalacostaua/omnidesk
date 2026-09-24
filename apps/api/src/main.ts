@@ -43,6 +43,7 @@ import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
 import { registerCustom } from './custom.js';
+import { registerStatuses } from './statuses.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { denial, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
@@ -402,6 +403,11 @@ registerCustom(app, {
   pool,
   inboundQueue,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+registerStatuses(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
 });
 
 registerCrm(app, {

@@ -147,8 +147,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .lhead{padding:12px 14px 0;flex:none;border-bottom:1px solid var(--line)}
   .lhead .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .lhead b{font-size:14.5px;letter-spacing:-.015em;font-weight:700}
-  .filters{display:flex;gap:6px;margin-top:10px}
-  .filters select{padding:6px 8px;font-size:12px;border-radius:6px;background:var(--panel)}
+  /* Фильтров стало четыре, и в одну строку они помещаются только
+     обрезанными до «Усі к...». Две строки по два — единственное, что
+     оставляет названия читаемыми в узкой колонке списка. */
+  .filters{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .filters select{padding:6px 8px;font-size:12px;border-radius:6px;background:var(--panel);
+    flex:1 1 calc(50% - 3px);min-width:0}
   .search{margin-top:8px}
   .search input{padding:7px 10px;font-size:12.5px;border-radius:6px}
   .lhead .tabs{margin-top:11px}
@@ -498,6 +502,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .av img{border-radius:13px}
   .conv .nm{font-size:13.5px}
   .chip{border-radius:7px;padding:2px 7px;background:var(--panel2);color:var(--t2)}
+  /* Свой статус — единственная цветная метка в строке, и цвет у неё
+     заданный человеком. Белый текст поэтому жёстко: палитра подобрана
+     тёмной, и на светлой теме он остаётся читаемым. */
+  .chip.st{color:#fff;font-weight:600}
+  .sdot{display:inline-block;width:9px;height:9px;border-radius:3px;flex:none}
 
   /* ─── Переписка ────────────────────────────────────────────────── */
   #thread{background:transparent}
@@ -715,6 +724,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .thead .acts{order:2;flex:1 1 0;min-width:0;justify-content:flex-start;
       overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
     .thead .acts::-webkit-scrollbar{display:none}
+    /* Списки в этой строке ужимались до одной стрелки, и «відповідальний»
+       с «статусом» становились двумя одинаковыми уголками. Раз строка
+       всё равно прокручивается, пусть лучше она будет длиннее. */
+    .thead .acts .asel{flex:none;min-width:128px}
     .thead .who{order:3;flex:1 1 100%;min-width:0}
 
     .composer{padding:9px 12px calc(9px + env(safe-area-inset-bottom))}
@@ -824,6 +837,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1" data-t>Канали</button>
     <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1" data-t>Сценарії</button>
     <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
+    <button class="rbtn" data-view="statuses" data-icon="tag" data-admin="1" data-t>Статуси</button>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
     <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
     <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
@@ -845,6 +859,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
           <option value="none" data-t>Без відповідального</option>
         </select>
         <select id="fTag"><option value="" data-t>Усі мітки</option></select>
+        <select id="fSt"><option value="" data-t>Усі статуси</option></select>
       </div>
       <div class="search"><input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off"></div>
       <div class="tabs">
@@ -918,7 +933,7 @@ var AI = { ready:false };
 // Роль вошедшего. До ответа сервера считаем оператором: показать
 // лишнее и убрать — хуже, чем показать нужное чуть позже.
 var ROLE = 'agent';
-var F = { status:'open', assignee:'all', channelId:'', tag:'', q:'' };
+var F = { status:'open', statusId:'', assignee:'all', channelId:'', tag:'', q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
 var pendingFile = null; // выбранный, но ещё не отправленный файл
@@ -1025,6 +1040,7 @@ function query(){
   var p = ['status=' + encodeURIComponent(F.status), 'assignee=' + encodeURIComponent(F.assignee)];
   if (F.channelId) p.push('channelId=' + encodeURIComponent(F.channelId));
   if (F.tag) p.push('tag=' + encodeURIComponent(F.tag));
+  if (F.statusId) p.push('statusId=' + encodeURIComponent(F.statusId));
   if (F.q) p.push('q=' + encodeURIComponent(F.q));
   return '/conversations?' + p.join('&');
 }
@@ -1051,6 +1067,7 @@ function renderList(){
         '<div class="pv">' + esc(c.preview || '') + '</div>' +
         '<div class="r3">' +
           '<span class="dot ' + (c.status === 'resolved' ? 'closed' : 'open') + '"></span>' +
+          statusChip(c) +
           '<span class="chip">' + esc(CH[c.channel_type] || c.channel_type) + '</span>' +
           (who ? '<span class="chip who">' + esc(who) + '</span>' : '') +
           (c.tags || []).map(function(t){ return '<span class="chip">' + esc(t) + '</span>' }).join('') +
@@ -1142,6 +1159,19 @@ function renderHead(){
             '>' + esc(u.name) + '</option>';
         }).join('') +
       '</select>' +
+      /* Свой статус. Списком рядом с ответственным, а не в меню: это
+         то, что оператор меняет чаще всего остального в шапке, и прятать
+         его за вторым щелчком значит, что статусы не будут ставить.
+         Когда статусов не завели — списка нет вовсе. */
+      (STATUSES.length
+        ? '<select class="asel" id="aSt" title="' + L('Статус діалогу') + '">' +
+            L('<option value="">Без статусу</option>') +
+            STATUSES.map(function(t){
+              return '<option value="' + esc(t.id) + '"' +
+                (c.status_id === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+            }).join('') +
+          '</select>'
+        : '') +
       '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
         esc(botState(c).label) + '</button>' +
       '<button class="' + (closed ? '' : 'ghost ') + 'mini" id="aClose">' +
@@ -1156,6 +1186,18 @@ function renderHead(){
     patchConv({ assigneeId: to }).then(function(){
       var who = MATES.filter(function(u){ return u.id === to })[0];
       toast(to ? L('Передано: ') + (who ? who.name : '') : L('Знято відповідального'));
+    });
+  };
+  if (el('aSt')) el('aSt').onchange = function(){
+    var to = this.value || null;
+    var st = to ? statusById(to) : null;
+    patchConv({ statusId: to }).then(function(){
+      /* Говорим не «статус змінено», а что с диалогом стало: закрытый
+         статус уносит его из «Відкритих», и без подсказки это выглядит
+         как потеря переписки. */
+      toast(!st ? L('Статус знято')
+        : st.kind === 'closed' ? L('Статус: ') + st.name + L(' · чат закрито')
+        : L('Статус: ') + st.name);
     });
   };
   paintAvatars();
@@ -4752,6 +4794,174 @@ function ntKeyBytes(key){
   return out;
 }
 
+/* ══════════════ Статусы диалога ══════════════ */
+
+/**
+ * Статусы — короткий справочник, и страница у него соответствующая:
+ * строка на статус, всё правится на месте, ничего не открывается в
+ * отдельной форме. Единственное, что здесь объясняется словами, — род
+ * статуса, потому что это единственное решение, которое человек может
+ * принять неправильно и не заметить.
+ */
+function colorSelect(id, value){
+  return '<select class="csel" id="' + id + '" style="max-width:120px;background-color:' +
+    esc(value || SCOLORS[0]) + ';color:#fff;font-weight:600">' +
+    SCOLORS.map(function(c, i){
+      return '<option value="' + c + '"' + (c === value ? ' selected' : '') +
+        ' style="background-color:' + c + ';color:#fff">' + L('Колір ') + (i + 1) + '</option>';
+    }).join('') + '</select>';
+}
+
+function kindSelect(id, value){
+  return '<select id="' + id + '" style="max-width:150px">' +
+    '<option value="open"' + (value === 'closed' ? '' : ' selected') + '>' +
+      L('У роботі') + '</option>' +
+    '<option value="closed"' + (value === 'closed' ? ' selected' : '') + '>' +
+      L('Закритий') + '</option></select>';
+}
+
+/** Цвет самого поля выбора — иначе выбранный цвет виден только в списке. */
+function paintColorSelect(sel){
+  if (sel) sel.style.backgroundColor = sel.value;
+}
+
+function tabStatuses(){
+  api('/statuses').then(function(d){
+    STATUSES = d.statuses || [];
+    fillStatusFilter();
+    lastList = null;
+
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead(L('Статуси діалогів'),
+        L('Системних станів чотири, і вони про механіку: чат відкритий або закритий. ') +
+        L('Статуси — про вашу роботу: <b>«Чекаємо оплату»</b>, <b>«Передано на склад»</b>, ') +
+        L('<b>«Немає товару»</b>. Оператор бачить їх у списку чатів і фільтрує за ними.')) +
+
+      L('<div class="card"><h3>Новий статус</h3>') +
+      '<div class="row2" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      L('<input id="stName" placeholder="назва, наприклад Чекаємо оплату" style="flex:1;min-width:200px">') +
+      kindSelect('stKind', 'open') + colorSelect('stColor', SCOLORS[0]) +
+      L('<button id="stAdd">Додати</button></div>') +
+      /* Род объясняется здесь один раз и подробно: это единственное
+         место, где человек решает судьбу счётчиков, и «у роботі» против
+         «закритий» без объяснения читается как оттенок смысла. */
+      L('<div class="hint"><b>У роботі</b> — чат залишається у вкладці «Відкриті» ') +
+      L('і потрапляє в лічильники. <b>Закритий</b> — чат їде у «Закриті», ') +
+      L('як і кнопка «Закрити чат». Клієнт написав — чат повернеться у роботу сам.</div>') +
+      '<div class="err" id="stErr"></div></div>' +
+
+      L('<div class="card"><h3>Статуси (') + STATUSES.length + ')</h3>' +
+      (STATUSES.length ? STATUSES.map(function(t, i){
+        return '<div class="item"><div style="min-width:0;flex:1;display:flex;gap:9px;' +
+          'align-items:center;flex-wrap:wrap">' +
+          '<input value="' + esc(t.name) + '" data-nm="' + t.id +
+            '" style="flex:0 1 220px;min-width:130px">' +
+          kindSelect('k-' + t.id, t.kind) + colorSelect('c-' + t.id, t.color) +
+          '</div>' +
+          '<div style="display:flex;gap:6px;flex:none">' +
+          '<button class="ghost mini" data-up="' + t.id + '"' + (i ? '' : ' disabled') +
+            L(' title="Вище">↑</button>') +
+          '<button class="ghost mini" data-down="' + t.id + '"' +
+            (i === STATUSES.length - 1 ? ' disabled' : '') + L(' title="Нижче">↓</button>') +
+          '<button class="ghost mini" data-del="' + t.id + L('">Видалити</button></div></div>');
+      }).join('')
+        : L('<div class="hint">Поки порожньо. Додайте перший — він зʼявиться в кожному чаті.</div>')) +
+      '</div></div>';
+
+    el('stAdd').onclick = function(){
+      el('stErr').textContent = '';
+      busy(el('stAdd'), true);
+      api('/statuses', { method:'POST', body:{
+        name: el('stName').value, kind: el('stKind').value, color: el('stColor').value
+      }}).then(function(){ tabStatuses(); toast(L('Статус додано')) })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('stErr').textContent = p.error === 'duplicate' ? L('Такий статус вже є')
+            : p.error === 'too_many' ? L('Більше статусів не буває сенсу: для дрібніших відтінків є мітки')
+            : L('Впишіть назву статусу');
+          busy(el('stAdd'), false);
+        });
+    };
+
+    paintColorSelect(el('stColor'));
+    el('stColor').onchange = function(){ paintColorSelect(this) };
+
+    /* Название сохраняется по уходу из поля, а не кнопкой: иначе на
+       каждой строке была бы своя кнопка «Зберегти», и их было бы
+       столько же, сколько статусов. */
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-nm]'), function(inp){
+      var was = inp.value;
+      inp.onchange = function(){
+        if (inp.value.trim() === was.trim()) return;
+        saveStatus(inp.dataset.nm, { name: inp.value });
+      };
+    });
+
+    STATUSES.forEach(function(t){
+      var k = el('k-' + t.id), c = el('c-' + t.id);
+      paintColorSelect(c);
+      k.onchange = function(){
+        /* Смена рода двигает все диалоги под этим статусом — об этом
+           говорим прямо, потому что человек менял слово, а получит
+           переехавшие чаты. */
+        saveStatus(t.id, { kind: k.value }, k.value === 'closed'
+          ? L('Чати з цим статусом тепер у «Закритих»')
+          : L('Чати з цим статусом повернулися в роботу'));
+      };
+      c.onchange = function(){ paintColorSelect(c); saveStatus(t.id, { color: c.value }) };
+    });
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-up],[data-down]'), function(b){
+      b.onclick = function(){
+        if (b.disabled) return;
+        moveStatus(b.dataset.up || b.dataset.down, b.dataset.up ? -1 : 1);
+      };
+    });
+
+    /* Удаление снимает статус с диалогов, но не переоткрывает их: чат,
+       закрытый вместе со статусом, остаётся закрытым. Об этом сказано
+       на кнопке подтверждения, а не в сноске под списком. */
+    armDelete(pageBox().querySelectorAll('[data-del]'), function(b){
+      return api('/statuses/' + b.dataset.del, { method:'DELETE' })
+        .then(function(){ tabStatuses(); toast(L('Статус видалено — чати залишилися як були')) });
+    });
+  }).catch(sErr);
+}
+
+function saveStatus(id, body, note){
+  return api('/statuses/' + id, { method:'PATCH', body: body })
+    .then(function(){ tabStatuses(); toast(note || L('Збережено')) })
+    .catch(function(e){
+      var p = e.payload || {};
+      el('stErr').textContent = p.error === 'duplicate' ? L('Такий статус вже є')
+        : p.error === 'name_required' ? L('Назва не може бути порожньою') : L('Не вдалося зберегти');
+    });
+}
+
+/**
+ * Перестановка. Порядок хранится числом, и двум соседям достаточно
+ * обменяться своими числами — переписывать весь список ради одного шага
+ * значит ставить десяток запросов там, где хватает двух.
+ */
+function moveStatus(id, dir){
+  var i = -1;
+  for (var k = 0; k < STATUSES.length; k++) if (STATUSES[k].id === id) i = k;
+  var j = i + dir;
+  if (i < 0 || j < 0 || j >= STATUSES.length) return;
+
+  var a = STATUSES[i], b = STATUSES[j];
+  /* Числа могут совпадать — тогда обмен ничего не изменит. Раздаём
+     заново по месту в списке: это дешевле, чем объяснять человеку,
+     почему стрелка не сработала. */
+  var sa = a.sort, sb = b.sort;
+  if (sa === sb){ sa = (i + 1) * 10; sb = (j + 1) * 10 }
+
+  api('/statuses/' + a.id, { method:'PATCH', body:{ sort: sb } })
+    .then(function(){ return api('/statuses/' + b.id, { method:'PATCH', body:{ sort: sa } }) })
+    .then(function(){ tabStatuses() })
+    .catch(sErr);
+}
+
 function tabReplies(){
   api('/quick-replies').then(function(d){
     QR = d.quickReplies || [];
@@ -4905,6 +5115,7 @@ var ICONS = {
   plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.4 3.4l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.6 20.6l1.7-1.7"/>',
   team:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  tag:'<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0l-7.2-7.2a2 2 0 0 1-.6-1.4V4.8A1.8 1.8 0 0 1 4.6 3h7.2a2 2 0 0 1 1.4.6l7.4 7.4a2 2 0 0 1 0 2.4"/><path d="M7.5 7.5h.01"/>',
   smile:'<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
@@ -5159,6 +5370,59 @@ function loadTags(){
   return api('/tags').then(function(d){ TAGS = d.tags || []; fillTagFilter() }).catch(function(){});
 }
 
+/* ══════════════ Свои статусы диалога ══════════════ */
+
+/* Системных статусов четыре, и они про механику. Свои — про работу:
+   «Чекаємо оплату», «Передано на склад». Каждый свой статус знает свой
+   род — открытый он или закрытый, — и именно род ставит системный
+   статус. Поэтому счётчик «Відкриті» остаётся правдой, сколько бы
+   статусов ни придумали.
+
+   Палитра повторяет список в packages/core/src/statuses.ts: сервер
+   чужой цвет не примет, и показывать выбор, который не сохранится,
+   нельзя. Совпадение проверяется тестом, а не доверием. */
+var SCOLORS = ['#2563eb','#0ea5e9','#0d9488','#16a34a','#65a30d','#ca8a04',
+  '#ea580c','#dc2626','#db2777','#9333ea','#6366f1','#64748b'];
+
+var STATUSES = [];
+
+function statusById(id){
+  for (var i = 0; i < STATUSES.length; i++) if (STATUSES[i].id === id) return STATUSES[i];
+  return null;
+}
+
+function loadStatuses(){
+  return api('/statuses').then(function(d){
+    STATUSES = d.statuses || [];
+    fillStatusFilter();
+    lastList = null;
+  }).catch(function(){});
+}
+
+function fillStatusFilter(){
+  var sel = el('fSt');
+  if (!sel) return;
+  /* Пока статусов нет, фильтра тоже нет: пустой список в строке
+     фильтров обещает срез, которого не существует. */
+  sel.style.display = STATUSES.length ? '' : 'none';
+  var want = L('<option value="">Усі статуси</option>') +
+    L('<option value="none">Без статусу</option>') +
+    STATUSES.map(function(t){
+      return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>';
+    }).join('');
+  if (sel.innerHTML === want) return;
+  var keep = sel.value;
+  sel.innerHTML = want;
+  sel.value = keep;
+}
+
+/** Цветная плашка статуса — то, за чем в список и приходят. */
+function statusChip(c){
+  if (!c.status_id || !c.status_name) return '';
+  return '<span class="chip st" style="background-color:' + esc(c.status_color || SCOLORS[0]) +
+    '">' + esc(c.status_name) + '</span>';
+}
+
 function refresh(){
   return api(query()).then(function(d){
     convs = d.conversations || [];
@@ -5183,6 +5447,7 @@ var VIEWS = {
   channels: tabChannels,
   bots: renderBots,
   replies: tabReplies,
+  statuses: tabStatuses,
   users: tabUsers,
   profile: tabProfile,
   integrations: pageIntegrations,
@@ -5242,6 +5507,7 @@ function start(){
   }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   loadTags();
+  loadStatuses();
   api('/teammates').then(function(d){ MATES = d.users || [] }).catch(function(){});
   api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
   api('/settings/ai').then(function(d){
@@ -5305,6 +5571,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
 el('fCh').onchange = function(){ F.channelId = this.value; lastList = null; refresh() };
 el('fAs').onchange = function(){ F.assignee = this.value; lastList = null; refresh() };
 el('fTag').onchange = function(){ F.tag = this.value; lastList = null; refresh() };
+el('fSt').onchange = function(){ F.statusId = this.value; lastList = null; refresh() };
 
 // Поиск с задержкой: без неё каждый набранный символ уходил бы
 // отдельным запросом к базе.

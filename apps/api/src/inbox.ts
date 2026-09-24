@@ -1,5 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { validateSteps, withTenant, zohoRecordUrl, type Pool } from '@omnidesk/core';
+import {
+  systemStatusFor,
+  validateSteps,
+  withTenant,
+  zohoRecordUrl,
+  type Pool,
+  type StatusKind,
+} from '@omnidesk/core';
 import { channelScope } from './scope.js';
 
 /**
@@ -41,6 +48,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
   app.get<{
     Querystring: {
       status?: string;
+      statusId?: string;
       assignee?: string;
       channelId?: string;
       tag?: string;
@@ -72,6 +80,15 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
     if (q.channelId) where.push(`c.channel_id = ${push(q.channelId)}::uuid`);
 
+    /*
+     * Свой статус. Фильтр отдельный от системного намеренно: «Відкриті»
+     * и «Чекаємо оплату» — это разные вопросы, и выбор одного не должен
+     * отменять другой. Значение none — «без своего статуса»: без него
+     * нельзя найти забытые диалоги, которым статус так и не поставили.
+     */
+    if (q.statusId === 'none') where.push(`c.status_id IS NULL`);
+    else if (q.statusId) where.push(`c.status_id = ${push(q.statusId)}::uuid`);
+
     // Доступ к каналам. Условие идёт последним, но действует раньше
     // всех фильтров: оператор с ограниченным списком не увидит чужой
     // канал ни выбрав его в фильтре, ни поиском по имени.
@@ -90,7 +107,8 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
 
     const rows = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query(
-        `SELECT c.id, c.status, c.last_message_at, c.unread_count, c.tags,
+        `SELECT c.id, c.status, c.status_id, c.last_message_at, c.unread_count, c.tags,
+                cs.name AS status_name, cs.color AS status_color, cs.kind AS status_kind,
                 c.window_expires_at, c.window_type, c.assignee_id, c.bot_enabled,
                 c.human_replied_at,
                 ct.id AS contact_id, ct.display_name, ct.phone_e164,
@@ -105,6 +123,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
            JOIN contacts ct ON ct.id = c.contact_id
            JOIN channels ch ON ch.id = c.channel_id
            LEFT JOIN users u ON u.id = c.assignee_id
+           LEFT JOIN conversation_statuses cs ON cs.id = c.status_id
           ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit}`,
@@ -204,6 +223,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     Params: { id: string };
     Body: {
       status?: string;
+      statusId?: string | null;
       assigneeId?: string | null;
       addTag?: string;
       removeTag?: string;
@@ -219,6 +239,8 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       return reply.code(400).send({ error: 'bad_status' });
     }
 
+    const statusId = b.statusId === undefined ? undefined : b.statusId || null;
+
     const updated = await withTenant(pool, auth.tenantId, async (db) => {
       const sets: string[] = [];
       const params: unknown[] = [req.params.id];
@@ -227,11 +249,53 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
         return '$' + params.length;
       };
 
+      /*
+       * Род своего статуса читаем из справочника, а не берём с клиента:
+       * присланный род означал бы, что закрытость диалога решает форма,
+       * а не настройка, и один запрос мог бы положить закрытый статус в
+       * открытую вкладку.
+       */
+      let custom: { kind: StatusKind } | undefined;
+      if (statusId) {
+        const { rows } = await db.query<{ kind: StatusKind }>(
+          `SELECT kind FROM conversation_statuses WHERE id = $1::uuid LIMIT 1`,
+          [statusId],
+        );
+        custom = rows[0];
+      }
+
       if (b.status) {
         sets.push(`status = ${push(b.status)}::text`);
         // resolved_at ставим и снимаем вместе со статусом: иначе
         // переоткрытый диалог остаётся с датой закрытия и ломает отчёты.
         sets.push(b.status === 'resolved' ? `resolved_at = now()` : `resolved_at = NULL`);
+        /*
+         * Закрыли или открыли руками — свой статус снимаем. Он говорил
+         * про прошлое состояние («Чекаємо оплату» на закрытом диалоге
+         * читается как незакрытое дело), и оставить его значит показать
+         * человеку два противоречащих слова в одной строке.
+         */
+        if (!statusId) sets.push(`status_id = NULL`);
+      }
+
+      /*
+       * Свой статус. Системный ставится следом, из рода статуса, и
+       * поэтому его нельзя прислать вместе со своим: иначе окажется, что
+       * диалог с закрытым статусом лежит в открытых, и виноват будет
+       * порядок полей в запросе.
+       */
+      if (statusId !== undefined) {
+        if (statusId === null) {
+          sets.push(`status_id = NULL`);
+        } else {
+          if (!custom) return 'bad_status_id' as const;
+          sets.push(`status_id = ${push(statusId)}::uuid`);
+          const sys = systemStatusFor(custom.kind);
+          sets.push(`status = ${push(sys)}::text`);
+          sets.push(
+            sys === 'resolved' ? `resolved_at = coalesce(resolved_at, now())` : `resolved_at = NULL`,
+          );
+        }
       }
       if (b.assigneeId !== undefined) {
         sets.push(`assignee_id = ${push(b.assigneeId)}::uuid`);
@@ -255,6 +319,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       return (rowCount ?? 0) > 0;
     });
 
+    if (updated === 'bad_status_id') return reply.code(400).send({ error: 'bad_status_id' });
     if (!updated) return reply.code(404).send({ error: 'not_found' });
 
     // Прочитано у нас — значит прочитано и там. Иначе владелец видит в
