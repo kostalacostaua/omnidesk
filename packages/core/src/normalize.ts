@@ -413,7 +413,7 @@ export interface MessagingEvent {
     app_id?: number | string;
     is_deleted?: boolean;
     is_unsupported?: boolean;
-    reply_to?: { mid?: string };
+    reply_to?: { mid?: string; story?: { url?: string; id?: string } };
     attachments?: Array<{ type: string; payload?: { url?: string; title?: string } }>;
   };
   reaction?: { mid: string; action: 'react' | 'unreact'; emoji?: string; reaction?: string };
@@ -489,9 +489,44 @@ export function normalizeMessaging(
     }
     if (atts.length) content.attachments = atts;
     if (m.reply_to?.mid) content.replyToExternalId = m.reply_to.mid;
+
+    /*
+     * История и рилс.
+     *
+     * Ответ на историю Instagram кладёт в reply_to.story — сама история
+     * при этом приходит картинкой, и без пометки в ленте видно только
+     * её, без единого намёка, что человек отвечает на неё. Упоминание в
+     * истории и присланный рилс различаются типом вложения.
+     *
+     * Ссылка временная и умрёт вместе с историей — это нормально:
+     * пометка останется, и оператор хотя бы будет знать, о чём речь.
+     */
+    const story = m.reply_to?.story;
+    if (story?.url || story?.id) {
+      content.ig = { kind: 'story_reply' };
+      if (story.url) content.ig.url = story.url;
+      if (story.id) content.ig.id = story.id;
+    } else {
+      const kinds = (m.attachments ?? []).map((a) => a.type);
+      if (kinds.includes('story_mention')) {
+        content.ig = { kind: 'story_mention' };
+        const url = (m.attachments ?? []).find((a) => a.type === 'story_mention')?.payload?.url;
+        if (url) content.ig.url = url;
+      } else if (kinds.includes('ig_reel') || kinds.includes('reel')) {
+        content.ig = { kind: 'reel' };
+        const url = (m.attachments ?? []).find((a) => a.type === 'ig_reel' || a.type === 'reel')
+          ?.payload?.url;
+        if (url) content.ig.url = url;
+      } else if (kinds.includes('share')) {
+        content.ig = { kind: 'share' };
+      }
+    }
     if (!content.text && !atts.length) {
-      if (!m.is_unsupported) continue;
-      content.text = '[Сообщение этого типа не поддерживается — откройте его в приложении]';
+      // Репост чужой публикации приходит без текста и без файла, зато с
+      // пометкой: показать её честнее, чем выбросить сообщение вовсе.
+      if (content.ig) content.text = '[поділився публікацією]';
+      else if (!m.is_unsupported) continue;
+      else content.text = '[Сообщение этого типа не поддерживается — откройте его в приложении]';
     }
 
     out.push({

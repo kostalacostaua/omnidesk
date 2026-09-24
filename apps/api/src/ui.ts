@@ -711,6 +711,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
     align-items:start;font-size:12px;padding:7px 9px;border:1px solid var(--line);
     border-radius:10px;background:var(--panel2)}
   .mlrow .t{font-weight:700}
+  .prow{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:8px;align-items:center;
+    padding:6px 9px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+  .prow .t{font-weight:700;font-size:12.5px}
+  .prow input{font-size:12.5px;padding:6px 8px}
   .mlrow code{font-size:11.5px;word-break:break-all;white-space:normal}
   @media (max-width:700px){ .mlrow{grid-template-columns:1fr} }
   /* Комментарий в ленте: под каким постом он написан и ушёл ли ответ
@@ -1528,6 +1532,22 @@ function loadThread(){
         ? '<div class="cmt">' + esc(c.email.subject) + '</div>'
         : '';
 
+      // История и рилс. Пометка стоит над текстом: на что отвечает
+      // человек, важнее того, что именно он написал.
+      var IGK = {
+        story_reply: L('відповідь на вашу історію'),
+        story_mention: L('згадав вас в історії'),
+        reel: L('надіслав рілс'),
+        share: L('поділився публікацією')
+      };
+      var ig = c.ig && IGK[c.ig.kind]
+        ? '<div class="cmt">' +
+            (c.ig.url
+              ? '<a href="' + esc(c.ig.url) + '" target="_blank" rel="noopener">' + IGK[c.ig.kind] + '</a>'
+              : IGK[c.ig.kind]) +
+          '</div>'
+        : '';
+
       var cm = c.comment
         ? '<div class="cmt">' +
             (c.comment.private
@@ -1538,7 +1558,7 @@ function loadThread(){
           '</div>'
         : '';
 
-      var body = subj + cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
+      var body = subj + ig + cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
 
       return '<div class="mwrap ' + (isOut ? 'out' : 'in') + '" data-mid="' + m.id +
         '" data-ext="' + esc(m.external_id || '') + '" data-text="' + esc((c.text || '').slice(0,120)) + '">' +
@@ -2284,8 +2304,10 @@ function renderCard(){
             '<div id="oCart"></div>' +
             '<span class="ok" id="oDone"></span>' +
             '<div class="err" id="oErr"></div>'
-          : L('<div class="hint">Zoho вимагає в замовленні компанію, а в ліда її немає. ') +
-            L('Сконвертуйте ліда в контакт у Zoho — після цього замовлення зʼявиться тут.</div>'))
+          : L('<div class="hint">Клієнт у Zoho — лід, а замовлення робиться на контакт. ') +
+            L('Сконвертуйте ліда в Zoho і натисніть «Оновити звʼязок».</div>') +
+            L('<button class="ghost mini" id="cReSync">Оновити звʼязок</button>') +
+            '<div class="err" id="oErr"></div>')
       : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
@@ -2300,6 +2322,21 @@ function renderCard(){
 
   paintAvatars();
   wireOrder();
+
+  if (el('cReSync')) el('cReSync').onclick = function(){
+    var b = el('cReSync');
+    busy(b, true);
+    el('oErr').textContent = '';
+    api('/contacts/' + ct.id + '/crm/refresh', { method:'POST' })
+      .then(function(){ toast(L('Звʼязок оновлено')); loadCard() })
+      .catch(function(e){
+        var p = (e && e.payload) || {};
+        el('oErr').textContent = p.error === 'still_lead'
+          ? L('У Zoho це досі лід — сконвертуйте його там')
+          : ordWhy(e);
+        busy(b, false);
+      });
+  };
 
   if (el('cCoSave')) el('cCoSave').onclick = function(){
     var name = el('cCo').value.trim();
@@ -2493,6 +2530,7 @@ function ordFind(){
 function ordWhy(e){
   var p = (e && e.payload) || {};
   return p.error === 'not_linked' ? L('Спершу надішліть клієнта в Zoho')
+    : p.error === 'lead_not_converted' ? L('У Zoho це лід — сконвертуйте його в контакт')
     : p.error === 'lead_has_no_company' ? L('У ліда немає компанії — сконвертуйте його в контакт')
     : p.error === 'no_company' ? L('У картці клієнта в Zoho не вказана компанія')
     : p.error === 'zoho_not_connected' ? L('Zoho не підключена')
@@ -6877,6 +6915,7 @@ function mlConnect(){
 var OWN = { summary:null, list:[], total:0, q:'', open:null };
 
 function ownPill(state){
+  if (state === 'partner') return L('<span class="pill ok">партнер</span>');
   if (state === 'paid') return L('<span class="pill ok">оплачено</span>');
   if (state === 'due') return L('<span class="pill warn">спливає</span>');
   return L('<span class="pill crit">не оплачено</span>');
@@ -6927,6 +6966,22 @@ function paintOwner(){
       : '') +
     '</div>' +
 
+    /* Прайс. Тариф в трёх валютах: цена подставляется в карточке
+       клиента сама, и одинаковые клиенты перестают стоить по-разному. */
+    L('<div class="pg-sec"><h3>Ціни за тарифами</h3><div class="card">') +
+      '<div class="mlrec">' + PLANS.map(function(pl){
+        var row = (st.plan_prices || {})[pl] || {};
+        return '<div class="prow"><div class="t">' + esc(pl) + '</div>' +
+          INV_CUR.map(function(c){
+            return '<input data-price="' + pl + '" data-cur="' + c + '" placeholder="' + c +
+              '" value="' + esc(row[c] == null ? '' : row[c]) + '">';
+          }).join('') + '</div>';
+      }).join('') + '</div>' +
+      L('<div class="hint">Порожньо — ціни в цій валюті немає, і підставлятися вона не буде.</div>') +
+      L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="pSave">Зберегти ціни</button></div>') +
+      '<span class="ok" id="pOk"></span>' +
+    '</div></div>' +
+
     /* Реквизиты. Лежат здесь, а не в карточке клиента: они одни на все
        счета, и повторять их у каждого клиента незачем. */
     L('<div class="pg-sec"><h3>Реквізити для рахунків</h3><div class="card">') +
@@ -6953,6 +7008,23 @@ function paintOwner(){
     '</div>';
 
   el('ofind').onclick = function(){ OWN.q = el('oq').value.trim(); tabOwner() };
+  el('pSave').onclick = function(){
+    var prices = {};
+    Array.prototype.forEach.call(document.querySelectorAll('[data-price]'), function(x){
+      var v = x.value.trim();
+      if (!v) return;
+      prices[x.dataset.price] = prices[x.dataset.price] || {};
+      prices[x.dataset.price][x.dataset.cur] = v;
+    });
+    busy(el('pSave'), true);
+    api('/admin/settings', { method:'PATCH', body:{ planPrices: prices } })
+      .then(function(){
+        el('pOk').textContent = L('збережено');
+        OWNSET = Object.assign({}, OWNSET, { plan_prices: prices });
+      })
+      .catch(showErr).then(function(){ busy(el('pSave'), false) });
+  };
+
   el('sSave').onclick = function(){
     busy(el('sSave'), true);
     api('/admin/settings', { method:'PATCH', body:{
@@ -7024,6 +7096,13 @@ function paintOrg(){
         '<select id="oplan">' + PLANS.map(function(p){
           return '<option value="' + p + '"' + (t.plan === p ? ' selected' : '') + '>' + p + '</option>';
         }).join('') + '</select>' +
+        /* Вид кабинета. Партнёрский не платит по определению, и «оплачено
+           до» у него не спрашивают: это не оплаченный период. */
+        '<select id="okind">' +
+          L('<option value="client">клієнт</option>') +
+          '<option value="partner"' + (t.kind === 'partner' ? ' selected' : '') + '>' +
+            L('партнер') + '</option>' +
+        '</select>' +
         '<select id="ostatus">' +
           L('<option value="active">працює</option>') +
           '<option value="suspended"' + (t.status === 'suspended' ? ' selected' : '') + '>' +
@@ -7033,9 +7112,15 @@ function paintOrg(){
       '<div class="row2" style="margin-top:8px">' +
         L('<input id="oseats" type="number" min="1" placeholder="місць" value="') + esc(t.seatsLimit) + '">' +
         L('<input id="oprice" placeholder="ціна на місяць" value="') + esc(t.priceMonth == null ? '' : t.priceMonth) + '">' +
-        '<input id="ocur" value="' + esc(t.currency) + '" style="max-width:90px">' +
-        '<input id="opaid" type="date" value="' + esc(t.paidUntil || '') + '">' +
+        '<select id="ocur" style="max-width:100px">' + INV_CUR.map(function(c){
+          return '<option value="' + c + '"' + (t.currency === c ? ' selected' : '') + '>' + c + '</option>';
+        }).join('') + '</select>' +
+        '<input id="opaid" type="date" value="' + esc(t.paidUntil || '') + '"' +
+          (t.kind === 'partner' ? ' disabled' : '') + '>' +
       '</div>' +
+      (t.kind === 'partner'
+        ? L('<div class="hint">Партнерський кабінет: оплата не потрібна, у списку він завжди «партнер».</div>')
+        : '') +
       L('<textarea id="onote" rows="2" placeholder="Нотатка про клієнта" style="margin-top:8px">') +
         esc(t.note || '') + '</textarea>' +
       L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="osave">Зберегти</button>') +
@@ -7135,6 +7220,17 @@ function paintOrg(){
 
   el('oback').onclick = tabOwner;
   el('osave').onclick = ownSave;
+  el('oplan').onchange = ownPrice;
+  el('ocur').onchange = ownPrice;
+  el('okind').onchange = function(){
+    // Партнёру дата оплаты не нужна: он не платит.
+    el('opaid').disabled = el('okind').value === 'partner';
+  };
+  // Счёт по умолчанию — на цену тарифа в валюте тарифа. Девять раз из
+  // десяти выставляют именно её, а десятый правится одним полем.
+  if (t.priceMonth != null && !el('iamt').value) el('iamt').value = t.priceMonth;
+  if (t.currency) el('icur').value = t.currency;
+
   el('iadd').onclick = invIssue;
   el('icur').onchange = invRate;
   el('iday').onchange = invRate;
@@ -7320,12 +7416,35 @@ function invPrint(v){
   setTimeout(function(){ try { w.print() } catch(e){} }, 200);
 }
 
+/**
+ * Цена по прайсу.
+ *
+ * Тариф и валюта выбраны — цену незачем вспоминать и вписывать руками:
+ * так у трёх клиентов на одном тарифе оказываются три разные цены,
+ * про которые через месяц никто не помнит, откуда они взялись.
+ *
+ * Своя цена при этом остаётся возможной: поле обычное, и вписанное в
+ * него не затирается, пока человек сам не сменит тариф или валюту.
+ */
+function ownPrice(){
+  var prices = (OWNSET && OWNSET.plan_prices) || {};
+  var byCur = prices[el('oplan').value] || {};
+  var v = byCur[el('ocur').value];
+  if (v != null) el('oprice').value = v;
+  // Валюта счёта идёт за валютой тарифа: счёт выставляют в той же.
+  if (el('icur')) { el('icur').value = el('ocur').value; invRate() }
+  if (el('iamt') && !el('iamt').value && el('oprice').value) {
+    el('iamt').value = el('oprice').value;
+  }
+}
+
 function ownSave(){
   var t = OWN.open.tenant;
   el('oerr').textContent = '';
   busy(el('osave'), true);
   api('/admin/tenants/' + t.id, { method:'PATCH', body:{
     plan: el('oplan').value,
+    kind: el('okind').value,
     status: el('ostatus').value,
     seatsLimit: Number(el('oseats').value) || 1,
     priceMonth: el('oprice').value,

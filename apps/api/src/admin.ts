@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import {
   INVOICE_CURRENCIES,
+  accountState,
+  isTenantKind,
   invoiceNumber,
   isInvoiceCurrency,
   isoDay,
@@ -52,6 +54,7 @@ interface TenantRow {
   name: string;
   slug: string;
   plan: string;
+  kind: string;
   status: string;
   source: string;
   seats_limit: number;
@@ -129,7 +132,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       const { rows, total } = await withSystem(pool, 'список организаций', async (db) => {
         const like = `%${q.toLowerCase()}%`;
         const { rows } = await db.query<TenantRow>(
-          `SELECT id, name, slug, plan, status, source, seats_limit,
+          `SELECT id, name, slug, plan, kind, status, source, seats_limit,
                   paid_until, price_month, currency, note, created_at
              FROM tenants
             WHERE $1 = '' OR lower(name) LIKE $2 OR lower(slug) LIKE $2
@@ -152,6 +155,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
           name: t.name,
           slug: t.slug,
           plan: t.plan,
+          kind: t.kind,
           status: t.status,
           source: t.source,
           seatsLimit: t.seats_limit,
@@ -159,7 +163,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
           priceMonth: t.price_month === null ? null : Number(t.price_month),
           currency: t.currency,
           createdAt: t.created_at,
-          pay: payState(t.paid_until),
+          pay: accountState(t.kind, t.paid_until),
           ...m,
         });
       }
@@ -178,9 +182,13 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
   app.get('/admin/summary', async () => {
     const month = monthRange(new Date());
     const rows = await withSystem(pool, 'сводка по организациям', async (db) => {
-      const { rows } = await db.query<{ id: string; price_month: string | null; paid_until: string | null; created_at: string }>(
-        `SELECT id, price_month, paid_until, created_at FROM tenants WHERE status <> 'deleted'`,
-      );
+      const { rows } = await db.query<{
+        id: string;
+        kind: string;
+        price_month: string | null;
+        paid_until: string | null;
+        created_at: string;
+      }>(`SELECT id, kind, price_month, paid_until, created_at FROM tenants WHERE status <> 'deleted'`);
       return rows;
     });
 
@@ -189,9 +197,13 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     let fresh = 0;
     let messages = 0;
     let active = 0;
+    let partners = 0;
     for (const t of rows) {
       if (new Date(t.created_at) >= month.from) fresh += 1;
-      if (payState(t.paid_until) !== 'unpaid') {
+      // Партнёр в деньгах не участвует: он не платит и не должен.
+      // Считать его в «платят» — врать себе о выручке.
+      if (t.kind === 'partner') partners += 1;
+      else if (payState(t.paid_until) !== 'unpaid') {
         paying += 1;
         mrr += Number(t.price_month ?? 0);
       }
@@ -205,6 +217,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       tenants: rows.length,
       fresh,
       paying,
+      partners,
       active,
       mrr: Math.round(mrr * 100) / 100,
       messages,
@@ -215,7 +228,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
   app.get<{ Params: { id: string } }>('/admin/tenants/:id', async (req, reply) => {
     const t = await withSystem(pool, 'организация', async (db) => {
       const { rows } = await db.query<TenantRow>(
-        `SELECT id, name, slug, plan, status, source, seats_limit,
+        `SELECT id, name, slug, plan, kind, status, source, seats_limit,
                 paid_until, price_month, currency, note, created_at
            FROM tenants WHERE id = $1 LIMIT 1`,
         [req.params.id],
@@ -266,6 +279,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         name: t.name,
         slug: t.slug,
         plan: t.plan,
+        kind: t.kind,
         status: t.status,
         source: t.source,
         seatsLimit: t.seats_limit,
@@ -274,7 +288,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         currency: t.currency,
         note: t.note,
         createdAt: t.created_at,
-        pay: payState(t.paid_until),
+        pay: accountState(t.kind, t.paid_until),
       },
       ...inside,
       // Счётчики отдельным полем: в списках выше уже есть users и
@@ -294,6 +308,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     Params: { id: string };
     Body: {
       plan?: string;
+      kind?: string;
       status?: string;
       seatsLimit?: number;
       paidUntil?: string | null;
@@ -318,6 +333,10 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     if (b.status !== undefined) {
       if (!TENANT_STATUS.includes(String(b.status))) return reply.code(400).send({ error: 'bad_status' });
       put('status', b.status);
+    }
+    if (b.kind !== undefined) {
+      if (!isTenantKind(b.kind)) return reply.code(400).send({ error: 'bad_kind' });
+      put('kind', b.kind);
     }
     if (b.seatsLimit !== undefined) {
       const n = Math.max(1, Math.min(1000, Math.round(Number(b.seatsLimit) || 1)));
@@ -456,7 +475,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     const row = await withSystem(pool, 'реквизиты', async (db) => {
       const { rows } = await db.query(
         `SELECT seller_name, seller_tax_id, seller_iban, seller_bank,
-                seller_address, seller_note, invoice_prefix, invoice_seq
+                seller_address, seller_note, invoice_prefix, invoice_seq, plan_prices
            FROM platform_settings WHERE id = 1`,
       );
       return rows[0] ?? null;
@@ -473,6 +492,8 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       sellerAddress?: string;
       sellerNote?: string;
       invoicePrefix?: string;
+      /** Прайс: тариф → валюта → цена. Пустая цена значит «нет в прайсе». */
+      planPrices?: Record<string, Record<string, number | string>>;
     };
   }>('/admin/settings', async (req, reply) => {
     const b = req.body ?? {};
@@ -491,6 +512,23 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       if (v === undefined) continue;
       vals.push(String(v).slice(0, 300));
       sets.push(`${col} = $${vals.length}`);
+    }
+    if (b.planPrices !== undefined) {
+      // Прайс чистим сами: в базу должны попасть только known валюты и
+      // числа, иначе форма однажды запишет туда что угодно.
+      const clean: Record<string, Record<string, number>> = {};
+      for (const [plan, byCur] of Object.entries(b.planPrices ?? {})) {
+        if (!PLANS.includes(String(plan))) continue;
+        const row: Record<string, number> = {};
+        for (const [cur, v] of Object.entries(byCur ?? {})) {
+          if (!(INVOICE_CURRENCIES as readonly string[]).includes(cur)) continue;
+          const n = money(v);
+          if (n > 0) row[cur] = n;
+        }
+        if (Object.keys(row).length) clean[plan] = row;
+      }
+      vals.push(JSON.stringify(clean));
+      sets.push(`plan_prices = $${vals.length}::jsonb`);
     }
     if (!sets.length) return reply.code(400).send({ error: 'nothing_to_change' });
 

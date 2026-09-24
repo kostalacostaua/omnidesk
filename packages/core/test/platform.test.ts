@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isPlatformOwner, monthRange, parsePlatformOwners, payState } from '../src/platform.js';
+import {
+  accountState,
+  isPlatformOwner,
+  isTenantKind,
+  monthRange,
+  parsePlatformOwners,
+  payState,
+} from '../src/platform.js';
 
 describe('список владельцев платформы', () => {
   it('читает список через запятую, пробел и перевод строки', () => {
@@ -83,5 +90,28 @@ describe('состояние оплаты', () => {
 
   it('месяц впереди — оплачено', () => {
     expect(payState('2026-06-10', now)).toBe('paid');
+  });
+});
+
+describe('вид кабинета', () => {
+  const now = new Date('2026-05-10T00:00:00Z');
+
+  it('партнёр оплачен всегда и от дат не зависит', () => {
+    expect(accountState('partner', null, now)).toBe('partner');
+    expect(accountState('partner', '2020-01-01', now)).toBe('partner');
+  });
+
+  it('у клиента всё по-прежнему', () => {
+    expect(accountState('client', '2026-06-10', now)).toBe('paid');
+    expect(accountState('client', '2026-05-14', now)).toBe('due');
+    expect(accountState('client', null, now)).toBe('unpaid');
+    expect(accountState(null, null, now)).toBe('unpaid');
+  });
+
+  it('чужое слово партнёром не делает', () => {
+    expect(isTenantKind('partner')).toBe(true);
+    expect(isTenantKind('client')).toBe(true);
+    expect(isTenantKind('друг')).toBe(false);
+    expect(accountState('друг', null, now)).toBe('unpaid');
   });
 });

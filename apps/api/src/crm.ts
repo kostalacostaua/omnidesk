@@ -237,6 +237,80 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   }
 
   /**
+   * Лид, которого сконвертировали в контакт.
+   *
+   * Лида конвертируют в Zoho, а не у нас: там нажимают Convert, и лид
+   * превращается в контакт с компанией и сделкой. У нас же остаётся
+   * ссылка на лида, по которой Zoho отвечает «эта запись уже
+   * сконвертирована». Для человека это выглядит как сломанная ссылка в
+   * карточке и отказ «у ліда немає компанії» после того, как он всё
+   * сделал правильно.
+   *
+   * Поэтому связь догоняется сама: Zoho отдаёт в самом лиде, во что он
+   * превратился. Проверяем это в тот момент, когда связь понадобилась,
+   * а не на каждом открытии диалога — лишний поход в чужой API на
+   * каждый клик дорог и никому не нужен.
+   */
+  async function followConversion(
+    tenantId: string,
+    contactId: string,
+    leadId: string,
+    z: { inst: { api_domain: string }; head: Record<string, string> },
+  ): Promise<string | null> {
+    const res = await fetch(`${z.inst.api_domain}/crm/v6/Leads/${leadId}`, {
+      headers: z.head,
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return null;
+
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: Array<Record<string, unknown>>;
+    };
+    const row = body.data?.[0] ?? {};
+    const detail = row['$converted_detail'] as { contact?: string; contact_id?: string } | undefined;
+    const newId = String(detail?.contact ?? detail?.contact_id ?? '');
+    if (!row['$converted'] || !/^[0-9]+$/.test(newId)) return null;
+
+    await withTenant(pool, tenantId, async (db) => {
+      await db.query(
+        `UPDATE contacts SET crm_module = 'Contacts', crm_record_id = $2 WHERE id = $1`,
+        [contactId, newId],
+      );
+    });
+    app.log.info({ tenantId, contactId, leadId, newId }, 'Лид сконвертирован — связь переставлена на контакт');
+    return newId;
+  }
+
+  /**
+   * Перепроверить связь с CRM вручную.
+   *
+   * Нужна, когда лида сконвертировали, а в карточке ещё старая ссылка:
+   * кнопка дешевле объяснения «подождите, само обновится».
+   */
+  app.post<{ Params: { id: string } }>('/contacts/:id/crm/refresh', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ crm_module: string | null; crm_record_id: string | null }>(
+        `SELECT crm_module, crm_record_id FROM contacts WHERE id = $1 LIMIT 1`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!row.crm_record_id) return reply.code(409).send({ error: 'not_linked' });
+    if (row.crm_module === 'Contacts') return { module: 'Contacts', recordId: row.crm_record_id };
+
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    const moved = await followConversion(a.tenantId, req.params.id, row.crm_record_id, z);
+    if (!moved) return reply.code(409).send({ error: 'still_lead' });
+    return { module: 'Contacts', recordId: moved };
+  });
+
+  /**
    * Компания клиента в CRM.
    *
    * Просьба звучит как «создать компанию», но на деле их две: завести
@@ -434,16 +508,32 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     });
     if (!conv) return reply.code(404).send({ error: 'not_found' });
     if (!conv.crm_record_id) return reply.code(409).send({ error: 'not_linked' });
-    if (conv.crm_module !== 'Contacts') {
-      // У лида компании-карточки нет, а заказ без неё Zoho не примет.
-      return reply.code(409).send({ error: 'lead_has_no_company' });
-    }
 
     const z = await zohoFor(a.tenantId);
     if ('error' in z) return reply.code(409).send(z);
 
+    // Лида в заказ положить нельзя: у Sales_Orders поля под лида нет.
+    // Но лида могли сконвертировать в Zoho минуту назад — тогда связь
+    // догоняется сама, и отказывать не за что.
+    let recordId = conv.crm_record_id;
+    if (conv.crm_module !== 'Contacts') {
+      const moved = await followConversion(a.tenantId, conv.contact_id, recordId, z);
+      if (!moved) return reply.code(409).send({ error: 'lead_not_converted' });
+      recordId = moved;
+    }
+
+    /*
+     * Компания. Спрашиваем, но не требуем.
+     *
+     * В стандартной разметке Zoho компания у заказа обязательна, но
+     * разметку меняют, и в половине организаций это поле необязательное.
+     * Решать за чужую CRM, что ей обязательно, — верный способ
+     * запретить то, что она разрешает. Поэтому компанию подставляем,
+     * если она есть, а отказ, если он будет, придёт от самой Zoho и с
+     * её словами.
+     */
     const who = await fetch(
-      `${z.inst.api_domain}/crm/v6/Contacts/${conv.crm_record_id}?fields=Account_Name,Last_Name`,
+      `${z.inst.api_domain}/crm/v6/Contacts/${recordId}?fields=Account_Name,Last_Name`,
       { headers: z.head, signal: AbortSignal.timeout(20_000) },
     );
     if (!who.ok) return reply.code(502).send({ error: 'zoho_refused' });
@@ -451,7 +541,6 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       data?: Array<{ Account_Name?: { id?: string; name?: string } }>;
     };
     const accountId = whoBody.data?.[0]?.Account_Name?.id;
-    if (!accountId) return reply.code(409).send({ error: 'no_company' });
 
     const subject = orderSubject(req.body?.subject, conv.display_name);
 
@@ -462,8 +551,8 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
         data: [
           {
             Subject: subject,
-            Account_Name: { id: accountId },
-            Contact_Name: { id: conv.crm_record_id },
+            ...(accountId ? { Account_Name: { id: accountId } } : {}),
+            Contact_Name: { id: recordId },
             Product_Details: items.map((i) => ({
               product: { id: i.productId },
               quantity: i.quantity,

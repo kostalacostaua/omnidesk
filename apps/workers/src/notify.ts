@@ -215,26 +215,69 @@ export function createNotifier(deps: NotifyDeps) {
         });
     if (!token) throw new UnrecoverableError('Бот для оповіщень не знайдений');
 
-    const res = await fetch(`${telegramRoot}/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const post = (to: string) =>
+      fetch(`${telegramRoot}/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: to,
+          text,
+          parse_mode: 'HTML',
+          link_preview_options: { is_disabled: true },
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
 
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { description?: string };
-      const detail = body.description ?? `Telegram відповів ${res.status}`;
-      // 400 «chat not found» и 403 «bot was kicked» повторять
-      // бессмысленно: нужно исправить настройку, а не подождать.
-      if (res.status === 400 || res.status === 403) throw new UnrecoverableError(detail);
-      throw new Error(detail);
+    const res = await post(chatId);
+    if (res.ok) return;
+
+    const body = (await res.json().catch(() => ({}))) as {
+      description?: string;
+      parameters?: { migrate_to_chat_id?: number };
+    };
+
+    /*
+     * Группа стала супергруппой.
+     *
+     * Это происходит само: кто-то включил историю для новых участников
+     * или сделал группу публичной, и Telegram выдаёт чату новый
+     * идентификатор, а по старому отвечает отказом. Человек при этом
+     * ничего не менял и видит «оповещения перестали приходить».
+     *
+     * Новый идентификатор Telegram присылает прямо в отказе — берём
+     * его, запоминаем и отправляем ещё раз. Просить человека
+     * переподключить группу в этом месте значит переложить на него
+     * чужую техническую подробность.
+     */
+    const moved = body.parameters?.migrate_to_chat_id;
+    if (moved && String(moved) !== chatId) {
+      await withTenant(pool, tenantId, async (db) => {
+        await db.query(
+          `UPDATE notify_targets
+              SET config = config || jsonb_build_object('chatId', $2::text)
+            WHERE id = $1`,
+          [target.id, String(moved)],
+        );
+      });
+      log('info', 'Группа Telegram стала супергруппой, идентификатор обновлён', {
+        targetId: target.id,
+        from: chatId,
+        to: String(moved),
+      });
+
+      const again = await post(String(moved));
+      if (again.ok) return;
+      const body2 = (await again.json().catch(() => ({}))) as { description?: string };
+      const detail2 = body2.description ?? `Telegram відповів ${again.status}`;
+      if (again.status === 400 || again.status === 403) throw new UnrecoverableError(detail2);
+      throw new Error(detail2);
     }
+
+    const detail = body.description ?? `Telegram відповів ${res.status}`;
+    // 400 «chat not found» и 403 «bot was kicked» повторять
+    // бессмысленно: нужно исправить настройку, а не подождать.
+    if (res.status === 400 || res.status === 403) throw new UnrecoverableError(detail);
+    throw new Error(detail);
   }
 
   async function sendEmail(

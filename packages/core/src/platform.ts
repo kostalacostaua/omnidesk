@@ -71,6 +71,32 @@ export function monthRange(when: Date, back = 0): { from: Date; to: Date; label:
  */
 export type PayState = 'unpaid' | 'due' | 'paid';
 
+/**
+ * Вид кабинета: клиент или партнёр.
+ *
+ * Партнёрский кабинет денег не приносит и не должен: его держат те, кто
+ * приводит клиентов. «Не оплачено» напротив такого кабинета — шум, от
+ * которого перестают замечать настоящие долги.
+ */
+export type TenantKind = 'client' | 'partner';
+export const TENANT_KINDS: TenantKind[] = ['client', 'partner'];
+
+export function isTenantKind(v: unknown): v is TenantKind {
+  return v === 'client' || v === 'partner';
+}
+
+/** Состояние кабинета: у партнёра оно одно и от дат не зависит. */
+export type AccountState = PayState | 'partner';
+
+export function accountState(
+  kind: string | null | undefined,
+  paidUntil: string | Date | null | undefined,
+  now: Date = new Date(),
+): AccountState {
+  if (kind === 'partner') return 'partner';
+  return payState(paidUntil, now);
+}
+
 export function payState(paidUntil: string | Date | null | undefined, now: Date = new Date()): PayState {
   if (!paidUntil) return 'unpaid';
   const end = paidUntil instanceof Date ? paidUntil : new Date(paidUntil);
