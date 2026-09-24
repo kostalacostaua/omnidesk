@@ -190,10 +190,59 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
                    coalesce(t.work_hours->>'tz', 'UTC')), 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE e.type = 'message.in')  AS msg_in,
                 count(*) FILTER (WHERE e.type = 'message.out') AS msg_out,
-                count(*) FILTER (WHERE e.type = 'conversation.new') AS conversations
+                count(*) FILTER (WHERE e.type = 'conversation.new') AS conversations,
+                count(*) FILTER (WHERE e.type = 'status'
+                                   AND (e.payload->>'resolved') = 'true') AS resolved
            FROM events e CROSS JOIN tenants t
           WHERE t.id = e.tenant_id AND ${sql}
           GROUP BY 1 ORDER BY 1`,
+        params,
+      );
+
+      /*
+       * Распределение времени первой ответа по корзинам.
+       *
+       * Медиана говорит про обычный случай, девятый дециль — про
+       * худшее, но ни то ни другое не показывает формы: бывает, что
+       * половина ответов уходит за минуту, а вторая половина — за час,
+       * и «медиана 20 минут» описывает случай, которого не было ни
+       * разу. Корзины показывают это сразу.
+       *
+       * Границы выбраны по тому, как человек ждёт: минуты, четверть
+       * часа, полчаса, час, полдня и «на следующий день».
+       */
+      const { rows: waitRows } = await db.query(
+        `SELECT CASE
+                  WHEN ${wait} <= 300   THEN 0
+                  WHEN ${wait} <= 900   THEN 1
+                  WHEN ${wait} <= 1800  THEN 2
+                  WHEN ${wait} <= 3600  THEN 3
+                  WHEN ${wait} <= 14400 THEN 4
+                  ELSE 5
+                END AS bucket,
+                count(*) AS n
+           FROM events e
+          WHERE ${sql} AND e.type = 'reply' AND ${wait} IS NOT NULL
+          GROUP BY 1 ORDER BY 1`,
+        params,
+      );
+
+      /*
+       * Когда пишут клиенты: часы против дней недели.
+       *
+       * Это единственная цифра в отчёте, по которой составляют
+       * расписание смен. Считается в поясе компании — в UTC картина
+       * сдвинута на три часа, и утренний пик оказывается ночным.
+       */
+      const { rows: heatRows } = await db.query(
+        `SELECT extract(isodow from e.at AT TIME ZONE
+                   coalesce(t.work_hours->>'tz', 'UTC'))::int AS dow,
+                extract(hour  from e.at AT TIME ZONE
+                   coalesce(t.work_hours->>'tz', 'UTC'))::int AS hour,
+                count(*) AS n
+           FROM events e CROSS JOIN tenants t
+          WHERE t.id = e.tenant_id AND ${sql} AND e.type = 'message.in'
+          GROUP BY 1, 2`,
         params,
       );
 
@@ -237,6 +286,8 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         byChannel,
         byUser,
         byDay,
+        waitRows,
+        heatRows,
         resolve: resolveRows[0] ?? {},
         goals,
       };
@@ -323,6 +374,18 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         messagesIn: Number(r['msg_in'] ?? 0),
         messagesOut: Number(r['msg_out'] ?? 0),
         conversations: Number(r['conversations'] ?? 0),
+        resolved: Number(r['resolved'] ?? 0),
+      })),
+      // Корзины отдаются всегда все шесть, даже пустые: иначе график
+      // молча меняет форму, и «за час» оказывается соседом «за минуту».
+      waitBuckets: [0, 1, 2, 3, 4, 5].map((b) => ({
+        bucket: b,
+        count: Number(data.waitRows.find((r) => Number(r['bucket']) === b)?.['n'] ?? 0),
+      })),
+      heat: data.heatRows.map((r) => ({
+        dow: Number(r['dow'] ?? 0),
+        hour: Number(r['hour'] ?? 0),
+        count: Number(r['n'] ?? 0),
       })),
     };
   });

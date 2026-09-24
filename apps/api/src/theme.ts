@@ -42,6 +42,12 @@ const DARK = `color-scheme:dark;
     --shadow:0 1px 2px rgba(0,0,0,.4);
     --lift:0 18px 40px -18px rgba(0,0,0,.7),0 2px 10px -6px rgba(0,0,0,.6);
     --lift2:0 30px 80px -30px rgba(0,0,0,.85),0 4px 16px -8px rgba(0,0,0,.6);
+    /* Цвета графиков. Отдельно от интерфейсных: у них своя работа —
+       различать ряды, а не выделять кнопку. Шаги подобраны под тёмную
+       подложку и проверены на различимость при дальтонизме. */
+    --viz1:#3987e5;--viz2:#d95926;--viz3:#199e70;
+    --heat0:rgba(255,255,255,.05);--heat1:#16233a;--heat2:#1d3760;
+    --heat3:#234f8e;--heat4:#2a6bbf;--heat5:#3987e5;
     --good:#47cd89;--good-bg:rgba(71,205,137,.12);--warn:#fdb022;--warn-bg:rgba(253,176,34,.12);
     --crit:#f97066;--crit-bg:rgba(249,112,102,.12);
     --rail:rgba(18,24,46,.55);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(255,255,255,.1);
@@ -83,6 +89,9 @@ export const TOKENS_CSS = `
     --shadow:0 1px 2px rgba(11,16,34,.05);
     --lift:0 18px 44px -20px rgba(11,16,34,.3),0 2px 8px -4px rgba(11,16,34,.1);
     --lift2:0 30px 70px -28px rgba(11,16,34,.3),0 4px 14px -8px rgba(11,16,34,.14);
+    --viz1:#2a78d6;--viz2:#eb6834;--viz3:#1baf7a;
+    --heat0:rgba(11,16,34,.05);--heat1:#e8f0fb;--heat2:#c3d9f4;
+    --heat3:#8fb8e9;--heat4:#558fdc;--heat5:#2a78d6;
     --good:#067647;--good-bg:#e9faf1;--warn:#b54708;--warn-bg:#fff6e6;
     --crit:#d92d20;--crit-bg:#fdeeed;
     --rail:rgba(255,255,255,.5);--railT:#6b7288;--railOn:#0b1022;--railOnBg:rgba(255,255,255,.75);

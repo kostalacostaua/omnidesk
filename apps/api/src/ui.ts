@@ -721,6 +721,49 @@ export const INBOX_HTML = `<!DOCTYPE html>
      в личные. Мелко и рядом с текстом — это пометка, а не сообщение. */
   .cmt{font-size:11px;opacity:.72;margin-bottom:4px}
   .cmt a{color:inherit;text-decoration:underline}
+
+  /* ── Графики ──────────────────────────────────────────────────
+     Тонкие метки, скруглённый верх столбца, зазор в два пиксела между
+     соседними, приглушённая сетка. Подпись значений — не на каждом
+     столбце, а в подсказке: числа на каждом пикселе читать невозможно. */
+  .viz{position:relative;padding-top:6px}
+  .vbars{display:flex;align-items:flex-end;gap:5px;height:172px;position:relative;z-index:1}
+  .vday{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;cursor:default}
+  .vcol{display:flex;align-items:flex-end;gap:2px;height:150px;width:100%;justify-content:center}
+  .vcol i{width:9px;max-width:42%;border-radius:4px 4px 0 0;display:block;min-height:2px;
+    transition:opacity .12s ease}
+  .vcol i.a{background:var(--viz1)}
+  .vcol i.b{background:var(--viz2)}
+  .vday:hover .vcol i{opacity:.7}
+  .vday span{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:100%}
+  .vgrid{position:absolute;left:0;right:0;top:6px;bottom:22px;z-index:0}
+  .vgrid u{position:absolute;left:0;right:0;border-top:1px solid var(--line);opacity:.7}
+  .vgrid u b{position:absolute;left:0;top:-8px;font-size:10px;color:var(--t3);font-weight:400;
+    background:transparent}
+  .vlegend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--t2);margin-top:10px}
+  .vlegend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;
+    vertical-align:-1px}
+  /* Распределение: ряд подписан словами, а число стоит рядом со
+     столбцом — без него длину пришлось бы измерять глазом. */
+  .vrow{display:grid;grid-template-columns:132px minmax(0,1fr) 52px;gap:10px;align-items:center;
+    font-size:12.5px;margin-top:7px;color:var(--t2)}
+  .vrow .f{height:10px;border-radius:5px;background:var(--panel2);overflow:hidden}
+  .vrow .f i{display:block;height:100%;border-radius:5px;background:var(--viz1);min-width:2px}
+  .vrow .n{text-align:right;color:var(--t1);font-weight:600;font-variant-numeric:tabular-nums}
+  /* Тепловая карта: один тон, от светлого к тёмному. Радуги здесь быть
+     не может — величина одна, и цвет обязан читаться как «больше». */
+  .vheat{display:grid;grid-template-columns:36px repeat(24,minmax(0,1fr));gap:2px;align-items:center}
+  .vheat .h{font-size:10px;color:var(--t3)}
+  .vheat .c{height:15px;border-radius:3px;background:var(--heat0)}
+  .vheat .c.s1{background:var(--heat1)} .vheat .c.s2{background:var(--heat2)}
+  .vheat .c.s3{background:var(--heat3)} .vheat .c.s4{background:var(--heat4)}
+  .vheat .c.s5{background:var(--heat5)}
+  .vscale{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--t3);margin-top:10px}
+  .vscale i{width:22px;height:10px;border-radius:3px;display:inline-block}
+  .vtip{position:fixed;z-index:400;pointer-events:none;background:var(--solid);
+    border:1px solid var(--line2);border-radius:9px;padding:7px 10px;font-size:12px;color:var(--t1);
+    box-shadow:var(--lift);white-space:pre-line;max-width:260px}
   /* Полоса «вы под клиентом». Висит поверх всего и не двигает вёрстку:
      забыть, от чьего имени пишешь, — самая дорогая ошибка в этой панели. */
   #impbar{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:300;
@@ -5457,6 +5500,7 @@ function dur(sec){
  */
 var RP_TABS = [
   ['overview', 'Огляд'],
+  ['when', 'Коли пишуть'],
   ['channels', 'Канали'],
   ['team', 'Команда'],
   ['sla', 'SLA'],
@@ -5527,6 +5571,7 @@ function tabReports(){
       }).join('') + '</div>' +
 
       (RP.tab === 'overview' ? rpOverview(d, t)
+        : RP.tab === 'when' ? rpWhen(d)
         : RP.tab === 'channels' ? rpChannels(d)
         : RP.tab === 'team' ? rpTeam(d)
         : rpSla(d, t)) +
@@ -5581,11 +5626,193 @@ function tabReports(){
   }).catch(sErr);
 }
 
+/* ══════════════ Графики ══════════════ */
+
+/**
+ * Подсказка под курсором.
+ *
+ * Одна на всю страницу и вешается один раз: столбцов в отчёте сотни, и
+ * свой обработчик на каждом — это сотни обработчиков, которые надо
+ * снимать при каждой перерисовке.
+ *
+ * Подписывать каждое значение прямо на графике нельзя: числа на каждом
+ * пикселе не читаются. Поэтому значения живут в подсказке, а рядом с
+ * графиком всегда есть таблица с теми же числами — для тех, кому мышь
+ * не помощник.
+ */
+var TIP = null;
+
+function tipShow(text, x, y){
+  if (!TIP){
+    TIP = document.createElement('div');
+    TIP.className = 'vtip';
+    document.body.appendChild(TIP);
+  }
+  TIP.textContent = text;
+  TIP.style.display = 'block';
+  var w = TIP.offsetWidth, h = TIP.offsetHeight;
+  TIP.style.left = Math.max(8, Math.min(x + 14, window.innerWidth - w - 8)) + 'px';
+  TIP.style.top = Math.max(8, y - h - 12) + 'px';
+}
+
+function tipHide(){ if (TIP) TIP.style.display = 'none' }
+
+function wireTips(){
+  document.addEventListener('mouseover', function(e){
+    var n = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (n) tipShow(n.dataset.tip, e.clientX, e.clientY);
+  });
+  document.addEventListener('mousemove', function(e){
+    if (!TIP || TIP.style.display === 'none') return;
+    var n = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (n) tipShow(n.dataset.tip, e.clientX, e.clientY);
+    else tipHide();
+  });
+  document.addEventListener('mouseout', function(e){
+    var n = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (n) tipHide();
+  });
+  window.addEventListener('scroll', tipHide, true);
+}
+
+/** Круглое число для верхней линии сетки: 7 превращается в 10, 43 — в 50. */
+function niceTop(v){
+  if (v <= 5) return 5;
+  var p = Math.pow(10, String(Math.round(v)).length - 1);
+  return Math.ceil(v / (p / 2)) * (p / 2);
+}
+
+/**
+ * Два ряда по дням.
+ *
+ * Именно столбцы, а не линия: дни дискретны, и линия между вторником и
+ * средой рисует значения, которых не существует. Ряда два — входящие и
+ * исходящие; третьим тут была бы уже каша.
+ *
+ * Подписи дней прореживаются: на месяце тридцать подписей налезают
+ * друг на друга и не читаются ни одна.
+ */
+function vizDays(days, a, b, labelA, labelB){
+  if (!days.length) return '';
+  var top = niceTop(Math.max.apply(null, [1].concat(days.map(function(x){
+    return Math.max(x[a] || 0, x[b] || 0);
+  }))));
+  var every = days.length > 24 ? 7 : days.length > 12 ? 2 : 1;
+
+  return '<div class="viz">' +
+    '<div class="vgrid">' +
+      [0, 0.5, 1].map(function(k){
+        return '<u style="top:' + Math.round((1 - k) * 100) + '%"><b>' +
+          esc(Math.round(top * k)) + '</b></u>';
+      }).join('') +
+    '</div>' +
+    '<div class="vbars">' +
+      days.map(function(x, i){
+        var t = fmtDate(x.day) + NL + labelA + ': ' + (x[a] || 0) + NL + labelB + ': ' + (x[b] || 0);
+        return '<div class="vday" data-tip="' + esc(t) + '">' +
+          '<div class="vcol">' +
+            '<i class="a" style="height:' + Math.round((x[a] || 0) / top * 100) + '%"></i>' +
+            '<i class="b" style="height:' + Math.round((x[b] || 0) / top * 100) + '%"></i>' +
+          '</div>' +
+          '<span>' + (i % every === 0 || i === days.length - 1 ? esc(x.day.slice(5)) : '') + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    '<div class="vlegend">' +
+      '<span><i style="background:var(--viz1)"></i>' + esc(labelA) + '</span>' +
+      '<span><i style="background:var(--viz2)"></i>' + esc(labelB) + '</span>' +
+    '</div>' +
+  '</div>';
+}
+
+/**
+ * Распределение времени первой ответа.
+ *
+ * Медиана говорит про обычный случай, девятый дециль — про худшее, но
+ * форму не показывает ни то ни другое: бывает, что половина ответов
+ * уходит за минуту, а вторая — за час, и «медиана двадцать минут»
+ * описывает случай, которого не было ни разу.
+ */
+var WAIT_LABELS = [
+  L('до 5 хвилин'), L('5–15 хвилин'), L('15–30 хвилин'),
+  L('30–60 хвилин'), L('1–4 години'), L('довше 4 годин')
+];
+
+function vizWait(buckets){
+  var list = buckets || [];
+  var total = list.reduce(function(s, x){ return s + (x.count || 0) }, 0);
+  if (!total) return L('<div class="hint">Відповідей за цей період не було.</div>');
+  var top = Math.max.apply(null, [1].concat(list.map(function(x){ return x.count || 0 })));
+
+  return '<div class="viz">' + list.map(function(x){
+    var share = Math.round((x.count || 0) / total * 100);
+    return '<div class="vrow" data-tip="' + esc(WAIT_LABELS[x.bucket] + ': ' + x.count + ' (' + share + '%)') + '">' +
+      '<span>' + esc(WAIT_LABELS[x.bucket] || '') + '</span>' +
+      '<span class="f"><i style="width:' + Math.round((x.count || 0) / top * 100) + '%"></i></span>' +
+      '<span class="n">' + esc(x.count || 0) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+/**
+ * Когда пишут клиенты: часы против дней недели.
+ *
+ * Единственная картинка в отчёте, по которой составляют расписание
+ * смен. Один тон от светлого к тёмному: величина одна, и цвет обязан
+ * читаться как «больше», а не как «другое». Радуга здесь была бы
+ * красивой и нечитаемой.
+ */
+var DOW = [L('Пн'), L('Вт'), L('Ср'), L('Чт'), L('Пт'), L('Сб'), L('Нд')];
+
+function vizHeat(cells){
+  var list = cells || [];
+  if (!list.length) return L('<div class="hint">Вхідних за цей період не було.</div>');
+
+  var byKey = {}, top = 0;
+  list.forEach(function(c){
+    byKey[c.dow + ':' + c.hour] = c.count;
+    if (c.count > top) top = c.count;
+  });
+
+  var head = '<div class="vheat"><span class="h"></span>' +
+    Array.from({ length: 24 }, function(_, h){
+      return '<span class="h" style="text-align:center">' + (h % 3 === 0 ? h : '') + '</span>';
+    }).join('') +
+    [1, 2, 3, 4, 5, 6, 7].map(function(d){
+      return '<span class="h">' + DOW[d - 1] + '</span>' +
+        Array.from({ length: 24 }, function(_, h){
+          var n = byKey[d + ':' + h] || 0;
+          // Пять ступеней: больше глаз всё равно не различает, а
+          // меньше — и вечерний пик сливается с обеденным.
+          var step = !n ? 0 : Math.min(5, Math.ceil(n / top * 5));
+          var t = DOW[d - 1] + ', ' + h + ':00 — ' + n;
+          return '<span class="c' + (step ? ' s' + step : '') + '" data-tip="' + esc(t) + '"></span>';
+        }).join('');
+    }).join('') +
+    '</div>';
+
+  return head +
+    '<div class="vscale">' + L('менше') +
+      [1, 2, 3, 4, 5].map(function(s){ return '<i style="background:var(--heat' + s + ')"></i>' }).join('') +
+      L('більше · до ') + esc(top) + L(' за годину') +
+    '</div>';
+}
+
+/** Доли по величине: один ряд, поэтому один тон и подпись у каждого. */
+function vizShare(rows, label, value, total){
+  var top = Math.max.apply(null, [1].concat(rows.map(function(r){ return r[value] || 0 })));
+  return '<div class="viz">' + rows.map(function(r){
+    var share = total ? Math.round((r[value] || 0) / total * 100) : 0;
+    return '<div class="vrow" data-tip="' + esc(r[label] + ': ' + (r[value] || 0) + ' (' + share + '%)') + '">' +
+      '<span>' + esc(r[label]) + '</span>' +
+      '<span class="f"><i style="width:' + Math.round((r[value] || 0) / top * 100) + '%"></i></span>' +
+      '<span class="n">' + esc(r[value] || 0) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
 function rpOverview(d, t){
   var days = d.byDay || [];
-  var top = Math.max.apply(null, [1].concat(days.map(function(x){
-    return Math.max(x.messagesIn, x.messagesOut);
-  })));
   var msgs = (t.messagesIn || 0) + (t.messagesOut || 0);
 
   return '<div class="nums">' +
@@ -5617,17 +5844,20 @@ function rpOverview(d, t){
     L('діалог живе і вночі, і у вихідні, і саме стільки клієнт чекає розвʼязки.</div>') +
     '</div></div>' +
 
+    L('<div class="pg-sec"><h3>Розподіл часу першої відповіді</h3><div class="card">') +
+    vizWait(d.waitBuckets) +
+    L('<div class="hint">Медіана ховає форму: буває, що половина відповідей іде за хвилину, ') +
+    L('а друга половина — за годину, і «медіана 20 хвилин» описує випадок, якого не було жодного разу.</div>') +
+    '</div></div>' +
+
     (days.length
-      ? L('<div class="pg-sec"><h3>По днях</h3><div class="card"><div class="bars">') +
-        days.map(function(x){
-          return '<div class="bar" title="' + esc(x.day) + ': ' + x.messagesIn +
-            L(' вхідних, ') + x.messagesOut + L(' вихідних">') +
-            '<div class="bcol"><i class="in" style="height:' +
-              Math.round(x.messagesIn / top * 100) + '%"></i>' +
-            '<i class="out" style="height:' + Math.round(x.messagesOut / top * 100) + '%"></i>' +
-            '</div><span>' + esc(x.day.slice(5)) + '</span></div>';
-        }).join('') + '</div>' +
-        L('<div class="hint"><b class="in">■</b> вхідні · <b class="out">■</b> вихідні</div>') +
+      ? L('<div class="pg-sec"><h3>Повідомлення по днях</h3><div class="card">') +
+        vizDays(days, 'messagesIn', 'messagesOut', L('вхідні'), L('вихідні')) +
+        '</div></div>' +
+        L('<div class="pg-sec"><h3>Діалоги по днях</h3><div class="card">') +
+        vizDays(days, 'conversations', 'resolved', L('нові'), L('закриті')) +
+        L('<div class="hint">Нові і закриті поруч: якщо закритих постійно менше, черга росте, ') +
+        L('і це видно раніше, ніж за скаргами.</div>') +
         '</div></div>'
       : '');
 }
@@ -5649,7 +5879,29 @@ function rpChannels(d){
         '<td style="width:120px"><span class="sbar"><i style="width:' +
         Math.round(c.messagesIn / top * 100) + '%"></i></span></td></tr>';
     }).join('') + '</tbody></table></div>' +
-    L('<div class="hint">Рядок клікається: відкриється список чатів цього каналу.</div></div>');
+    L('<div class="hint">Рядок клікається: відкриється список чатів цього каналу.</div></div>') +
+
+    L('<div class="pg-sec"><h3>Частки каналів</h3><div class="card">') +
+    vizShare(list.map(function(c){
+      return { name: c.name || CH[c.type] || c.type, messagesIn: c.messagesIn };
+    }), 'name', 'messagesIn', list.reduce(function(s2, c){ return s2 + (c.messagesIn || 0) }, 0)) +
+    L('<div class="hint">Рахуємо по вхідних: саме вони показують, звідки насправді йдуть клієнти, ') +
+    L('а не де ми більше написали.</div>') +
+    '</div></div>';
+}
+
+/**
+ * Когда пишут клиенты.
+ *
+ * Отдельная вкладка, а не картинка в обзоре: по ней составляют
+ * расписание смен, и смотреть её приходят отдельно.
+ */
+function rpWhen(d){
+  return L('<div class="pg-sec"><h3>Коли пишуть клієнти</h3><div class="card">') +
+    vizHeat(d.heat) +
+    L('<div class="hint">Години у вашому часовому поясі. Темніше — більше вхідних. ') +
+    L('За цією картинкою складають графік змін: порожні ранки і завалений вечір видно одразу.</div>') +
+    '</div></div>';
 }
 
 /**
@@ -7594,6 +7846,7 @@ function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
 
 function start(){
   applyLang();
+  wireTips();
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
   fitHeight();
