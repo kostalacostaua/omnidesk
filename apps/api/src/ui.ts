@@ -285,6 +285,15 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .addrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:12px;
     border-top:1px dashed var(--line2)}
 
+  /* Папка в списке шаблонов — заголовок группы, а не строка списка:
+     её нельзя открыть или выбрать, в неё можно только положить. */
+  .qfd{display:flex;align-items:center;gap:9px;padding:12px 0 6px;flex-wrap:wrap}
+  .qfd .nm{font-weight:600;font-size:13.5px}
+  .qfd .dim{font-size:12px}
+  .mvsel{padding:4px 7px;font-size:12px;border-radius:7px;max-width:150px;
+    background:var(--panel);border:1px solid var(--line);color:var(--t1)}
+  .tplbox .qfdl{padding:6px 11px 3px;font-size:11px;font-weight:600;
+    color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
   .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;
     max-height:180px;overflow-y:auto;background:var(--panel)}
   .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12.5px}
@@ -1662,14 +1671,21 @@ function toggleTemplates(){
     b.style.display = 'block';
     return;
   }
-  b.innerHTML = QR.map(function(q, i){
-    var n = (q.attachments || []).length;
-    return '<div class="qr" data-i="' + i + '"><b>/' + esc(q.shortcut) + '</b>' +
-      (n ? '<span class="chip">📎 ' + n + '</span> ' : '') +
-      '<span class="x">' + esc(q.body) + '</span></div>';
+  /* Папки и здесь: список в поле ответа — тот же список, что в
+     настройках, и порядок в них обязан совпадать. Заголовок папки
+     показывается только тогда, когда папка есть: в плоском списке
+     лишняя строка сверху была бы просто шумом. */
+  b.innerHTML = qrGroups().map(function(g){
+    return (g.folder ? '<div class="qfdl">' + esc(g.folder) + '</div>' : '') +
+      g.items.map(function(q){
+        var n = (q.attachments || []).length;
+        return '<div class="qr" data-i="' + QR.indexOf(q) + '"><b>/' + esc(q.shortcut) + '</b>' +
+          (n ? '<span class="chip">📎 ' + n + '</span> ' : '') +
+          '<span class="x">' + esc(q.body) + '</span></div>';
+      }).join('');
   }).join('');
   b.style.display = 'block';
-  Array.prototype.forEach.call(b.children, function(node){
+  Array.prototype.forEach.call(b.querySelectorAll('[data-i]'), function(node){
     node.onclick = function(){
       useTemplate(QR[Number(node.dataset.i)]);
       b.style.display = 'none';
@@ -4962,14 +4978,106 @@ function moveStatus(id, dir){
     .catch(sErr);
 }
 
+/* ── Папки шаблонов ───────────────────────────────────────────────
+   Папка — это имя в поле шаблона, а не сущность со своей жизнью.
+   Поэтому здесь нет ни создания, ни удаления: папка появляется с
+   первым шаблоном и исчезает с последним. Раскладка повторяет ту, что
+   делает сервер (packages/core/src/replies.ts): порядок в настройках и
+   в поле ответа обязан быть одним, иначе человек ищет шаблон дважды
+   по-разному. */
+function qrFolder(v){
+  // Без регулярных выражений: в этом файле обратный слэш запрещён — он
+  // ломается при сборке интерфейса в одну строку.
+  var s = String(v == null ? '' : v);
+  [13, 10, 9].forEach(function(code){ s = s.split(String.fromCharCode(code)).join(' ') });
+  while (s.indexOf('  ') >= 0) s = s.split('  ').join(' ');
+  return s.trim();
+}
+
+function qrGroups(){
+  var map = {}, order = [];
+  QR.forEach(function(q){
+    var name = qrFolder(q.folder), key = name.toLowerCase();
+    if (!map[key]){ map[key] = { folder:name, items:[] }; order.push(key) }
+    map[key].items.push(q);
+  });
+  var out = order.map(function(k){ return map[k] });
+  out.forEach(function(g){
+    g.items.sort(function(a, b){ return a.shortcut.localeCompare(b.shortcut, 'uk') });
+  });
+  // «Без папки» — в конец: это обычно остатки, и держать их наверху
+  // значит показывать беспорядок раньше порядка.
+  return out.sort(function(a, b){
+    if (!a.folder) return 1;
+    if (!b.folder) return -1;
+    return a.folder.localeCompare(b.folder, 'uk');
+  });
+}
+
+/* Список папок приходит с сервера вместе с шаблонами: он нужен для
+   подсказки и для выбора, и считать его второй раз здесь — значит
+   завести второе мнение о том, какие папки существуют. */
+var QRF = [];
+
+function qrFolders(){ return QRF }
+
+/** Строка шаблона. Вынесена, потому что рисуется внутри каждой папки. */
+function qrItem(q){
+  var files = q.attachments || [];
+  var chips = files.map(function(a, i){
+    return '<span class="fchip" title="' + esc(a.filename || L('файл')) + '">' +
+      '<span class="ic">' + (String(a.mime || '').indexOf('image/') === 0 ? '🖼' : '📄') + '</span>' +
+      '<a href="#" data-open="' + q.id + '" data-oi="' + i + '">' + esc(a.filename || L('файл')) + '</a>' +
+      '<span class="dim">' + Math.round((a.size || 0) / 1024) + L(' КБ</span>') +
+      '<span class="x" data-del="' + q.id + '" data-di="' + i + L('" title="Прибрати файл">×</span></span>');
+  }).join('');
+  return '<div class="item"><div style="min-width:0">' +
+    '<div class="t"><code>/' + esc(q.shortcut) + '</code></div>' +
+    '<div class="s">' + esc(q.body) + '</div>' +
+    (chips ? '<div class="fchips">' + chips + '</div>' : '') +
+    '</div>' +
+    '<div style="display:flex;gap:6px;flex:none">' +
+    '<select class="mvsel" data-mv="' + q.id + '" title="' + L('Папка') + '">' +
+      '<option value=""' + (qrFolder(q.folder) ? '' : ' selected') + '>' + L('Без папки') + '</option>' +
+      qrFolders().map(function(f){
+        return '<option value="' + esc(f) + '"' +
+          (qrFolder(q.folder).toLowerCase() === f.toLowerCase() ? ' selected' : '') +
+          '>' + esc(f) + '</option>';
+      }).join('') +
+      '<option value="__new">' + L('Нова папка...') + '</option>' +
+    '</select>' +
+    (files.length < 3
+      ? '<button class="ghost mini" data-file="' + q.id + L('">Файл</button>') : '') +
+    '<button class="ghost mini" data-qr="' + q.id + L('">Видалити</button></div></div>');
+}
+
+function moveReply(id, folder){
+  return api('/quick-replies/' + id, { method:'PATCH', body:{ folder: folder } })
+    .then(function(){
+      tabReplies();
+      renderComposer(true);
+      toast(folder ? L('Перекладено: ') + folder : L('Прибрано з папки'));
+    })
+    .catch(sErr);
+}
+
 function tabReplies(){
   api('/quick-replies').then(function(d){
     QR = d.quickReplies || [];
+    QRF = d.folders || [];
     pageBox().innerHTML = '<div class="pg">' +
       pageHead(L('Шаблони відповідей'), L('Заготовки, які оператор вставляє в листування командою ') +
         L('<b>/імʼя</b>. До шаблону можна додати до трьох файлів — прайс, схему проїзду, інструкцію.')) +
       L('<div class="card"><h3>Новий шаблон</h3>') +
-      L('<div class="row2"><input id="qsc" placeholder="коротке імʼя, наприклад ціна"></div>') +
+      '<div class="row2" style="display:flex;gap:8px;flex-wrap:wrap">' +
+      L('<input id="qsc" placeholder="коротке імʼя, наприклад ціна" style="flex:1;min-width:180px">') +
+      /* Папка задаётся при создании, а не после: шаблон создают пачками,
+         и переносить потом по одному — та же работа второй раз. Список
+         существующих папок подсказкой, но вписать можно и новую. */
+      L('<input id="qfd" list="qfdl" placeholder="папка (необовʼязково)" style="flex:1;min-width:150px">') +
+      '<datalist id="qfdl">' + qrFolders().map(function(f){
+        return '<option value="' + esc(f) + '">';
+      }).join('') + '</datalist></div>' +
       '<div class="row2" style="margin-top:9px">' +
       L('<textarea id="qbd" rows="3" placeholder="Текст, який підставиться в поле відповіді"></textarea>') +
       '</div>' +
@@ -4987,25 +5095,21 @@ function tabReplies(){
       '<input type="file" id="qrNewFile" style="display:none"></div>' +
 
       L('<div class="card"><h3>Шаблони (') + QR.length + ')</h3>' +
-      (QR.length ? QR.map(function(q){
-        var files = q.attachments || [];
-        var chips = files.map(function(a, i){
-          return '<span class="fchip" title="' + esc(a.filename || L('файл')) + '">' +
-            '<span class="ic">' + (String(a.mime || '').indexOf('image/') === 0 ? '🖼' : '📄') + '</span>' +
-            '<a href="#" data-open="' + q.id + '" data-oi="' + i + '">' + esc(a.filename || L('файл')) + '</a>' +
-            '<span class="dim">' + Math.round((a.size || 0) / 1024) + L(' КБ</span>') +
-            '<span class="x" data-del="' + q.id + '" data-di="' + i + L('" title="Прибрати файл">×</span></span>');
-        }).join('');
-        return '<div class="item"><div style="min-width:0">' +
-          '<div class="t"><code>/' + esc(q.shortcut) + '</code></div>' +
-          '<div class="s">' + esc(q.body) + '</div>' +
-          (chips ? '<div class="fchips">' + chips + '</div>' : '') +
-          '</div>' +
-          '<div style="display:flex;gap:6px;flex:none">' +
-          (files.length < 3
-            ? '<button class="ghost mini" data-file="' + q.id + L('">Файл</button>') : '') +
-          '<button class="ghost mini" data-qr="' + q.id + L('">Видалити</button></div></div>');
-      }).join('') : L('<div class="hint">Поки порожньо.</div>')) + '</div></div>';
+      (QR.length
+        ? qrGroups().map(function(g){
+            /* Заголовок группы — и есть папка. Отдельной сущности нет:
+               папка живёт, пока в ней что-то лежит. Кнопка переименования
+               стоит тут же, потому что это единственное действие, которое
+               у папки вообще есть. */
+            return '<div class="qfd">' +
+              '<span class="nm">' + (g.folder ? esc(g.folder) : L('Без папки')) + '</span>' +
+              '<span class="dim">' + g.items.length + '</span>' +
+              (g.folder
+                ? '<button class="ghost mini" data-ren="' + esc(g.folder) + L('">Перейменувати</button>')
+                : '') +
+              '</div>' + g.items.map(qrItem).join('');
+          }).join('')
+        : L('<div class="hint">Поки порожньо.</div>')) + '</div></div>';
 
     // Файл к новому шаблону выбирается до сохранения и уезжает сразу
     // после того, как шаблон получил свой номер.
@@ -5023,7 +5127,7 @@ function tabReplies(){
       el('qerr').textContent = '';
       busy(el('qadd'), true);
       api('/quick-replies', { method:'POST', body:{
-        shortcut: el('qsc').value, body: el('qbd').value
+        shortcut: el('qsc').value, body: el('qbd').value, folder: el('qfd').value
       }}).then(function(created){
         var id = created && (created.quickReply ? created.quickReply.id : created.id);
         if (!newFile || !id) return null;
@@ -5048,6 +5152,61 @@ function tabReplies(){
     armDelete(pageBox().querySelectorAll('[data-qr]'), function(b){
       return api('/quick-replies/' + b.dataset.qr, { method:'DELETE' })
         .then(function(){ tabReplies(); renderComposer(true) });
+    });
+
+    /* Перекладывание шаблона. Новая папка заводится прямо отсюда: иначе
+       первый шаблон в новую папку положить нечем — она ведь и появляется
+       только вместе с ним. */
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-mv]'), function(sel){
+      sel.onchange = function(){
+        var id = sel.dataset.mv;
+        if (sel.value !== '__new'){ moveReply(id, sel.value); return }
+        var inp = document.createElement('input');
+        inp.placeholder = L('назва папки');
+        inp.style.maxWidth = '150px';
+        sel.parentNode.replaceChild(inp, sel);
+        inp.focus();
+        inp.onkeydown = function(ev){ if (ev.key === 'Enter') inp.blur() };
+        inp.onblur = function(){
+          var v = inp.value.trim();
+          if (v) moveReply(id, v); else tabReplies();
+        };
+      };
+    });
+
+    /* Переименование папки. Одним запросом на всю папку, а не по
+       шаблону: на двадцати шаблонах обрыв посередине оставил бы
+       половину в старой папке. */
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-ren]'), function(b){
+      b.onclick = function(){
+        var head = b.parentNode, from = b.dataset.ren;
+        head.innerHTML = '';
+        var inp = document.createElement('input');
+        inp.value = from;
+        inp.style.maxWidth = '220px';
+        var ok = document.createElement('button');
+        ok.className = 'mini';
+        ok.textContent = L('Зберегти');
+        var no = document.createElement('button');
+        no.className = 'ghost mini';
+        no.textContent = L('Скасувати');
+        head.appendChild(inp); head.appendChild(ok); head.appendChild(no);
+        inp.focus(); inp.select();
+        no.onclick = function(){ tabReplies() };
+        ok.onclick = function(){
+          busy(ok, true);
+          var to = inp.value.trim();
+          api('/quick-replies/folders', { method:'PATCH', body:{ from: from, to: to } })
+            .then(function(){
+              tabReplies();
+              renderComposer(true);
+              // Пустое имя — это не ошибка, а «вынести из папки». Так и
+              // говорим, иначе человек решит, что шаблоны пропали.
+              toast(to ? L('Папку перейменовано') : L('Шаблони прибрано з папки'));
+            })
+            .catch(function(e){ busy(ok, false); sErr(e) });
+        };
+      };
     });
 
     // Файл выбирается одним скрытым полем на всю страницу: по одному
@@ -5509,7 +5668,10 @@ function start(){
   loadTags();
   loadStatuses();
   api('/teammates').then(function(d){ MATES = d.users || [] }).catch(function(){});
-  api('/quick-replies').then(function(d){ QR = d.quickReplies || [] }).catch(function(){});
+  api('/quick-replies').then(function(d){
+    QR = d.quickReplies || [];
+    QRF = d.folders || [];
+  }).catch(function(){});
   api('/settings/ai').then(function(d){
     AI.ready = Boolean(d && d.connected && d.mode !== 'off');
     if (AI.ready && current) renderComposer(true);

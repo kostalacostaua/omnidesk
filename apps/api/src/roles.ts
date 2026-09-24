@@ -32,6 +32,9 @@ const ADMIN_PREFIXES = [
   '/scenarios',
   '/users',
   '/quick-replies',
+  // Статусы — справочник компании, а не заметка оператора: одно
+  // переименование меняет список у всей смены.
+  '/statuses',
   '/zoho',
   '/data-deletion',
   '/tenant',

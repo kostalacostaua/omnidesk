@@ -23,6 +23,10 @@ describe('какой уровень нужен запросу', () => {
     expect(requiredLevel('POST', '/scenarios')).toBe('admin');
     expect(requiredLevel('PATCH', '/users/u1')).toBe('admin');
     expect(requiredLevel('POST', '/quick-replies')).toBe('admin');
+    expect(requiredLevel('POST', '/statuses')).toBe('admin');
+    expect(requiredLevel('PATCH', '/statuses/s1')).toBe('admin');
+    // А читать справочник обязан любой: статус стоит в шапке чата.
+    expect(requiredLevel('GET', '/statuses')).toBe('any');
     expect(requiredLevel('PATCH', '/tenant')).toBe('admin');
   });
 

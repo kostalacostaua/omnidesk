@@ -16,6 +16,7 @@ export * from './custom.js';
 export * from './webchat.js';
 export * from './workhours.js';
 export * from './statuses.js';
+export * from './replies.js';
 export * from './routing.js';
 export * from './notify.js';
 export * from './mail.js';

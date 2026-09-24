@@ -15,6 +15,9 @@ import {
   decryptJson,
   graphGet,
   parseTemplates,
+  folderNames,
+  groupByFolder,
+  replyFolder,
   canSendWhatsapp,
   wabaFromDebug,
   type DebugTokenReply,
@@ -1159,17 +1162,28 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     if (!auth) return reply.code(401).send(auth401);
 
     const rows = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query(
-        `SELECT id, shortcut, body, attachments, created_at
-           FROM quick_replies ORDER BY shortcut ASC`,
+      const { rows } = await db.query<{ shortcut: string; folder: string }>(
+        `SELECT id, shortcut, body, attachments, folder, created_at FROM quick_replies`,
       );
       return rows;
     });
 
-    return { quickReplies: rows };
+    /*
+     * Порядок задаёт код, а не SQL: тот же список показывается в поле
+     * ответа, и правило «папки по алфавиту, без папки — в конец, внутри
+     * по сокращению» должно быть записано ровно в одном месте. В SQL
+     * оно жило бы вторым, чуть-чуть другим — с иным пониманием
+     * регистра и украинской буквы «і».
+     */
+    const groups = groupByFolder(rows);
+
+    return {
+      quickReplies: groups.flatMap((g) => g.items),
+      folders: folderNames(rows),
+    };
   });
 
-  app.post<{ Body: { shortcut?: string; body?: string } }>(
+  app.post<{ Body: { shortcut?: string; body?: string; folder?: string } }>(
     '/quick-replies',
     async (req, reply) => {
       const auth = requireAuth(req);
@@ -1180,18 +1194,80 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       if (!shortcut || !body) return reply.code(400).send({ error: 'shortcut_and_body_required' });
       if (shortcut.length > 32) return reply.code(400).send({ error: 'shortcut_too_long' });
 
+      const folder = replyFolder(req.body?.folder);
+
       const id = await withTenant(pool, auth.tenantId, async (db) => {
         const { rows } = await db.query<{ id: string }>(
-          `INSERT INTO quick_replies (tenant_id, shortcut, body)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (tenant_id, shortcut) DO UPDATE SET body = EXCLUDED.body
+          `INSERT INTO quick_replies (tenant_id, shortcut, body, folder)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, shortcut)
+             DO UPDATE SET body = EXCLUDED.body, folder = EXCLUDED.folder
            RETURNING id`,
-          [auth.tenantId, shortcut, body],
+          [auth.tenantId, shortcut, body, folder],
         );
         return rows[0]!.id;
       });
 
-      return reply.code(201).send({ id, shortcut });
+      return reply.code(201).send({ id, shortcut, folder });
+    },
+  );
+
+  /**
+   * Переименование папки.
+   *
+   * Отдельной ручкой, а не перебором шаблонов из браузера: папка на
+   * двадцать шаблонов переименовалась бы двадцатью запросами, и любой
+   * обрыв посередине оставил бы половину в старой папке, половину в
+   * новой. Здесь это один UPDATE.
+   *
+   * Он же — способ склеить две папки: переименовали «доставку» в
+   * «Доставка» — шаблоны сошлись. И способ вынести из папки: пустое имя
+   * означает «без папки».
+   */
+  app.patch<{ Body: { from?: string; to?: string } }>(
+    '/quick-replies/folders',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const from = replyFolder(req.body?.from);
+      const to = replyFolder(req.body?.to);
+      if (!from) return reply.code(400).send({ error: 'folder_required' });
+
+      const moved = await withTenant(pool, auth.tenantId, async (db) => {
+        // Сравнение без регистра: человек переименовывает ту папку,
+        // которую видит, а видит он её в том виде, в каком показали.
+        const { rowCount } = await db.query(
+          `UPDATE quick_replies SET folder = $2 WHERE lower(folder) = lower($1)`,
+          [from, to],
+        );
+        return rowCount ?? 0;
+      });
+
+      if (!moved) return reply.code(404).send({ error: 'not_found' });
+      return { moved, folder: to };
+    },
+  );
+
+  /** Перенос одного шаблона: та же папка, но для одной строки. */
+  app.patch<{ Params: { id: string }; Body: { folder?: string } }>(
+    '/quick-replies/:id',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+      if (req.body?.folder === undefined) return reply.code(400).send({ error: 'nothing' });
+
+      const folder = replyFolder(req.body.folder);
+      const ok = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rowCount } = await db.query(
+          `UPDATE quick_replies SET folder = $2 WHERE id = $1`,
+          [req.params.id, folder],
+        );
+        return (rowCount ?? 0) > 0;
+      });
+
+      if (!ok) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true, folder };
     },
   );
 
