@@ -23,6 +23,13 @@ import {
   wabaFromDebug,
   type DebugTokenReply,
   CUSTOM_CHANNEL,
+  ResendError,
+  dnsRows,
+  domainReady,
+  resendCreateDomain,
+  resendFindDomain,
+  resendGetDomain,
+  resendVerifyDomain,
   newCustomKey,
   newCustomSecret,
   WEBCHAT_CHANNEL,
@@ -72,6 +79,9 @@ export interface SettingsDeps {
   telegramWebhookSecret: string;
   mtproto?: { redis: Redis; loginQueue: Queue<MtprotoLoginJob> };
   meta?: { appId: string; appSecret: string; appUrl: string; stateSecret: string; redis: Redis; configId?: string };
+  /** Ключ Resend: домены почтовых каналов живут в нашем аккаунте. */
+  resendApiKey?: string;
+  resendRoot?: string;
   /**
    * Кто смотрит: владелец платформы и не под клиентом ли он сейчас.
    *
@@ -785,6 +795,157 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return { channelId, key, secret, outUrl, inUrl: `${appUrl}/channels/custom/messages` };
     },
   );
+
+  /**
+   * Почта.
+   *
+   * Подключение — это домен, а не логин с паролем: письма принимает
+   * наш сервер, и для этого у домена должна стоять MX-запись на него.
+   * Поэтому просим поддомен (help.firma.com), а не основной домен:
+   * MX у домена один, и перенаправив его, клиент потеряет собственную
+   * почту сотрудников. Об этом написано прямо в форме — молчаливое
+   * «упс» здесь стоит рабочего ящика.
+   *
+   * Домен заводится в нашем аккаунте Resend, поэтому ключ здесь наш, а
+   * не клиента: клиенту незачем заводить учётную запись у почтового
+   * провайдера ради того, чтобы им пользовались мы.
+   */
+  app.post<{ Body: { domain?: string; localPart?: string; displayName?: string } }>(
+    '/settings/channels/email',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+      if (!deps.resendApiKey) return reply.code(503).send({ error: 'email_unavailable' });
+
+      const domain = String(req.body?.domain ?? '').trim().toLowerCase().replace(/^https?:[/][/]/, '');
+      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+        return reply.code(400).send({ error: 'bad_domain' });
+      }
+      const local = (String(req.body?.localPart ?? '').trim().toLowerCase() || 'support')
+        .replace(/[^a-z0-9._-]/g, '')
+        .slice(0, 40);
+      if (!local) return reply.code(400).send({ error: 'bad_address' });
+      const address = `${local}@${domain}`;
+
+      // Домен занят другой организацией — это не ошибка ввода, а чужой
+      // домен, и объяснить это надо прямо.
+      const owner = await withSystem(pool, 'владелец почтового домена', async (db) => {
+        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+          `SELECT channel_id, tenant_id FROM channel_routes
+            WHERE channel_type = 'email' AND external_id = $1 LIMIT 1`,
+          [domain],
+        );
+        return rows[0] ?? null;
+      });
+      if (owner && owner.tenant_id !== auth.tenantId) {
+        return reply.code(409).send({ error: 'domain_taken' });
+      }
+
+      const opts = { apiKey: deps.resendApiKey, ...(deps.resendRoot ? { root: deps.resendRoot } : {}) };
+      let dom;
+      try {
+        dom = await resendCreateDomain(opts, domain);
+      } catch (err) {
+        // Домен мог остаться в Resend от прошлой неудачной попытки:
+        // второй раз его не заведут, и без этого человек упирается в
+        // «уже существует» без выхода.
+        const found = err instanceof ResendError ? await resendFindDomain(opts, domain).catch(() => null) : null;
+        if (!found) {
+          const detail = err instanceof ResendError ? err.detail.slice(0, 300) : String(err);
+          app.log.warn({ err, domain }, 'Resend не завёл домен');
+          return reply.code(502).send({ error: 'resend_refused', detail });
+        }
+        dom = await resendGetDomain(opts, found.id).catch(() => found);
+      }
+
+      const channelId = owner?.channel_id ?? randomUUID();
+      const title = req.body?.displayName?.trim().slice(0, 80) || address;
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, 'email', $3, $4, $5, $6, $7)
+           ON CONFLICT (type, external_id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 credentials_enc = EXCLUDED.credentials_enc,
+                 meta = EXCLUDED.meta, status = EXCLUDED.status, last_error = NULL`,
+          [
+            channelId,
+            auth.tenantId,
+            title,
+            domain,
+            encryptJson(masterKey, auth.tenantId, { domainId: dom.id, domain, address }),
+            JSON.stringify({ domain, address, records: dnsRows(dom), status: dom.status }),
+            domainReady(dom) ? 'active' : 'pending',
+          ],
+        );
+      });
+
+      return { channelId, domain, address, status: dom.status, records: dnsRows(dom) };
+    },
+  );
+
+  /**
+   * Перепроверка домена.
+   *
+   * DNS расходится не мгновенно, и первая проверка почти всегда
+   * отвечает «ещё нет». Поэтому кнопка, а не единственная попытка при
+   * подключении: человек добавил записи и нажал, когда готов.
+   */
+  app.post<{ Params: { id: string } }>('/channels/:id/email/verify', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+    if (!deps.resendApiKey) return reply.code(503).send({ error: 'email_unavailable' });
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ credentials_enc: Buffer }>(
+        `SELECT credentials_enc FROM channels WHERE id = $1 AND type = 'email' LIMIT 1`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    const creds = decryptJson<{ domainId: string; domain: string; address: string }>(
+      masterKey,
+      auth.tenantId,
+      row.credentials_enc,
+    );
+    const opts = { apiKey: deps.resendApiKey, ...(deps.resendRoot ? { root: deps.resendRoot } : {}) };
+
+    try {
+      await resendVerifyDomain(opts, creds.domainId);
+    } catch (err) {
+      // Просьба проверить могла не пройти по лимиту — состояние всё
+      // равно читаем: оно могло подтвердиться до нашего нажатия.
+      app.log.info({ err }, 'Resend не принял просьбу о проверке домена');
+    }
+
+    let dom;
+    try {
+      dom = await resendGetDomain(opts, creds.domainId);
+    } catch (err) {
+      const detail = err instanceof ResendError ? err.detail.slice(0, 300) : String(err);
+      return reply.code(502).send({ error: 'resend_refused', detail });
+    }
+
+    const ready = domainReady(dom);
+    await withTenant(pool, auth.tenantId, async (db) => {
+      await db.query(
+        `UPDATE channels
+            SET meta = meta || $2::jsonb, status = $3,
+                last_error = CASE WHEN $3 = 'active' THEN NULL ELSE last_error END
+          WHERE id = $1`,
+        [
+          req.params.id,
+          JSON.stringify({ records: dnsRows(dom), status: dom.status }),
+          ready ? 'active' : 'pending',
+        ],
+      );
+    });
+
+    return { status: dom.status, ready, records: dnsRows(dom) };
+  });
 
   /** Ключ, секрет подписи и адрес: их показывают и меняют после подключения. */
   app.get<{ Params: { id: string } }>('/channels/:id/custom', async (req, reply) => {

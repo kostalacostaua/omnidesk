@@ -57,6 +57,7 @@ export const CRM_SOURCE: Record<string, string> = {
   messenger: 'Facebook Messenger',
   whatsapp: 'WhatsApp',
   viber_business: 'Viber',
+  email: 'Пошта',
   messenger_comments: 'Facebook, коментарі',
   instagram_comments: 'Instagram, коментарі',
   webchat: 'Чат на сайті',

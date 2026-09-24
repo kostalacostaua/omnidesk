@@ -111,7 +111,7 @@ export interface MtprotoInboundPayload {
 export interface InboundJob {
   channelId: string;
   tenantId: string;
-  provider: 'telegram' | 'meta' | 'mtproto' | 'viber' | 'webchat' | 'custom';
+  provider: 'telegram' | 'meta' | 'mtproto' | 'viber' | 'webchat' | 'custom' | 'resend';
   /** Сырое тело вебхука как есть. */
   payload: unknown;
   receivedAt: string;
@@ -173,8 +173,14 @@ export interface MediaJob {
   channelId: string;
   messageId: string;
   attachmentIndex: number;
-  provider: 'telegram' | 'meta';
+  provider: 'telegram' | 'meta' | 'resend';
   externalId: string;
+  /**
+   * Объект, внутри которого лежит файл: у почты это письмо. Вложение
+   * письма нельзя забрать по одному своему идентификатору — ссылку на
+   * него выдают только вместе с письмом.
+   */
+  sourceId?: string;
   /**
    * Аватар едет через ту же очередь, что и вложения.
    *

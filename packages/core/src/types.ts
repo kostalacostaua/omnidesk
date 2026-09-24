@@ -35,7 +35,12 @@ export type ChannelType =
    * человек, и уходит он под пост, а не в переписку.
    */
   | 'messenger_comments'
-  | 'instagram_comments';
+  | 'instagram_comments'
+  /**
+   * Почта. Собеседник пишет с обычного ящика, и у переписки есть тема и
+   * цепочка — то, чего нет ни в одном мессенджере.
+   */
+  | 'email';
 
 export type Direction = 'in' | 'out';
 export type SenderType = 'customer' | 'agent' | 'bot' | 'system';
@@ -83,6 +88,18 @@ export interface MessageContent {
     /** Ответ ушёл в личные, а не под пост. */
     private?: boolean;
   };
+  /**
+   * Письмо: тема и цепочка. Лежит рядом с текстом, потому что нужно и
+   * оператору на экране, и при ответе — чтобы он ушёл в ту же цепочку,
+   * а не отдельным письмом.
+   */
+  email?: {
+    subject?: string;
+    messageId?: string;
+    references?: string;
+    to?: string[];
+    cc?: string[];
+  };
 }
 
 export interface UnifiedMessage {
@@ -100,6 +117,12 @@ export interface UnifiedMessage {
     avatarUrl?: string;
     /** MTProto: без access_hash написать пользователю нельзя. */
     accessHash?: string;
+    /**
+     * Почта собеседника. Отдельно от username: по ней ищут клиента в
+     * CRM, и складывать туда «ник, который выглядит как адрес» —
+     * значит однажды отправить письмо в никуда.
+     */
+    email?: string;
   };
   direction: Direction;
   senderType: SenderType;
@@ -178,6 +201,9 @@ export function computeResponseWindow(
     // кнопки, и живут они в том месте, где кнопка.
     case 'messenger_comments':
     case 'instagram_comments':
+    // У почты окон нет и быть не может: это не чужая площадка с
+    // правилами, а протокол, которому тридцать лет.
+    case 'email':
     case 'webchat':
     case 'custom':
     case 'telegram_bot':

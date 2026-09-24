@@ -8,6 +8,7 @@ import {
   verifyMetaSignature,
   verifyMetaSubscription,
   verifyTelegramSecret,
+  verifyResendSignature,
   type InboundJob,
 } from '@omnidesk/core';
 
@@ -31,6 +32,7 @@ const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 const META_APP_SECRET = process.env.META_APP_SECRET ?? '';
 const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN ?? '';
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+const RESEND_WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET ?? '';
 
 /** Сколько помним обработанные message_id. Meta ретраит до 7 дней. */
 const DEDUP_TTL_SECONDS = 7 * 24 * 3600;
@@ -44,6 +46,7 @@ const app = Fastify({
         'req.headers.authorization',
         'req.headers["x-hub-signature-256"]',
         'req.headers["x-telegram-bot-api-secret-token"]',
+        'req.headers["svix-signature"]',
         'req.body',
       ],
       remove: true,
@@ -140,6 +143,68 @@ app.post('/webhooks/meta', async (req, reply) => {
       { jobId: undefined },
     )
     .catch((err) => app.log.error({ err }, 'Не удалось поставить задачу meta в очередь'));
+
+  return reply.code(200).send({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Почта (Resend)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Входящее письмо.
+ *
+ * В вебхуке приходят только метаданные — само письмо забирает воркер по
+ * идентификатору. Здесь как и везде: проверить подпись, положить в
+ * очередь, ответить 200.
+ *
+ * Подписывает Svix, и проверка у него своя: подписывается
+ * «идентификатор.время.тело», а время проверяется обязательно — иначе
+ * перехваченный запрос можно повторять годами.
+ */
+app.post('/webhooks/resend', async (req, reply) => {
+  const raw = (req as { rawBody?: Buffer }).rawBody;
+  const h = req.headers;
+  const one = (v: unknown) => (typeof v === 'string' ? v : undefined);
+
+  if (
+    !raw ||
+    !verifyResendSignature(
+      raw,
+      {
+        ...(one(h['svix-id']) ? { id: one(h['svix-id']) as string } : {}),
+        ...(one(h['svix-timestamp']) ? { timestamp: one(h['svix-timestamp']) as string } : {}),
+        ...(one(h['svix-signature']) ? { signature: one(h['svix-signature']) as string } : {}),
+      },
+      RESEND_WEBHOOK_SECRET,
+    )
+  ) {
+    app.log.warn({ ip: req.ip }, 'Отклонён вебхук Resend: неверная подпись');
+    return reply.code(401).send({ error: 'invalid_signature' });
+  }
+
+  const body = req.body as { type?: string; data?: { email_id?: string } };
+  // Статусы отправленных писем нам пока не нужны: в ленте состояние
+  // ответа мы и так показываем, а строить по ним отчёт никто не просил.
+  if (body?.type !== 'email.received' || !body?.data?.email_id) {
+    return reply.code(200).send({ ok: true });
+  }
+
+  void inboundQueue
+    .add(
+      'resend',
+      {
+        provider: 'resend',
+        // Канал ищет воркер: в вебхуке есть адрес получателя, а по нему
+        // домен, а по домену канал.
+        channelId: '',
+        tenantId: '',
+        payload: req.body,
+        receivedAt: new Date().toISOString(),
+      },
+      { jobId: dedupeKey('resend', String(body.data.email_id)) },
+    )
+    .catch((err) => app.log.error({ err }, 'Не удалось поставить письмо в очередь'));
 
   return reply.code(200).send({ ok: true });
 });

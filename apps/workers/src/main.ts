@@ -28,6 +28,17 @@ import {
   normalizeMessagingReactions,
   splitMessagingPayload,
   splitCommentPayload,
+  EMAIL_CHANNEL,
+  normalizeEmail,
+  addressDomain,
+  parseAddress,
+  replySubject,
+  threadHeaders,
+  fromHeader,
+  resendReceivedEmail,
+  resendReceivedAttachment,
+  resendSend,
+  ResendError,
   normalizeComments,
   isCommentChannel,
   type CommentEntry,
@@ -227,9 +238,14 @@ async function persistMessage(
 
     if (!contactId) {
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO contacts (tenant_id, display_name, phone_e164)
-         VALUES ($1, $2, $3) RETURNING id`,
-        [msg.tenantId, msg.peerProfile.name ?? null, msg.peerProfile.phone ?? null],
+        `INSERT INTO contacts (tenant_id, display_name, phone_e164, email)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [
+          msg.tenantId,
+          msg.peerProfile.name ?? null,
+          msg.peerProfile.phone ?? null,
+          msg.peerProfile.email ?? null,
+        ],
       );
       contactId = rows[0]!.id;
 
@@ -244,6 +260,16 @@ async function persistMessage(
       );
       // Если гонку выиграл другой воркер — берём его contact_id.
       contactId = linked[0]!.contact_id;
+    }
+
+    // Почта известного контакта: клиент мог прийти сначала в Telegram,
+    // а потом написать письмом. Пустое поле заполняем, заполненное не
+    // трогаем — там может стоять адрес, который вписал оператор.
+    if (contactId && msg.peerProfile.email) {
+      await db.query(
+        `UPDATE contacts SET email = $2 WHERE id = $1 AND (email IS NULL OR email = '')`,
+        [contactId, msg.peerProfile.email],
+      );
     }
 
     // 2. Диалог + окно ответа
@@ -393,7 +419,8 @@ const inboundQueue = new Queue<InboundJob>(QUEUE_INBOUND, { connection, defaultJ
 async function enqueueMedia(
   msg: UnifiedMessage,
   messageId: string,
-  provider: 'telegram' | 'meta',
+  provider: 'telegram' | 'meta' | 'resend',
+  sourceId?: string,
 ): Promise<void> {
   const list = msg.content.attachments ?? [];
   for (let i = 0; i < list.length; i++) {
@@ -408,6 +435,7 @@ async function enqueueMedia(
         attachmentIndex: i,
         provider,
         externalId: att.externalId,
+        ...(sourceId ? { sourceId } : {}),
       },
       // jobId по сообщению и индексу: повторная постановка того же
       // вложения не приведёт ко второму скачиванию.
@@ -542,6 +570,7 @@ async function handleMedia(job: MediaJob): Promise<void> {
   if (job.provider === 'meta' && /^https:[/][/]/.test(job.externalId)) {
     return handleMetaMedia(job);
   }
+  if (job.provider === 'resend') return handleEmailMedia(job);
   if (job.provider !== 'telegram') {
     throw new UnrecoverableError(`Скачивание для ${job.provider} ещё не реализовано`);
   }
@@ -666,6 +695,70 @@ async function handleMetaMedia(job: MediaJob): Promise<void> {
     );
   });
   log('info', 'Вложение Meta сохранено', { messageId: job.messageId, size: body.length });
+}
+
+/**
+ * Вложение письма.
+ *
+ * Ссылку на файл выдают только вместе с письмом и ненадолго, поэтому
+ * шага два: спросить ссылку, сразу скачать. Хранить саму ссылку негде
+ * и незачем — к моменту, когда оператор откроет диалог, она протухнет.
+ */
+async function handleEmailMedia(job: MediaJob): Promise<void> {
+  if (!RESEND) throw new UnrecoverableError('Ключ Resend не задан');
+  if (!job.sourceId) throw new UnrecoverableError('Неизвестно, из какого письма вложение');
+
+  let link;
+  try {
+    link = await resendReceivedAttachment(RESEND, job.sourceId, job.externalId);
+  } catch (err) {
+    if (err instanceof ResendError && (err.status === 404 || err.authFailed)) {
+      await markAttachment(job, { error: 'not_available', status: err.status });
+      throw new UnrecoverableError(err.message);
+    }
+    throw err;
+  }
+
+  const url = link.download_url;
+  if (!url) {
+    await markAttachment(job, { error: 'no_download_url' });
+    throw new UnrecoverableError('Resend не дал ссылки на вложение');
+  }
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (res.status === 403 || res.status === 404 || res.status === 410) {
+    await markAttachment(job, { error: 'link_expired', status: res.status });
+    throw new UnrecoverableError('Ссылка на вложение истекла');
+  }
+  if (!res.ok) throw new Error(`Скачивание вернуло ${res.status}`);
+
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (bytes.length > MAX_META_MEDIA_BYTES) {
+    await markAttachment(job, { error: 'too_large', size: bytes.length });
+    throw new UnrecoverableError('Файл больше допустимого размера');
+  }
+
+  const contentType = link.content_type || res.headers.get('content-type') || 'application/octet-stream';
+  const key = mediaKey(job.tenantId, job.messageId, job.attachmentIndex);
+  await storage.put(key, bytes, contentType);
+  await withTenant(pool, job.tenantId, async (db) => {
+    await db.query(
+      `UPDATE messages
+          SET content = jsonb_set(
+                content,
+                ARRAY['attachments', $2::text],
+                (COALESCE(content->'attachments'->$3::int, '{}'::jsonb) - 'externalId')
+                  || jsonb_build_object(
+                       'storageKey', $4::text,
+                       'mime',       $5::text,
+                       'size',       $6::int,
+                       'ready',      true)
+              )
+        WHERE id = $1`,
+      [job.messageId, String(job.attachmentIndex), job.attachmentIndex, key, contentType, bytes.length],
+    );
+  });
+  log('info', 'Вложение письма сохранено', { messageId: job.messageId, size: bytes.length });
 }
 
 /** Отмечает вложение как недоступное, чтобы интерфейс не ждал его вечно. */
@@ -811,6 +904,8 @@ async function handleInbound(job: InboundJob): Promise<void> {
     }
     return;
   }
+
+  if (job.provider === 'resend') return handleEmailInbound(job);
 
   if (job.provider === 'meta') {
     const payload = job.payload as MetaWebhookPayload;
@@ -977,6 +1072,83 @@ async function handleMessagingEntry(entry: MessagingEntry): Promise<void> {
   // на сообщение, которое записывается строкой выше.
   for (const r of normalizeMessagingReactions(entry)) {
     await applyReaction(channel.tenant_id, channel.id, r);
+  }
+}
+
+/** Ключ Resend. Пусто — почтовый канал в этом окружении не работает. */
+const RESEND = process.env['RESEND_API_KEY']
+  ? {
+      apiKey: process.env['RESEND_API_KEY'] as string,
+      ...(process.env['RESEND_API_ROOT'] ? { root: process.env['RESEND_API_ROOT'] as string } : {}),
+    }
+  : null;
+
+/**
+ * Входящее письмо.
+ *
+ * В вебхуке приходят только метаданные, поэтому письмо забирается по
+ * идентификатору целиком — с телом, заголовками и списком вложений.
+ * Канал ищем по домену получателя: адресов у домена сколько угодно
+ * (support@, info@, sales@), и заводить канал под каждый значило бы
+ * заставлять клиента подключать домен по три раза.
+ */
+async function handleEmailInbound(job: InboundJob): Promise<void> {
+  if (!RESEND) {
+    log('warn', 'Пришло письмо, но ключ Resend не задан');
+    return;
+  }
+
+  const body = job.payload as { data?: { email_id?: string; to?: string[] } };
+  const emailId = body?.data?.email_id;
+  if (!emailId) return;
+
+  let mail;
+  try {
+    mail = await resendReceivedEmail(RESEND, emailId);
+  } catch (err) {
+    if (err instanceof ResendError && (err.status === 404 || err.authFailed)) {
+      log('warn', 'Resend не отдал письмо', { emailId, status: err.status });
+      throw new UnrecoverableError(err.message);
+    }
+    throw err;
+  }
+
+  // Получателей может быть несколько: наш адрес ищем среди них, а не
+  // берём первый попавшийся — письмо могло прийти копией.
+  const targets = [...(mail.to ?? []), ...(body.data?.to ?? [])];
+  let channel = null;
+  for (const t of targets) {
+    const domain = addressDomain(parseAddress(t).email);
+    if (!domain) continue;
+    channel = await findChannel(EMAIL_CHANNEL, domain);
+    if (channel) break;
+  }
+  if (!channel) {
+    log('warn', 'Канал почты не найден', { to: targets.join(',') });
+    return;
+  }
+
+  const m = normalizeEmail({ tenantId: channel.tenant_id, channelId: channel.id }, mail);
+  if (!m) {
+    log('warn', 'Письмо без отправителя пропущено', { emailId });
+    return;
+  }
+
+  const { inserted, messageId, conversationId, contactId } = await persistMessage(m);
+  log('info', inserted ? 'Письмо сохранено' : 'Дубликат письма, пропущен', {
+    channelId: channel.id,
+    externalId: m.externalId,
+  });
+  if (!inserted) return;
+
+  // Вложения качаются по временной ссылке, и ссылку надо ещё получить:
+  // в письме лежит только идентификатор. Обе операции — работа очереди
+  // вложений, поэтому сюда едет идентификатор письма и вложения.
+  if (messageId) await enqueueMedia(m, messageId, 'resend', mail.id);
+  if (contactId) await enqueueCrm(m, contactId, conversationId);
+  if (conversationId) {
+    const sent = await onInbound(m, conversationId);
+    if (sent) log('info', 'Бот ответил на письмо', { conversationId, replies: sent });
   }
 }
 
@@ -2207,6 +2379,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
     return;
   }
 
+  if (row.channel_type === EMAIL_CHANNEL) return sendEmail(job, row);
+
   if (isCommentChannel(row.channel_type)) return sendComment(job, row, worker);
 
   if (row.channel_type === 'messenger' || row.channel_type === 'instagram') {
@@ -2698,6 +2872,124 @@ async function viberTick(): Promise<void> {
         );
       });
     }
+  }
+}
+
+/**
+ * Ответ письмом.
+ *
+ * Уходит в ту же цепочку, что и письмо клиента: без заголовков
+ * In-Reply-To и References почтовый клиент показывает ответ отдельным
+ * письмом, и для человека это выглядит как «нам не ответили, а написали
+ * что-то новое».
+ *
+ * Тема берётся из последнего письма клиента с одним «Re:». Своей темы у
+ * оператора нет и не надо: он отвечает в разговоре, а не начинает новую
+ * переписку.
+ *
+ * Отправитель подписан именем компании: в списке писем клиент видит
+ * отправителя, и «Ромашка» узнаётся, а support@help.romashka.com
+ * читается как рассылка.
+ */
+async function sendEmail(job: OutboundJob, row: OutboundRow): Promise<void> {
+  if (!RESEND) {
+    await markFailed(job, { reason: 'resend_not_configured' });
+    throw new UnrecoverableError('Ключ Resend не задан — письма не уходят');
+  }
+
+  const creds = decryptJson<{ domain: string; address: string }>(
+    masterKey,
+    job.tenantId,
+    row.credentials_enc,
+  );
+
+  const about = await withTenant(pool, job.tenantId, async (db) => {
+    // Тема и цепочка — из последнего входящего письма этого разговора.
+    const { rows } = await db.query<{
+      subject: string | null;
+      message_id: string | null;
+      refs: string | null;
+      channel_name: string | null;
+    }>(
+      `SELECT last_in.content->'email'->>'subject'    AS subject,
+              last_in.content->'email'->>'messageId'  AS message_id,
+              last_in.content->'email'->>'references' AS refs,
+              ch.display_name                          AS channel_name
+         FROM messages me
+         JOIN channels ch ON ch.id = me.channel_id
+         LEFT JOIN LATERAL (
+              SELECT m.content
+                FROM messages m
+               WHERE m.conversation_id = me.conversation_id AND m.direction = 'in'
+               ORDER BY m.sent_at DESC
+               LIMIT 1
+         ) last_in ON true
+        WHERE me.id = $1
+        LIMIT 1`,
+      [job.messageId],
+    );
+    return rows[0] ?? null;
+  });
+
+  const tenantName = await withSystem(pool, 'имя организации для письма', async (db) => {
+    const { rows } = await db.query<{ name: string }>(`SELECT name FROM tenants WHERE id = $1`, [
+      job.tenantId,
+    ]);
+    return rows[0]?.name ?? '';
+  });
+
+  // Имя канала по умолчанию — сам адрес; подписываться адресом незачем.
+  const label =
+    about?.channel_name && !about.channel_name.includes('@') ? about.channel_name : tenantName;
+
+  const files: Array<{ filename: string; content: string; content_type?: string }> = [];
+  for (const att of row.content?.attachments ?? []) {
+    if (!att.storageKey) continue;
+    const file = await storage.get(att.storageKey);
+    if (!file) {
+      await markFailed(job, { reason: 'attachment_missing' });
+      throw new UnrecoverableError('Вложение не найдено в хранилище');
+    }
+    files.push({
+      filename: att.filename || 'file',
+      content: Buffer.from(file.body).toString('base64'),
+      ...(att.mime ? { content_type: att.mime } : {}),
+    });
+  }
+
+  const text = row.text ?? '';
+  if (!text && !files.length) {
+    await markFailed(job, { reason: 'empty_email' });
+    throw new UnrecoverableError('Пустое письмо не отправляем');
+  }
+
+  try {
+    const sent = await resendSend(RESEND, {
+      from: fromHeader(label, creds.address),
+      to: [row.peer_id ?? ''],
+      subject: replySubject(about?.subject),
+      ...(text ? { text } : {}),
+      headers: threadHeaders(about?.message_id, about?.refs),
+      ...(files.length ? { attachments: files } : {}),
+    });
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2 WHERE id = $1 AND status = 'pending'`,
+        [job.messageId, sent.id ?? null],
+      );
+    });
+    log('info', 'Письмо отправлено', { messageId: job.messageId });
+  } catch (err) {
+    if (!(err instanceof ResendError)) throw err;
+    if (err.rateLimited) throw err; // повторим по расписанию очереди
+    if (err.authFailed || err.status === 400 || err.status === 422) {
+      // Домен не подтверждён, адрес отправителя не тот, получатель в
+      // отказном списке — всё это чинится настройкой, а не повтором.
+      await markFailed(job, { reason: 'resend_refused', status: err.status, detail: err.detail.slice(0, 300) });
+      throw new UnrecoverableError(err.message);
+    }
+    throw err;
   }
 }
 

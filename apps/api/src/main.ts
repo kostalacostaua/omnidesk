@@ -480,6 +480,8 @@ registerSettings(app, {
   }),
   telegramApiRoot: TELEGRAM_API_ROOT,
   publicUrl: PUBLIC_URL,
+  ...(process.env['RESEND_API_KEY'] ? { resendApiKey: process.env['RESEND_API_KEY'] } : {}),
+  ...(process.env['RESEND_API_ROOT'] ? { resendRoot: process.env['RESEND_API_ROOT'] } : {}),
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
   mtproto: { redis, loginQueue: mtprotoLoginQueue },
   ...(process.env['META_APP_ID'] && process.env['META_APP_SECRET']

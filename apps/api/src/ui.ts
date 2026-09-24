@@ -703,6 +703,16 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
   .chico.messenger_comments{background:linear-gradient(140deg,#00b2ff,#006aff)}
   .chico.instagram_comments{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
+  .chico.email{background:linear-gradient(140deg,#64748b,#0f172a);font-size:15px}
+  /* Записи DNS: четыре колонки, значение переносится. На узком экране
+     строка становится в столбик — копировать всё равно придётся руками. */
+  .mlrec{display:flex;flex-direction:column;gap:6px}
+  .mlrow{display:grid;grid-template-columns:70px 130px minmax(0,1fr) 80px;gap:8px;
+    align-items:start;font-size:12px;padding:7px 9px;border:1px solid var(--line);
+    border-radius:10px;background:var(--panel2)}
+  .mlrow .t{font-weight:700}
+  .mlrow code{font-size:11.5px;word-break:break-all;white-space:normal}
+  @media (max-width:700px){ .mlrow{grid-template-columns:1fr} }
   /* Комментарий в ленте: под каким постом он написан и ушёл ли ответ
      в личные. Мелко и рядом с текстом — это пометка, а не сообщение. */
   .cmt{font-size:11px;opacity:.72;margin-bottom:4px}
@@ -1116,7 +1126,8 @@ var CH = { telegram_bot:'Telegram', telegram_business:'Telegram Business',
   whatsapp_user:L('WhatsApp номерний'), instagram:'Instagram',
   messenger:'Messenger', viber_business:L('Viber для бізнесу'), webchat:L('Чат на сайті'),
   viber_user:L('Viber номерний'), custom:L('Власний канал'),
-  messenger_comments:L('Facebook, коментарі'), instagram_comments:L('Instagram, коментарі') };
+  messenger_comments:L('Facebook, коментарі'), instagram_comments:L('Instagram, коментарі'),
+  email:L('Пошта') };
 
 /* Комментарии — отдельный канал у той же страницы, и отличаются они не
    значком, а правилами: под постом отвечают всем сразу. */
@@ -1510,6 +1521,13 @@ function loadThread(){
 
       // Пометка комментария. Оператор обязан видеть, что отвечает
       // публично, ещё до того, как начнёт печатать.
+      // Тема письма. Показывается у каждого письма, а не один раз
+      // сверху: в одной переписке тема меняется, и по ней человек
+      // понимает, о чём именно это письмо.
+      var subj = c.email && c.email.subject
+        ? '<div class="cmt">' + esc(c.email.subject) + '</div>'
+        : '';
+
       var cm = c.comment
         ? '<div class="cmt">' +
             (c.comment.private
@@ -1520,7 +1538,7 @@ function loadThread(){
           '</div>'
         : '';
 
-      var body = cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
+      var body = subj + cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
 
       return '<div class="mwrap ' + (isOut ? 'out' : 'in') + '" data-mid="' + m.id +
         '" data-ext="' + esc(m.external_id || '') + '" data-text="' + esc((c.text || '').slice(0,120)) + '">' +
@@ -3367,7 +3385,7 @@ function editRow(id, value, save, errId){
 
 var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger:'FB',
   whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB',
-  webchat:'WEB', custom:'API', messenger_comments:'FB', instagram_comments:'IG' };
+  webchat:'WEB', custom:'API', messenger_comments:'FB', instagram_comments:'IG', email:'@' };
 
 /* Ключи своего канала. Показываются при подключении и потом на странице
    канала: это наши собственные секреты, а не чужой платформы, и прятать
@@ -3440,6 +3458,17 @@ function tabChannels(){
       L('покажемо після підключення.</div>') +
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div>' +
       '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
+
+      L('<div class="tile"><div class="t1"><div class="chico email">@</div>') +
+      L('<div><div class="ttl">Пошта</div><div class="sub">Листи на ваш піддомен</div></div></div>') +
+      L('<div class="sub" style="white-space:normal">Заведіть піддомен для звернень — help.firma.com. ') +
+      L('Основний домен не підійде: у нього один запис MX, і переказавши його нам, ') +
+      L('ви залишите без пошти співробітників.</div>') +
+      '<div class="row2" style="margin-top:8px">' +
+      L('<input id="mlLoc" placeholder="support" style="max-width:120px">') +
+      L('<input id="mlDom" placeholder="help.firma.com">') +
+      L('<button id="mlAdd">Підключити</button></div>') +
+      '<div class="err" id="mlcErr"></div></div>' +
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
       L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +
@@ -3592,6 +3621,7 @@ function tabChannels(){
         });
     };
     el('metaGo').onclick = startMeta;
+    if (el('mlAdd')) el('mlAdd').onclick = mlConnect;
     if (S.metaError && !S.metaPick) { el('metaErr').textContent = S.metaError; S.metaError = null; }
     if (S.metaPick) showMetaPick(S.metaPick);
 
@@ -4070,6 +4100,7 @@ function openChannel(id){
     '</div></div></div>' +
 
     (c.type === 'webchat' ? '<div id="wcBox"></div>' : '') +
+    (c.type === 'email' ? '<div id="mlBox"></div>' : '') +
     '<div id="chTeam"></div>' +
 
     L('<div class="pg-sec"><h3>Автоматизація</h3><div class="grid">') +
@@ -4082,6 +4113,7 @@ function openChannel(id){
     '</div></div></div>';
 
   if (c.type === 'webchat') wcPanel(id);
+  if (c.type === 'email') mlPanel(id, c);
   if (isAdmin()) chTeamPanel(id);
 
   el('chBack').onclick = tabChannels;
@@ -6727,6 +6759,108 @@ function showErr(e){
   if (e && e.status === 401){ logout(); el('gateErr').textContent = L('Токен недійсний або застарів'); }
 }
 
+
+/* ══════════════ Почта ══════════════ */
+
+/**
+ * Записи DNS для почтового домена.
+ *
+ * Показываются целиком и всегда: приём без MX не работает, а отправка
+ * без DKIM уезжает в спам. Решать за клиента, что из этого ему «не
+ * нужно», мы не вправе — это его домен.
+ *
+ * Состояние домена не угадывается по времени: есть кнопка, и она
+ * спрашивает Resend. DNS расходится десятки минут, и «проверили один
+ * раз при подключении» означало бы вечное «ожидаем».
+ */
+function mlRecords(records){
+  if (!records || !records.length) return L('<div class="dim" style="font-size:12.5px">Записів немає.</div>');
+  return '<div class="mlrec">' + records.map(function(r){
+    return '<div class="mlrow">' +
+      '<div class="t">' + esc(r.type || '') + '</div>' +
+      '<div class="n">' + esc(r.name || '@') + '</div>' +
+      '<div class="v"><code>' + esc(r.value || '') + '</code>' +
+        (r.priority != null ? L(' <span class="dim">пріоритет ') + esc(r.priority) + '</span>' : '') +
+      '</div>' +
+      '<div class="s">' + (String(r.status || '').toLowerCase() === 'verified'
+        ? L('<span class="pill ok">є</span>')
+        : L('<span class="pill warn">чекаємо</span>')) + '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function mlPanel(id, c){
+  var meta = (c && c.meta) || {};
+  var box = el('mlBox');
+  if (!box) return;
+  box.innerHTML =
+    L('<div class="pg-sec"><h3>Домен і записи DNS</h3><div class="tile">') +
+    '<div class="kv">' +
+      L('<div class="k">Адреса</div><div><code>') + esc(meta.address || '') + '</code></div>' +
+      L('<div class="k">Стан домену</div><div>') +
+        (String(meta.status || '').toLowerCase() === 'verified'
+          ? L('<span class="pill ok">підтверджено</span>')
+          : L('<span class="pill warn">очікує записів</span>')) + '</div>' +
+    '</div>' +
+    '<div style="margin-top:10px">' + mlRecords(meta.records) + '</div>' +
+    L('<div class="sub" style="white-space:normal;margin-top:10px">Додайте ці записи у свого реєстратора. ') +
+    L('MX приймає листи, решта — щоб ваші відповіді не потрапляли в спам. ') +
+    L('DNS розходиться до години.</div>') +
+    L('<div class="acts"><button class="ghost mini" id="mlCheck">Перевірити</button></div>') +
+    '<div class="ok" id="mlOk"></div><div class="err" id="mlErr"></div>' +
+    '</div></div>';
+
+  el('mlCheck').onclick = function(){
+    busy(el('mlCheck'), true);
+    el('mlErr').textContent = '';
+    el('mlOk').textContent = '';
+    api('/channels/' + id + '/email/verify', { method:'POST' })
+      .then(function(r){
+        el('mlOk').textContent = r.ready ? L('домен підтверджено') : L('записи ще не бачимо');
+        // Канал мог стать рабочим — перечитываем список, чтобы плитка
+        // и фильтры показывали новое состояние.
+        api('/channels').then(function(d){
+          CHANNELS = d.channels || [];
+          var upd = null;
+          for (var i = 0; i < CHANNELS.length; i++) if (CHANNELS[i].id === id) upd = CHANNELS[i];
+          if (upd) mlPanel(id, upd);
+        }).catch(function(){});
+      })
+      .catch(function(e){
+        var p = (e && e.payload) || {};
+        el('mlErr').textContent = p.error === 'email_unavailable'
+          ? L('Пошта не налаштована на сервері')
+          : (p.detail || L('Не вдалося перевірити'));
+      })
+      .then(function(){ if (el('mlCheck')) busy(el('mlCheck'), false) });
+  };
+}
+
+/** Подключение почтового домена из витрины каналов. */
+function mlConnect(){
+  var domain = el('mlDom').value.trim().toLowerCase();
+  var local = el('mlLoc').value.trim().toLowerCase();
+  el('mlcErr').textContent = '';
+  if (!domain){ el('mlcErr').textContent = L('Впишіть піддомен'); return }
+  busy(el('mlAdd'), true);
+  api('/settings/channels/email', { method:'POST', body:{ domain: domain, localPart: local } })
+    .then(function(r){
+      toast(L('Домен заведено — додайте записи DNS'));
+      return api('/channels').then(function(d){
+        CHANNELS = d.channels || [];
+        openChannel(r.channelId);
+      });
+    })
+    .catch(function(e){
+      var p = (e && e.payload) || {};
+      el('mlcErr').textContent =
+        p.error === 'bad_domain' ? L('Схоже на неправильний домен')
+        : p.error === 'domain_taken' ? L('Цей домен уже підключила інша організація')
+        : p.error === 'email_unavailable' ? L('Пошта не налаштована на сервері')
+        : (p.detail || L('Не вдалося підключити'));
+      busy(el('mlAdd'), false);
+    });
+}
 
 /* ══════════════ Панель владельца платформы ══════════════ */
 
