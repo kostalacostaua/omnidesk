@@ -422,12 +422,25 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
   .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
   .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
-  .aclbox{padding:2px 0 14px}
-  .aclgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px}
-  .aclrow{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r1);
-    background:var(--panel2);font-size:12.5px;cursor:pointer}
-  .aclrow input{width:auto;flex:none;margin:0}
-  .aclrow .dim{margin-left:auto;font-size:11px}
+  /* Матрица доступов: люди по строкам, каналы и папки по столбцам.
+     Первый столбец не уезжает при прокрутке вбок — без имени строка
+     галочек не значит ничего. */
+  .mtxwrap{overflow-x:auto;margin-top:6px}
+  .mtx{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:100%}
+  .mtx th,.mtx td{padding:8px 10px;text-align:center;white-space:nowrap;
+    border-bottom:1px solid var(--line)}
+  .mtx th{font-weight:600;color:var(--t2);font-size:11.5px;vertical-align:bottom}
+  .mtx th:first-child,.mtx td:first-child{text-align:left;position:sticky;left:0;
+    background:var(--solid);z-index:2;min-width:190px}
+  .mtx tbody tr:hover td{background:var(--hover)}
+  .mtx tbody tr:hover td:first-child{background:var(--hover)}
+  .mtx input{width:17px;height:17px;margin:0;padding:0}
+  /* Галочка «по умолчанию всё» отличается от поставленной руками:
+     иначе строка «видит всё» и строка «выбрано всё» выглядят одинаково,
+     а ведут себя по-разному, когда появится новый канал. */
+  .mtx input.all{opacity:.45}
+  .mtx .who{display:flex;align-items:center;gap:7px}
+  .mtx .who b{font-weight:600}
   .prof{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:14px;
     background:var(--panel);border:1px solid var(--line);border-radius:var(--r2)}
   .prof-av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;
@@ -4482,73 +4495,6 @@ function pollTgUser(){
  * администратор, снявший все галочки, должен понимать, что открыл всё,
  * а не запретил всё.
  */
-function openAcl(userId, btn){
-  var box = el('acl-' + userId);
-  if (!box) return;
-  if (box.style.display !== 'none'){ box.style.display = 'none'; return }
-
-  busy(btn, true);
-  Promise.all([api('/users/' + userId + '/channels'), api('/channels')])
-    .then(function(res){
-      var picked = {}, list = res[1].channels || [];
-      (res[0].channelIds || []).forEach(function(id){ picked[id] = true });
-
-      box.innerHTML = list.length
-        ? '<div class="aclgrid">' + list.map(function(c){
-            return '<label class="aclrow"><input type="checkbox" data-ch="' + c.id + '"' +
-              (picked[c.id] ? ' checked' : '') + '>' +
-              '<span>' + esc(c.display_name || CH[c.type] || c.type) + '</span>' +
-              '<span class="dim">' + esc(CH[c.type] || c.type) + '</span></label>';
-          }).join('') + '</div>' +
-          '<div class="hint" id="aclhint-' + userId + '"></div>' +
-          '<div class="row2" style="margin-top:8px">' +
-          '<button class="mini" id="aclsave-' + userId + L('">Зберегти доступ</button>') +
-          '<button class="ghost mini" id="aclall-' + userId + L('">Відкрити всі</button></div>') +
-          '<div class="err" id="aclerr-' + userId + '"></div>'
-        : L('<div class="hint">Каналів поки немає — спершу підключіть хоча б один.</div>');
-
-      box.style.display = 'block';
-      busy(btn, false);
-      if (!list.length) return;
-
-      function marks(){
-        return Array.prototype.filter.call(box.querySelectorAll('[data-ch]'), function(x){
-          return x.checked;
-        }).map(function(x){ return x.dataset.ch });
-      }
-      function hint(){
-        var n = marks().length;
-        el('aclhint-' + userId).textContent = n
-          ? L('Видно тільки вибраний канал') + (n > 1 ? L('и: ') + n : '')
-          : L('Жодної галочки — співробітник бачить усі канали.');
-      }
-      hint();
-      Array.prototype.forEach.call(box.querySelectorAll('[data-ch]'), function(x){
-        x.onchange = hint;
-      });
-
-      el('aclall-' + userId).onclick = function(){
-        Array.prototype.forEach.call(box.querySelectorAll('[data-ch]'), function(x){
-          x.checked = false;
-        });
-        hint();
-      };
-
-      el('aclsave-' + userId).onclick = function(){
-        var save = el('aclsave-' + userId);
-        busy(save, true);
-        api('/users/' + userId + '/channels', { method:'PUT', body:{ channelIds: marks() } })
-          .then(function(){ toast(L('Доступ збережено')); box.style.display = 'none' })
-          .catch(function(e){
-            var p = e.payload || {};
-            el('aclerr-' + userId).textContent = p.detail || L('Не вдалося зберегти');
-          })
-          .then(function(){ busy(save, false) });
-      };
-    })
-    .catch(function(){ busy(btn, false); alertLine(L('Не вдалося отримати список каналів')) });
-}
-
 function tabUsers(){
   api('/users').then(function(d){
     USERS = d.users || [];
@@ -4576,17 +4522,13 @@ function tabUsers(){
           '<div class="s">' + esc(u.email) + ' · ' + esc(ROLES[u.role] || u.role) +
           ' · ' + esc(seen) + '</div></div>' +
           '<div style="display:flex;gap:6px;flex:none">' +
-          // Доступ к каналам есть только у тех, кого можно ограничить:
-          // владелец и администратор видят всё по своей роли.
-          (u.role === 'owner' || u.role === 'admin' ? '' :
-            '<button class="ghost mini" data-acl="' + u.id + L('">Канали</button>')) +
           (u.role === 'owner' ? '' :
             '<button class="ghost mini" data-user="' + u.id + '" data-active="' +
             (u.is_active ? 'false' : 'true') + '">' +
             (u.is_active ? L('Відключити') : L('Увімкнути')) + '</button>') +
-          '</div></div>' +
-          '<div class="aclbox" id="acl-' + u.id + '" style="display:none"></div>';
-      }).join('') + '</div>';
+          '</div></div>';
+      }).join('') + '</div>' +
+      '<div id="mtx"></div>';
 
     el('uadd').onclick = function(){
       el('uerr').textContent = '';
@@ -4603,10 +4545,6 @@ function tabUsers(){
         });
     };
 
-    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-acl]'), function(b){
-      b.onclick = function(){ openAcl(b.dataset.acl, b) };
-    });
-
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-user]'), function(b){
       b.onclick = function(){
         busy(b, true);
@@ -4615,7 +4553,108 @@ function tabUsers(){
           .then(tabUsers).catch(function(){ busy(b, false) });
       };
     });
+    loadAccess();
   }).catch(sErr);
+}
+
+/* ══════════════ Доступи ══════════════
+
+   Кто какой канал видит и какими папками шаблонов пользуется — это
+   пересечение людей и вещей, а не свойство человека. Раздавать его по
+   одной карточке значит открывать десять карточек, чтобы ответить на
+   вопрос «кто вообще видит Instagram».
+
+   Пустой список у человека означает «всё», и это главная ловушка
+   таблицы: пустая строка читается как «ничего не видит». Поэтому у
+   такого человека галочки стоят все, но бледные, а в первом столбце
+   написано «усі». Снять одну из бледных — значит сказать «все, кроме
+   этой», и строка становится обычной.
+
+   Обратно: отметили всё до единой — снова отправляем пустой список, а
+   не полный. Разница видна не сегодня, а в тот день, когда подключат
+   новый канал: «усі» получит его сам, а перечисленный поимённо — нет. */
+
+var ACC = null;
+
+function loadAccess(){
+  return api('/access').then(function(d){ ACC = d; renderAccess() }).catch(function(){});
+}
+
+function accSet(kind, userId){
+  return (kind === 'channel' ? ACC.channelIds : ACC.folderIds)[userId] || [];
+}
+
+function accItems(kind){
+  return kind === 'channel' ? ACC.channels : ACC.folders;
+}
+
+function accTable(kind, title, hint, empty){
+  var items = accItems(kind);
+  if (!items.length) return L('<div class="pg-sec"><h3>') + esc(title) + '</h3>' +
+    '<div class="card"><div class="hint">' + esc(empty) + '</div></div></div>';
+
+  var rows = ACC.users.map(function(u){
+    var picked = accSet(kind, u.id), all = u.unrestricted || !picked.length;
+    return '<tr data-u="' + u.id + '">' +
+      '<td><div class="who"><b>' + esc(u.name) + '</b>' +
+      '<span class="pill">' + esc(u.unrestricted ? L('за роллю') : all ? L('усі') :
+        picked.length + L(' з ') + items.length) + '</span></div></td>' +
+      items.map(function(it){
+        return '<td><input type="checkbox" data-k="' + kind + '" data-i="' + it.id + '"' +
+          (all ? ' checked class="all"' : (picked.indexOf(it.id) >= 0 ? ' checked' : '')) +
+          (u.unrestricted ? ' disabled' : '') + '></td>';
+      }).join('') + '</tr>';
+  }).join('');
+
+  return L('<div class="pg-sec"><h3>') + esc(title) + '</h3><div class="card">' +
+    '<div class="hint">' + esc(hint) + '</div>' +
+    '<div class="mtxwrap"><table class="mtx"><thead><tr><th></th>' +
+    items.map(function(it){ return '<th>' + esc(it.name) + '</th>' }).join('') +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="err" id="mtxerr-' + kind + '"></div></div></div>';
+}
+
+function renderAccess(){
+  var box = el('mtx');
+  if (!box || !ACC) return;
+
+  box.innerHTML =
+    accTable('channel', L('Доступ до каналів'),
+      L('Порожній рядок неможливий: хто не обмежений — бачить усі канали, і галочки в нього бліді. Зніміть одну — і людина бачитиме решту.'),
+      L('Каналів поки немає — спершу підключіть хоча б один.')) +
+    accTable('folder', L('Доступ до папок шаблонів'),
+      L('Шаблони поза папками доступні всім: «без папки» — це не папка, давати чи забирати там нічого.'),
+      L('Папок поки немає — створіть їх у розділі «Шаблони».'));
+
+  Array.prototype.forEach.call(box.querySelectorAll('input[data-i]'), function(inp){
+    inp.onchange = function(){
+      var tr = inp.parentNode.parentNode, kind = inp.dataset.k;
+      var items = accItems(kind), userId = tr.dataset.u;
+      var picked = [];
+      Array.prototype.forEach.call(tr.querySelectorAll('input[data-i]'), function(x){
+        if (x.checked) picked.push(x.dataset.i);
+      });
+      // Отмечено всё — значит «усі», а не перечисление: иначе новый
+      // канал этому человеку не достанется, и никто не поймёт почему.
+      if (picked.length === items.length) picked = [];
+      saveAccess(kind, userId, picked);
+    };
+  });
+}
+
+function saveAccess(kind, userId, ids){
+  var path = kind === 'channel' ? '/channels' : '/folders';
+  var body = kind === 'channel' ? { channelIds: ids } : { folderIds: ids };
+  return api('/users/' + userId + path, { method:'PUT', body: body })
+    .then(function(){
+      (kind === 'channel' ? ACC.channelIds : ACC.folderIds)[userId] = ids;
+      renderAccess();
+    })
+    .catch(function(e){
+      var p = e.payload || {};
+      el('mtxerr-' + kind).textContent = p.detail || L('Не вдалося зберегти доступ');
+      loadAccess();
+    });
 }
 
 /* ══════════════ Оповіщення ══════════════

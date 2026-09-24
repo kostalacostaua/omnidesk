@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { channelListScope, channelScope } from '../src/scope.js';
+import { channelListScope, channelScope, folderScope } from '../src/scope.js';
 
 /**
  * Разграничение доступа к каналам живёт условием в SQL. Проверить его
@@ -57,5 +57,46 @@ describe('условие стоит там, где читается перепи
 
   it('список каналов показывает только доступные', () => {
     expect(source('apps/api/src/settings.ts')).toContain('channelListScope(');
+  });
+});
+
+/**
+ * Папки шаблонов раздаются по тому же правилу, что и каналы. Здесь
+ * проверяется не сходство ради сходства, а две вещи, в которых легко
+ * ошибиться по-разному: пустой список означает «все», и шаблоны вне
+ * папок остаются доступными всем.
+ */
+describe('доступ к папкам шаблонов', () => {
+  const sql = folderScope('q.folder', '$1');
+
+  it('администратор проходит поверх любого списка', () => {
+    expect(sql).toContain("su.role IN ('owner','admin')");
+  });
+
+  it('пустой список означает «все папки», а не «ни одной»', () => {
+    expect(sql).toContain('NOT EXISTS (SELECT 1 FROM user_reply_folders');
+  });
+
+  it('сравнение имён без регистра: «Доставка» и «доставка» — одна папка', () => {
+    expect(sql).toContain('lower(q.folder)');
+    expect(sql).toContain('lower(f.name)');
+  });
+
+  it('идентификатор подставляется параметром', () => {
+    expect(sql).not.toMatch(/'[0-9a-f-]{36}'/);
+    expect(sql.match(/\$1/g)?.length).toBe(3);
+  });
+
+  it('шаблоны без папки отданы всем, и это видно в самом запросе', () => {
+    // Условие «или папки нет» стоит рядом с ограничением, а не где-то
+    // ещё: иначе ограничение одного человека молча забрало бы у всех
+    // заготовки, которые просто не разложили.
+    const settings = readFileSync(join(ROOT, 'apps/api/src/settings.ts'), 'utf8');
+    expect(settings).toContain("q.folder = '' OR ");
+    expect(settings).toContain("folderScope('q.folder'");
+  });
+
+  it('список папок тоже урезан, иначе в настройках видно чужое', () => {
+    expect(source('apps/api/src/settings.ts')).toContain("folderScope('f.name'");
   });
 });

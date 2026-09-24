@@ -1,4 +1,4 @@
-import { channelListScope } from './scope.js';
+import { channelListScope, folderScope } from './scope.js';
 import type { FastifyInstance } from 'fastify';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
@@ -997,6 +997,148 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     };
   });
 
+  /**
+   * Доступ сотрудника к папкам шаблонов. Устроено как у каналов, и это
+   * не случайность: одно правило на две разные вещи человек помнит,
+   * два — путает.
+   */
+  app.get<{ Params: { id: string } }>('/users/:id/folders', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const data = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ folder_id: string }>(
+        `SELECT folder_id FROM user_reply_folders WHERE user_id = $1`,
+        [req.params.id],
+      );
+      const { rows: role } = await db.query<{ role: string }>(
+        `SELECT role FROM users WHERE id = $1`,
+        [req.params.id],
+      );
+      return { ids: rows.map((r) => r.folder_id), role: role[0]?.role ?? '' };
+    });
+
+    return {
+      folderIds: data.ids,
+      unrestricted: data.ids.length === 0,
+      manageable: data.role !== 'owner' && data.role !== 'admin',
+    };
+  });
+
+  /** Задать список папок. Пустой список снимает ограничение. */
+  app.put<{ Params: { id: string }; Body: { folderIds?: string[] } }>(
+    '/users/:id/folders',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const ids = Array.isArray(req.body?.folderIds) ? req.body!.folderIds!.slice(0, 200) : [];
+
+      const result = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows: who } = await db.query<{ role: string }>(
+          `SELECT role FROM users WHERE id = $1`,
+          [req.params.id],
+        );
+        const role = who[0]?.role;
+        if (!role) return { error: 'not_found' as const };
+        if (role === 'owner' || role === 'admin') return { error: 'role_unrestricted' as const };
+
+        await db.query(`DELETE FROM user_reply_folders WHERE user_id = $1`, [req.params.id]);
+        if (ids.length) {
+          await db.query(
+            `INSERT INTO user_reply_folders (tenant_id, user_id, folder_id)
+             SELECT $1, $2, f.id FROM reply_folders f WHERE f.id = ANY($3::uuid[])
+             ON CONFLICT DO NOTHING`,
+            [auth.tenantId, req.params.id, ids],
+          );
+        }
+        const { rows } = await db.query<{ folder_id: string }>(
+          `SELECT folder_id FROM user_reply_folders WHERE user_id = $1`,
+          [req.params.id],
+        );
+        return { ids: rows.map((r) => r.folder_id) };
+      });
+
+      if ('error' in result) {
+        return reply.code(result.error === 'not_found' ? 404 : 400).send({
+          error: result.error,
+          detail: result.error === 'role_unrestricted'
+            ? 'Власник і адміністратор бачать усі папки за своєю роллю'
+            : 'Співробітника не знайдено',
+        });
+      }
+
+      return { folderIds: result.ids, unrestricted: result.ids.length === 0 };
+    },
+  );
+
+  /**
+   * Доступы одной таблицей.
+   *
+   * Человек и канал — это пересечение, и раздавать его по одному
+   * человеку значит открывать десять карточек, чтобы ответить на
+   * вопрос «кто вообще видит Instagram». Поэтому здесь сразу всё:
+   * люди, каналы, папки и отмеченные клетки.
+   *
+   * Пустой список у человека означает «всё», и ручка отдаёт это
+   * признаком, а не пустым массивом: в таблице пустая строка читается
+   * как «ничего не видит», и перепутать эти два состояния — значит
+   * закрыть человеку работу, думая, что открыл.
+   */
+  app.get('/access', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const data = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows: users } = await db.query<{
+        id: string;
+        full_name: string | null;
+        email: string;
+        role: string;
+      }>(
+        `SELECT id, full_name, email, role FROM users
+          WHERE is_active ORDER BY lower(coalesce(full_name, email)), id`,
+      );
+      const { rows: channels } = await db.query<{ id: string; display_name: string; type: string }>(
+        `SELECT id, display_name, type FROM channels ORDER BY created_at`,
+      );
+      const { rows: folders } = await db.query<{ id: string; name: string }>(
+        `SELECT id, name FROM reply_folders ORDER BY lower(name)`,
+      );
+      const { rows: uc } = await db.query<{ user_id: string; channel_id: string }>(
+        `SELECT user_id, channel_id FROM user_channels`,
+      );
+      const { rows: uf } = await db.query<{ user_id: string; folder_id: string }>(
+        `SELECT user_id, folder_id FROM user_reply_folders`,
+      );
+      return { users, channels, folders, uc, uf };
+    });
+
+    const pick = (rows: { user_id: string }[], key: 'channel_id' | 'folder_id') => {
+      const out: Record<string, string[]> = {};
+      for (const row of rows) {
+        const id = (row as unknown as Record<string, string>)[key]!;
+        (out[row.user_id] ??= []).push(id);
+      }
+      return out;
+    };
+
+    return {
+      users: data.users.map((u) => ({
+        id: u.id,
+        name: u.full_name || u.email,
+        role: u.role,
+        // Владельца и администратора ограничивать нечем: они отвечают
+        // за компанию целиком, и галочка у них была бы обманом.
+        unrestricted: u.role === 'owner' || u.role === 'admin',
+      })),
+      channels: data.channels.map((c) => ({ id: c.id, name: c.display_name, type: c.type })),
+      folders: data.folders.map((f) => ({ id: f.id, name: f.name })),
+      channelIds: pick(data.uc, 'channel_id'),
+      folderIds: pick(data.uf, 'folder_id'),
+    };
+  });
+
   /** Задать список каналов. Пустой список снимает ограничение. */
   app.put<{ Params: { id: string }; Body: { channelIds?: string[] } }>(
     '/users/:id/channels',
@@ -1191,9 +1333,21 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);
 
+    /*
+     * Шаблоны отдаются только из тех папок, которыми человеку
+     * разрешено пользоваться. Условие стоит в запросе, а не проверкой
+     * после: список уходит и в поле ответа, и в настройки, и забыть
+     * его в одном из мест — значит открыть всё.
+     *
+     * Шаблоны вне папок видны всем: «без папки» — это не папка, дать
+     * или отнять там нечего.
+     */
     const rows = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query<{ shortcut: string; folder: string }>(
-        `SELECT id, shortcut, body, attachments, folder, created_at FROM quick_replies`,
+        `SELECT id, shortcut, body, attachments, folder, created_at
+           FROM quick_replies q
+          WHERE q.folder = '' OR ${folderScope('q.folder', '$1')}`,
+        [auth.userId],
       );
       return rows;
     });
@@ -1215,7 +1369,10 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
      * не должна пропасть из настроек вместе с ней.
      */
     const list = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query<{ name: string }>(`SELECT name FROM reply_folders`);
+      const { rows } = await db.query<{ name: string }>(
+        `SELECT name FROM reply_folders f WHERE ${folderScope('f.name', '$1')}`,
+        [auth.userId],
+      );
       return rows.map((r) => r.name);
     });
 

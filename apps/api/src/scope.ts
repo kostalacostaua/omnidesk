@@ -49,3 +49,25 @@ export function channelScope(channelExpr: string, userParam: string): string {
 export function channelListScope(userParam: string): string {
   return channelScope('c.id', userParam);
 }
+
+/**
+ * То же правило для папок шаблонов.
+ *
+ * Отдельная функция, а не параметр у предыдущей: таблицы разные, и
+ * попытка обобщить их одной строкой с подстановкой имени таблицы
+ * означала бы собирать SQL из кусков там, где сейчас читается глазами.
+ *
+ * Шаблоны вне папок в это правило не попадают вовсе: условие говорит
+ * только про строки с папкой, а «без папки» разрешается отдельно в
+ * самом запросе. Так видно, что это решение принято, а не забыто.
+ */
+export function folderScope(folderExpr: string, userParam: string): string {
+  return `(
+    EXISTS (SELECT 1 FROM users su
+             WHERE su.id = ${userParam}::uuid AND su.role IN ('owner','admin'))
+    OR NOT EXISTS (SELECT 1 FROM user_reply_folders sf WHERE sf.user_id = ${userParam}::uuid)
+    OR lower(${folderExpr}) IN (SELECT lower(f.name) FROM reply_folders f
+                          JOIN user_reply_folders sf ON sf.folder_id = f.id
+                         WHERE sf.user_id = ${userParam}::uuid)
+  )`.replace(/\s+/g, ' ');
+}
