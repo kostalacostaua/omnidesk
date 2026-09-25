@@ -23,6 +23,9 @@ import {
   guessColumns,
   isOrderModule,
   STOCK_SUBFORM,
+  STOCK_COLUMNS,
+  discountAmount,
+  orderTotal,
   type OrderModule,
   type OrderPipeline,
   type OrderSettings,
@@ -361,27 +364,37 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
      * полей её нет. Но складывать товары надо именно в неё, поэтому в
      * «Замовленнях» она стоит первой и с известными колонками.
      */
-    if (module === 'Sales_Orders') {
-      meta.subforms.push({
-        api: STOCK_SUBFORM.api,
-        label: 'Товари замовлення',
-        module: '',
-        columns: [
-          { api: STOCK_SUBFORM.product, label: 'Товар', lookup: 'Products' },
-          { api: STOCK_SUBFORM.quantity, label: 'Кількість', lookup: '' },
-          { api: STOCK_SUBFORM.price, label: 'Ціна', lookup: '' },
-        ],
-        guess: { ...STOCK_SUBFORM },
-      });
+    const found = subforms(own.body);
+    if (module === 'Sales_Orders' && !found.some((x) => x.api === STOCK_SUBFORM.api)) {
+      found.unshift({ api: STOCK_SUBFORM.api, label: 'Товари замовлення', module: '' });
     }
 
-    for (const sub of subforms(own.body)) {
+    for (const sub of found) {
       let columns: SubformColumn[] = [];
       if (sub.module) {
         const got = await ask('fields', { module: sub.module });
         if (!('error' in got)) columns = subformColumns(got.body);
       }
-      meta.subforms.push({ ...sub, columns, guess: guessColumns(columns) });
+      /*
+       * Стандартная таблица товаров приходит обычным полем-подформой,
+       * но своего модуля у неё нет, и колонки спросить не у кого: они
+       * зашиты в самом API. Без этого в настройках три пустых списка
+       * там, где всё известно заранее.
+       */
+      const stock = sub.api === STOCK_SUBFORM.api;
+      if (!columns.length && stock) columns = STOCK_COLUMNS;
+      meta.subforms.push({
+        ...sub,
+        columns,
+        guess: stock
+          ? {
+              product: STOCK_SUBFORM.product,
+              quantity: STOCK_SUBFORM.quantity,
+              price: STOCK_SUBFORM.price,
+              discount: STOCK_SUBFORM.discount,
+            }
+          : guessColumns(columns),
+      });
     }
 
     /*
@@ -753,6 +766,11 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     const form = {
       module: s.module,
       ready: orderReady(s),
+      // Скидки показываем, только если им есть куда уехать: поле
+      // скидки в окне, которое никуда не пишется, — это обещание,
+      // которого не будет в заказе.
+      lineOff: Boolean(s.subform.discount),
+      wholeOff: Boolean(s.discountField),
       // Названия воронок берём из разметки, а не из сохранённой
       // настройки: воронку переименовали — оператор должен увидеть
       // новое имя, а не то, что записали полгода назад.
@@ -792,7 +810,8 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     Params: { id: string };
     Body: {
       subject?: string;
-      items?: Array<{ productId?: string; quantity?: number; price?: number }>;
+      items?: Array<{ productId?: string; quantity?: number; price?: number; discount?: string }>;
+      discount?: string;
       fields?: Record<string, unknown>;
       pipeline?: string;
     };
@@ -932,11 +951,25 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       row[sub.product] = link ? { id: i.productId } : names.get(i.productId);
       if (sub.quantity) row[sub.quantity] = i.quantity;
       if (sub.price) row[sub.price] = i.price;
+      // Скидку кладём, только если колонка для неё указана: писать её
+      // в поле, которого нет, — это отказ всего заказа из-за уступки в
+      // двести гривен.
+      if (sub.discount && i.discount > 0) row[sub.discount] = i.discount;
       return row;
     });
 
+    /*
+     * Скидка на весь заказ. Считается от суммы со скидками строк:
+     * «минус десять процентов сверху» означает десять процентов от
+     * того, что человек назвал клиенту, а не от прайса.
+     */
+    const whole = s.discountField
+      ? discountAmount(req.body?.discount, orderTotal(items))
+      : 0;
+
     const record: Record<string, unknown> = {
       ...picked.values,
+      ...(whole > 0 ? { [s.discountField]: whole } : {}),
       ...(accountId ? { Account_Name: { id: accountId } } : {}),
       Contact_Name: { id: recordId },
       [sub.api]: rows,

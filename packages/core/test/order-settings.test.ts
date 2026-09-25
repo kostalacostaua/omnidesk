@@ -151,7 +151,7 @@ describe('разметка сделки', () => {
       { api: 'Kilkist', label: 'Кількість', lookup: '' },
       { api: 'Cina', label: 'Ціна за одиницю', lookup: '' },
     ]);
-    expect(guess).toEqual({ product: 'Poz', quantity: 'Kilkist', price: 'Cina' });
+    expect(guess).toEqual({ product: 'Poz', quantity: 'Kilkist', price: 'Cina', discount: '' });
   });
 
   it('одна колонка не достаётся двум ролям', () => {
@@ -160,6 +160,16 @@ describe('разметка сделки', () => {
     ]);
     expect(guess.product).toBe('Product_Price');
     expect(guess.price).toBe('');
+  });
+
+  it('двусмысленная колонка достаётся роли, для которой нет однозначной', () => {
+    const guess = guessColumns([
+      { api: 'Tovar', label: 'Товар', lookup: 'Products' },
+      { api: 'Cina_zi_znyzhkoyu', label: 'Ціна зі знижкою', lookup: '' },
+      { api: 'Znyzhka', label: 'Знижка', lookup: '' },
+    ]);
+    expect(guess.discount).toBe('Znyzhka');
+    expect(guess.price).toBe('Cina_zi_znyzhkoyu');
   });
 });
 

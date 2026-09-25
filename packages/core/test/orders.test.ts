@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ORDER_ITEMS_MAX, orderItems, orderSubject, orderTotal } from '../src/orders.js';
+import {
+  ORDER_ITEMS_MAX,
+  discountAmount,
+  orderItems,
+  orderSubject,
+  orderSubtotal,
+  orderTotal,
+} from '../src/orders.js';
 
 /**
  * Проверки здесь про деньги: строка заказа приезжает из браузера, и
@@ -76,5 +83,46 @@ describe('название заказа', () => {
 
   it('длинное режется', () => {
     expect(orderSubject('я'.repeat(500), 'Олена')).toHaveLength(120);
+  });
+});
+
+/**
+ * Скидка — это деньги, о которых договорились вслух. Ошибка здесь
+ * видна в счёте, который клиент уже получил.
+ */
+describe('скидки', () => {
+  it('процент превращается в деньги', () => {
+    expect(discountAmount('10%', 1000)).toBe(100);
+    expect(discountAmount('12,5%', 200)).toBe(25);
+  });
+
+  it('число без знака — это деньги, а не проценты', () => {
+    expect(discountAmount('150', 1000)).toBe(150);
+  });
+
+  it('скидка не больше суммы: отрицательная строка — это возврат', () => {
+    expect(discountAmount('5000', 1000)).toBe(1000);
+    expect(discountAmount('150%', 1000)).toBe(1000);
+  });
+
+  it('пусто, ноль и мусор — это отсутствие скидки', () => {
+    expect(discountAmount('', 1000)).toBe(0);
+    expect(discountAmount('0', 1000)).toBe(0);
+    expect(discountAmount('-50', 1000)).toBe(0);
+    expect(discountAmount('десять', 1000)).toBe(0);
+  });
+
+  it('скидка строки считается от её собственной суммы', () => {
+    const items = orderItems([{ productId: 'p1', quantity: 3, price: 100, discount: '10%' }]);
+    expect(items[0].discount).toBe(30);
+  });
+
+  it('итог показывает сумму со скидками, а не прайс', () => {
+    const items = orderItems([
+      { productId: 'p1', quantity: 2, price: 100, discount: '50' },
+      { productId: 'p2', quantity: 1, price: 300 },
+    ]);
+    expect(orderSubtotal(items)).toBe(500);
+    expect(orderTotal(items)).toBe(450);
   });
 });

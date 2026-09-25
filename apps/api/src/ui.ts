@@ -2510,11 +2510,11 @@ function renderCard(){
  * сохраняется намеренно: недособранный заказ не нужен ни отчётам, ни
  * второму оператору.
  */
-var ORD = { conv:null, lines:[], subject:'', vals:{},
+var ORD = { conv:null, lines:[], subject:'', vals:{}, off:'',
   cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
 
 function ordFresh(){
-  ORD = { conv:current, lines:[], subject:'', vals:{},
+  ORD = { conv:current, lines:[], subject:'', vals:{}, off:'',
     cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
 }
 
@@ -2532,9 +2532,38 @@ function ordFields(){
   return p ? p.fields : (f.fields || []);
 }
 
+/**
+ * Скидка: деньгами или процентом.
+ *
+ * «Минус двести» и «минус десять процентов» — одна и та же фраза в
+ * разговоре, и переводить проценты в уме оператор не должен. Больше
+ * суммы скидка не бывает: отрицательная строка — это возврат, а не
+ * скидка.
+ */
+function ordOff(raw, base){
+  var v = String(raw == null ? '' : raw).trim();
+  if (!v) return 0;
+  var pc = v.charAt(v.length - 1) === '%';
+  var n = Number((pc ? v.slice(0, -1) : v).split(',').join('.'));
+  if (!isFinite(n) || n <= 0) return 0;
+  var off = pc ? base * n / 100 : n;
+  return Math.min(Math.round(off * 100) / 100, Math.round(base * 100) / 100);
+}
+
+/** Сумма строк до скидок. */
+function ordSum(){
+  return ORD.lines.reduce(function(s, l){ return s + l.qty * l.price }, 0);
+}
+
+/** Скидки строк вместе. */
+function ordOffLines(){
+  return ORD.lines.reduce(function(s, l){ return s + ordOff(l.off, l.qty * l.price) }, 0);
+}
+
 /** Сумма — только для глаз оператора. Настоящую считает Zoho. */
 function ordTotal(){
-  return ORD.lines.reduce(function(s, l){ return s + l.qty * l.price }, 0);
+  var afterLines = ordSum() - ordOffLines();
+  return afterLines - ordOff(ORD.off, afterLines);
 }
 
 function ordMoney(n){
@@ -2691,7 +2720,7 @@ function ordAdd(p){
   if (!p) return;
   var same = ORD.lines.filter(function(l){ return l.id === p.id })[0];
   if (same) same.qty += 1;
-  else ORD.lines.push({ id:p.id, name:p.name || p.code, qty:1, price:p.price || 0 });
+  else ORD.lines.push({ id:p.id, name:p.name || p.code, qty:1, price:p.price || 0, off:'' });
   ordCart();
 }
 
@@ -2705,14 +2734,29 @@ function ordCart(){
         return '<div class="oline">' +
           '<span class="on">' + esc(l.name) + '</span>' +
           '<input data-oqty="' + i + '" value="' + esc(String(l.qty)) + '" ' +
-            'style="width:48px;text-align:center">' +
+            'style="width:44px;text-align:center">' +
           '<input data-oprc="' + i + '" value="' + esc(ordMoney(l.price)) + '" ' +
-            'style="width:78px;text-align:right">' +
+            'style="width:70px;text-align:right">' +
+          (ORD.form && ORD.form.lineOff
+            ? '<input data-ooff="' + i + '" value="' + esc(l.off || '') + '"' +
+              L(' placeholder="знижка" style="width:66px;text-align:right">')
+            : '') +
           '<span class="x" data-odel="' + i + '" style="cursor:pointer">×</span>' +
         '</div>';
       }).join('') +
-      L('<div class="kv2" style="margin-top:9px"><div class="k">Разом</div><div>') +
-        esc(ordMoney(ordTotal())) + '</div></div>') +
+      L('<div class="kv2" style="margin-top:9px"><div class="k">Сума</div><div>') +
+        esc(ordMoney(ordSum())) + '</div>' +
+      (ordOffLines() > 0
+        ? L('<div class="k">Знижки рядків</div><div>−') + esc(ordMoney(ordOffLines())) + '</div>'
+        : '') +
+      '</div>' +
+      (ORD.form && ORD.form.wholeOff
+        ? L('<div class="oline" style="margin-top:7px"><span class="on">Знижка на замовлення</span>') +
+        '<input id="oOff" value="' + esc(ORD.off || '') + '"' +
+        L(' placeholder="грн або %" style="width:96px;text-align:right"></div>')
+        : '') +
+      L('<div class="kv2" style="margin-top:7px"><div class="k"><b>Разом</b></div><div><b>') +
+        esc(ordMoney(ordTotal())) + '</b></div></div>') +
     L('<div class="fld" style="margin-top:9px"><label>Назва замовлення</label>') +
       '<input id="oSub" value="' + esc(ORD.subject || '') + '"' +
       L(' placeholder="залишіть пустим — назвемо самі"></div>');
@@ -2731,9 +2775,13 @@ function ordCart(){
       ordCart();
     };
   });
+  Array.prototype.forEach.call(cart.querySelectorAll('[data-ooff]'), function(x){
+    x.onchange = function(){ ORD.lines[x.dataset.ooff].off = x.value; ordCart() };
+  });
   Array.prototype.forEach.call(cart.querySelectorAll('[data-odel]'), function(x){
     x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); ordCart() };
   });
+  if (el('oOff')) el('oOff').onchange = function(){ ORD.off = el('oOff').value; ordCart() };
   el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
 
   /*
@@ -2875,8 +2923,9 @@ function ordCreate(){
     subject: ORD.subject || '',
     pipeline: ORD.pipe || '',
     fields: ORD.vals,
+    discount: ORD.off || '',
     items: ORD.lines.map(function(l){
-      return { productId: l.id, quantity: l.qty, price: l.price };
+      return { productId: l.id, quantity: l.qty, price: l.price, discount: l.off || '' };
     })
   }}).then(function(r){
     // Каталог и поля оставляем: следующий заказ тому же клиенту
@@ -2884,6 +2933,7 @@ function ordCreate(){
     ORD.lines = [];
     ORD.subject = '';
     ORD.vals = {};
+    ORD.off = '';
     ORD.q = '';
     ORD.autoAmount = true;
     ordClose();
@@ -2913,7 +2963,7 @@ function wireOrder(){
  * Вписанное руками имя поля ошибается молча и обнаруживается на
  * первом заказе.
  */
-var OS = { set:null, meta:null, busy:false, err:'', open:'' };
+var OS = { set:null, meta:null, metaFor:'', busy:false, err:'', open:'' };
 
 function osLoad(){
   return api('/settings/orders').then(function(r){
@@ -2924,6 +2974,7 @@ function osLoad(){
 
 function osMeta(module){
   OS.meta = null;
+  OS.metaFor = module;
   OS.err = '';
   osPaint();
   return api('/crm/order-meta?module=' + encodeURIComponent(module))
@@ -2966,9 +3017,11 @@ function osPaint(){
     // сделках на заказы значит сохранить имена полей, которых там нет.
     s.pipelines = [];
     s.fields = [];
+    s.discountField = '';
     s.subform = s.module === 'Sales_Orders'
-      ? { api:'Product_Details', product:'product', quantity:'quantity', price:'list_price' }
-      : { api:'', product:'', quantity:'', price:'' };
+      ? { api:'Product_Details', product:'product', quantity:'quantity',
+          price:'list_price', discount:'Discount' }
+      : { api:'', product:'', quantity:'', price:'', discount:'' };
     osMeta(s.module);
   };
 
@@ -3011,17 +3064,26 @@ function osPaint(){
     s.subform.product = sub ? sub.guess.product : '';
     s.subform.quantity = sub ? sub.guess.quantity : '';
     s.subform.price = sub ? sub.guess.price : '';
+    s.subform.discount = sub ? sub.guess.discount : '';
     osPaint();
   };
   Array.prototype.forEach.call(box.querySelectorAll('[data-oscol]'), function(x){
     x.onchange = function(){ s.subform[x.dataset.oscol] = x.value };
   });
+  if (el('osWhole')) el('osWhole').onchange = function(){ s.discountField = el('osWhole').value };
 
   el('osSave').onclick = function(){
     el('osErr').textContent = '';
     busy(el('osSave'), true);
     api('/settings/orders', { method:'PATCH', body:s })
-      .then(function(r){ OS.set = r.settings; toast(L('Збережено')); osPaint() })
+      .then(function(r){
+        // Берём то, что вернул сервер: он мог поправить настройку, и
+        // показывать человеку своё значение вместо сохранённого —
+        // значит врать ему о том, что записано.
+        OS.set = r.settings || s;
+        toast(L('Збережено'));
+        if (OS.metaFor !== OS.set.module) osMeta(OS.set.module); else osPaint();
+      })
       .catch(function(e){ el('osErr').textContent = ordWhy(e) })
       .then(function(){ if (el('osSave')) busy(el('osSave'), false) });
   };
@@ -3093,8 +3155,31 @@ function osSubBox(s, m){
             L('<div class="fld"><label>Товар</label>') + osCol(sub, 'product', s.subform.product) + '</div>' +
             L('<div class="fld"><label>Кількість</label>') + osCol(sub, 'quantity', s.subform.quantity) + '</div>' +
             L('<div class="fld"><label>Ціна</label>') + osCol(sub, 'price', s.subform.price) + '</div>' +
-            '</div>'
+            L('<div class="fld"><label>Знижка на товар</label>') +
+              osCol(sub, 'discount', s.subform.discount) + '</div>' +
+            '</div>' +
+            L('<div class="hint">Знижку на рядок можна не вказувати — тоді її не питають ') +
+            L('в оператора.</div>') +
+            osWhole(s, m)
           : ''));
+}
+
+/**
+ * Скидка на весь заказ.
+ *
+ * Отдельным полем, а не галочкой в списке полей: это не «ещё одно
+ * поле Zoho», а уступка сверх позиций, и оператор вписывает её под
+ * суммой, а не среди перевозчиков и сроков.
+ */
+function osWhole(s, m){
+  var nums = (m.fields || []).filter(function(f){ return f.kind === 'num' });
+  if (!nums.length) return '';
+  return L('<div class="fld" style="margin-top:10px"><label>Поле знижки на все замовлення</label>') +
+    '<select id="osWhole"><option value="">' + L('не питати') + '</option>' +
+    nums.map(function(f){
+      return '<option value="' + esc(f.api) + '"' +
+        (f.api === s.discountField ? ' selected' : '') + '>' + esc(f.label) + '</option>';
+    }).join('') + '</select></div>';
 }
 
 function osCol(sub, role, value){

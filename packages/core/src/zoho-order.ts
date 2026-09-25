@@ -271,16 +271,47 @@ export function guessColumns(cols: SubformColumn[]): {
   product: string;
   quantity: string;
   price: string;
+  discount: string;
 } {
-  const by = (re: RegExp, skip: string[]) =>
-    cols.filter((c) => !skip.includes(c.api) && (re.test(c.api) || re.test(c.label)))[0]?.api ?? '';
+  const DISCOUNT = /discount|знижк|скидк/i;
+  const PRICE = /price|ціна|цена|варт|стоим|rate/i;
+  const hit = (re: RegExp, c: SubformColumn) => re.test(c.api) || re.test(c.label);
+
+  /*
+   * Колонка, похожая только на эту роль, лучше похожей на две.
+   * «Ціна зі знижкою» подходит и под цену, и под скидку, и правило
+   * «первое совпадение» отдало бы её той роли, которая ищется раньше.
+   * Поэтому сначала берём однозначные, а двусмысленную — если другой
+   * нет.
+   */
+  const pick = (re: RegExp, other: RegExp, skip: string[]) => {
+    const free = cols.filter((c) => !skip.includes(c.api) && hit(re, c));
+    const clean = free.filter((c) => !hit(other, c));
+    return (clean[0] ?? free[0])?.api ?? '';
+  };
 
   const product =
-    cols.filter((c) => c.lookup === 'Products')[0]?.api ?? by(/product|товар|позиц|item/i, []);
-  const quantity = by(/quantity|qty|кільк|колич/i, [product]);
-  const price = by(/price|ціна|цена|варт|стоим|rate/i, [product, quantity]);
-  return { product, quantity, price };
+    cols.filter((c) => c.lookup === 'Products')[0]?.api ??
+    pick(/product|товар|позиц|item/i, DISCOUNT, []);
+  const quantity = pick(/quantity|qty|кільк|колич/i, DISCOUNT, [product]);
+  const discount = pick(DISCOUNT, PRICE, [product, quantity]);
+  const price = pick(PRICE, DISCOUNT, [product, quantity, discount]);
+  return { product, quantity, price, discount };
 }
+
+/**
+ * Колонки стандартной таблицы товаров.
+ *
+ * Подформой она не считается, своего модуля у неё нет, и спросить её
+ * колонки у Zoho нельзя — они зашиты в самом API. Поэтому список
+ * здесь, а не приходит ответом.
+ */
+export const STOCK_COLUMNS: SubformColumn[] = [
+  { api: 'product', label: 'Товар', lookup: 'Products' },
+  { api: 'quantity', label: 'Кількість', lookup: '' },
+  { api: 'list_price', label: 'Ціна', lookup: '' },
+  { api: 'Discount', label: 'Знижка', lookup: '' },
+];
 
 export interface PipelineStage {
   value: string;

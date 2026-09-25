@@ -57,6 +57,11 @@ export interface OrderSubform {
   quantity: string;
   /** Колонка с ценой. */
   price: string;
+  /**
+   * Колонка со скидкой на строку. Может отсутствовать: не в каждой
+   * подформе она заведена, и заказ без неё делается по-прежнему.
+   */
+  discount: string;
 }
 
 export interface OrderSettings {
@@ -73,6 +78,14 @@ export interface OrderSettings {
   fields: string[];
   pipelines: OrderPipeline[];
   subform: OrderSubform;
+  /**
+   * Поле скидки на весь заказ.
+   *
+   * Отдельно от скидок строк: скидка на заказ — это уступка сверх
+   * позиций («округлим до тысячи»), и размазывать её по строкам
+   * значит менять цены, о которых договорились.
+   */
+  discountField: string;
 }
 
 /** Стандартная таблица товаров Sales_Orders: колонки известны Zoho. */
@@ -81,6 +94,7 @@ export const STOCK_SUBFORM: OrderSubform = {
   product: 'product',
   quantity: 'quantity',
   price: 'list_price',
+  discount: 'Discount',
 };
 
 export const ORDER_SETTINGS_DEFAULT: OrderSettings = {
@@ -91,6 +105,7 @@ export const ORDER_SETTINGS_DEFAULT: OrderSettings = {
   fields: [],
   pipelines: [],
   subform: STOCK_SUBFORM,
+  discountField: '',
 };
 
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
@@ -136,12 +151,15 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
 
   const sub = (r['subform'] ?? {}) as Record<string, unknown>;
   const api = String(sub['api'] ?? '');
+  const col = (key: string) =>
+    NAME.test(String(sub[key] ?? '')) ? String(sub[key]) : '';
   const subform: OrderSubform = NAME.test(api)
     ? {
         api,
-        product: NAME.test(String(sub['product'] ?? '')) ? String(sub['product']) : '',
-        quantity: NAME.test(String(sub['quantity'] ?? '')) ? String(sub['quantity']) : '',
-        price: NAME.test(String(sub['price'] ?? '')) ? String(sub['price']) : '',
+        product: col('product'),
+        quantity: col('quantity'),
+        price: col('price'),
+        discount: col('discount'),
       }
     : { ...STOCK_SUBFORM };
 
@@ -153,6 +171,7 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
     fields: names(r['fields']),
     pipelines,
     subform,
+    discountField: NAME.test(String(r['discountField'] ?? '')) ? String(r['discountField']) : '',
   };
 }
 

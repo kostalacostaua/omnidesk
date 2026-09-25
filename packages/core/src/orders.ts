@@ -15,12 +15,15 @@ export type OrderItemInput = {
   productId?: unknown;
   quantity?: unknown;
   price?: unknown;
+  discount?: unknown;
 };
 
 export type OrderItem = {
   productId: string;
   quantity: number;
   price: number;
+  /** Скидка на строку, в деньгах. Проценты превращены в деньги здесь. */
+  discount: number;
 };
 
 /** Больше ста строк — это не разговор, а выгрузка прайса. */
@@ -43,6 +46,29 @@ function money(v: unknown): number {
   return n > 0 ? Math.round(n * 100) / 100 : 0;
 }
 
+/**
+ * Скидка: деньгами или процентом.
+ *
+ * Оператор договаривается и так, и так: «минус двести» и «минус
+ * десять процентов» — одна и та же фраза в разговоре. Процент
+ * превращается в деньги здесь, а не в Zoho: у неё в строке заказа
+ * скидка хранится числом, и «10» в этом поле означает десять гривен, а
+ * не десять процентов.
+ *
+ * Больше суммы скидка быть не может: отрицательная строка в заказе —
+ * это не скидка, а возврат, и делается он не здесь.
+ */
+export function discountAmount(raw: unknown, base: number): number {
+  const s = typeof raw === 'number' ? String(raw) : String(raw ?? '').trim();
+  if (!s) return 0;
+  const percent = s.endsWith('%');
+  const n = num(percent ? s.slice(0, -1) : s);
+  if (n <= 0) return 0;
+  const amount = percent ? (base * n) / 100 : n;
+  const top = Math.round(base * 100) / 100;
+  return Math.min(Math.round(amount * 100) / 100, top > 0 ? top : 0);
+}
+
 export function orderItems(raw: unknown): OrderItem[] {
   if (!Array.isArray(raw)) return [];
   const out: OrderItem[] = [];
@@ -50,15 +76,32 @@ export function orderItems(raw: unknown): OrderItem[] {
     const id = typeof r?.productId === 'string' ? r.productId.trim() : '';
     if (!id) continue;
     const q = Math.round(num(r.quantity));
-    out.push({ productId: id, quantity: q > 0 ? q : 1, price: money(r.price) });
+    const quantity = q > 0 ? q : 1;
+    const price = money(r.price);
+    out.push({
+      productId: id,
+      quantity,
+      price,
+      discount: discountAmount(r.discount, quantity * price),
+    });
     if (out.length === ORDER_ITEMS_MAX) break;
   }
   return out;
 }
 
-/** Сумма — для показа человеку. Настоящую считает Zoho по тем же строкам. */
-export function orderTotal(items: OrderItem[]): number {
+/** Сумма строк до скидок. */
+export function orderSubtotal(items: OrderItem[]): number {
   return Math.round(items.reduce((s, i) => s + i.quantity * i.price, 0) * 100) / 100;
+}
+
+/**
+ * Сумма — для показа человеку. Настоящую считает Zoho по тем же строкам.
+ *
+ * Скидки строк вычтены: показывать «разом» без них значит называть
+ * клиенту сумму, которой не будет в счёте.
+ */
+export function orderTotal(items: OrderItem[]): number {
+  return Math.round(items.reduce((s, i) => s + i.quantity * i.price - i.discount, 0) * 100) / 100;
 }
 
 /**
