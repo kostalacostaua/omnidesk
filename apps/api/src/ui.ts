@@ -4238,9 +4238,33 @@ var BILL = null;
    увидеть сначала лучшую цену, а не худшую. */
 var BILL_PERIOD = 'year';
 
+/*
+ * Отказ подписки словами.
+ *
+ * Отдельно от sErr нарочно: sErr — это не форматтер текста, а
+ * перерисовка страницы сообщением об отказе. Подставленный в строку, он
+ * стирал профиль целиком и оставлял на его месте «paddle_failed» — по
+ * одной неудачной оплате исчезала вся страница.
+ *
+ * Здесь же важно другое: показать то, что ответил Paddle. Его слова
+ * называют причину («price not found», «forbidden»), а наш код —
+ * только то, что не получилось.
+ */
+function billWhy(e){
+  var p = (e && e.payload) || {};
+  if (p.error === 'paddle_not_configured') return L('Paddle не налаштований на сервері');
+  if (p.error === 'no_price') return L('Тариф ще не заведений у Paddle');
+  if (p.error === 'no_customer') return L('У Paddle ще немає вашого клієнта — спочатку оплата');
+  if (p.why) return L('Paddle: ') + p.why;
+  return (e && e.message) || L('помилка');
+}
+
 function billLoad(){
   api('/billing').then(function(d){ BILL = d; billPaint() })
-    .catch(function(e){ var b = el('bill'); if (b) b.innerHTML = '<div class="err">' + esc(sErr(e)) + '</div>' });
+    .catch(function(e){
+      var b = el('bill');
+      if (b) b.innerHTML = '<div class="err">' + esc(billWhy(e)) + '</div>';
+    });
 }
 
 function billCur(prices){
@@ -4330,7 +4354,7 @@ function billPaint(){
       busy(b, false);
       // Ссылка одноразовая и живёт недолго, поэтому открываем сразу.
       if (d && d.url) window.open(d.url, '_blank', 'noopener');
-    }).catch(function(e){ busy(b, false); el('bErr').textContent = sErr(e) });
+    }).catch(function(e){ busy(b, false); el('bErr').textContent = billWhy(e) });
   };
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-per]'), function(btn){
@@ -4392,7 +4416,7 @@ function billPay(plan, btn){
       busy(btn, false);
       if (err) err.textContent = String(e && e.message) === 'paddle_script'
         ? L('Не вдалося завантажити вікно оплати. Перевірте блокувальник реклами.')
-        : sErr(e);
+        : billWhy(e);
     });
 }
 
@@ -8532,10 +8556,7 @@ function paintOwner(){
         }
       })
       .catch(function(e){
-        el('pPadErr').textContent = ((e.payload || {}).why) ||
-          (((e.payload || {}).error) === 'paddle_not_configured'
-            ? L('Paddle не налаштований: немає ключа PADDLE_API_KEY')
-            : sErr(e));
+        el('pPadErr').textContent = billWhy(e);
       })
       .then(function(){ busy(el('pPaddle'), false) });
   };

@@ -75,6 +75,7 @@ async function platform(pool: Pool): Promise<PlatformRow> {
 
 async function paddleFetch(
   deps: BillingDeps,
+  log: { warn: (o: unknown, m: string) => void },
   path: string,
   init: { method: string; body?: unknown },
 ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; message: string }> {
@@ -97,7 +98,11 @@ async function paddleFetch(
     // Paddle кладёт причину в error.detail — она человеческая, и
     // показывать её полезнее, чем наш пересказ.
     const err = (parsed as { error?: { detail?: string; code?: string } } | null)?.error;
-    return { ok: false, status: res.status, message: err?.detail ?? err?.code ?? text.slice(0, 300) };
+    const message = err?.detail ?? err?.code ?? text.slice(0, 300);
+    // В журнал — обязательно. Без этого отказ виден только тому, кто
+    // сидит перед экраном, и разбирать его приходится по скриншоту.
+    log.warn({ path, status: res.status, code: err?.code, detail: message }, 'Paddle отказал');
+    return { ok: false, status: res.status, message };
   }
   return { ok: true, data: (parsed as { data?: unknown } | null)?.data ?? null };
 }
@@ -195,7 +200,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       return rows[0]?.paddle_customer_id ?? null;
     });
 
-    const made = await paddleFetch(deps, '/transactions', {
+    const made = await paddleFetch(deps, req.log, '/transactions', {
       method: 'POST',
       body: {
         items: [{ price_id: priceId, quantity: 1 }],
@@ -234,7 +239,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     });
     if (!customer) return reply.code(409).send({ error: 'no_customer' });
 
-    const got = await paddleFetch(deps, `/customers/${customer}/portal-sessions`, { method: 'POST' });
+    const got = await paddleFetch(deps, req.log, `/customers/${customer}/portal-sessions`, { method: 'POST' });
     if (!got.ok) return reply.code(502).send({ error: 'paddle_failed', why: got.message });
 
     const urls = (got.data as { urls?: { general?: { overview?: string } } } | null)?.urls;
@@ -281,7 +286,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       // Товар заводим один на тариф и запоминаем: вторая цена должна
       // лечь к нему же, а не создать рядом второй с тем же названием.
       if (!ids.product) {
-        const product = await paddleFetch(deps, '/products', {
+        const product = await paddleFetch(deps, req.log, '/products', {
           method: 'POST',
           body: { name: `Rozmovio ${plan}`, tax_category: 'standard' },
         });
@@ -306,7 +311,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
           failed.push({ plan, period, why: 'no_price' });
           continue;
         }
-        const price = await paddleFetch(deps, '/prices', {
+        const price = await paddleFetch(deps, req.log, '/prices', {
           method: 'POST',
           body: {
             product_id: ids.product,
