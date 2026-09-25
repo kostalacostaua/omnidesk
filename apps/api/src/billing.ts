@@ -142,6 +142,44 @@ async function paddleFetch(
 export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
   const { pool, requireAuth } = deps;
 
+  /**
+   * Забыть привязку к Paddle, которой в этом кабинете нет.
+   *
+   * Переезд из песочницы в боевой Paddle — это другой кабинет: клиент,
+   * подписка и сделка остаются в старом, а у нас в базе лежат их
+   * идентификаторы. С ними оплата отвечала бы «клиента не найдено»
+   * ровно в тот момент, когда человек решил заплатить, и понять
+   * причину по этому ответу было бы нельзя.
+   *
+   * Стираем только на прямой ответ «нет такого». Сетевая беда или
+   * отказ по правам — не повод забывать оплату клиента.
+   */
+  async function forgetPaddle(tenantId: string, why: string, log: { warn: (o: unknown, m: string) => void }) {
+    await withTenant(pool, tenantId, async (db) => {
+      await db.query(
+        `UPDATE tenants SET paddle_customer_id = NULL, paddle_subscription_id = NULL,
+                            paddle_status = NULL, paddle_txn = NULL
+          WHERE id = $1`,
+        [tenantId],
+      );
+    });
+    log.warn({ tenantId, why }, 'Привязка к Paddle из другого кабинета — забыли её');
+  }
+
+  /** Клиент Paddle, если он есть в том кабинете, с которым мы работаем. */
+  async function customerNow(
+    tenantId: string,
+    id: string | null,
+    log: { warn: (o: unknown, m: string) => void },
+  ): Promise<string | null> {
+    if (!id) return null;
+    const got = await paddleFetch(deps, log, `/customers/${id}`, { method: 'GET' });
+    if (got.ok) return id;
+    if (got.status !== 404) return id;
+    await forgetPaddle(tenantId, 'customer_not_found', log);
+    return null;
+  }
+
   /** Организация в том виде, в каком её касается оплата. */
   async function tenantNow(tenantId: string): Promise<{
     plan: string;
@@ -290,7 +328,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const priceId = paddlePriceId(p.paddle_prices ?? {}, plan, period);
     if (!priceId) return reply.code(409).send({ error: 'no_price' });
 
-    const customer = me.paddle_customer_id;
+    const customer = await customerNow(a.tenantId, me.paddle_customer_id, req.log);
     // За человека — столько единиц, сколько людей в тарифе. Paddle сам
     // умножит цену на количество, и сумма в окне оплаты совпадёт с той,
     // что клиент видел на странице.
@@ -352,7 +390,15 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       `/transactions?customer_id=${encodeURIComponent(customer)}&status=completed,billed,past_due&per_page=50`,
       { method: 'GET' },
     );
-    if (!got.ok) return reply.code(502).send({ error: 'paddle_failed', why: got.message });
+    if (!got.ok) {
+      // Клиента из другого кабинета Paddle не знает. Это не поломка, а
+      // пустой список: оплат в этом кабинете действительно не было.
+      if (got.status === 404 || got.status === 400) {
+        await forgetPaddle(a.tenantId, 'transactions_' + got.status, req.log);
+        return { payments: [] };
+      }
+      return reply.code(502).send({ error: 'paddle_failed', why: got.message });
+    }
 
     const rows = Array.isArray(got.data) ? (got.data as Record<string, unknown>[]) : [];
     return { payments: rows.map(paddlePayment) };
@@ -408,13 +454,14 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     if (!a) return reply.code(401).send(auth401);
     if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
 
-    const customer = await withTenant(pool, a.tenantId, async (db) => {
+    const stored = await withTenant(pool, a.tenantId, async (db) => {
       const { rows } = await db.query<{ paddle_customer_id: string | null }>(
         `SELECT paddle_customer_id FROM tenants WHERE id = $1`,
         [a.tenantId],
       );
       return rows[0]?.paddle_customer_id ?? null;
     });
+    const customer = await customerNow(a.tenantId, stored, req.log);
     if (!customer) return reply.code(409).send({ error: 'no_customer' });
 
     const got = await paddleFetch(deps, req.log, `/customers/${customer}/portal-sessions`, { method: 'POST' });
