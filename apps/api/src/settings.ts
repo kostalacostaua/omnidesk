@@ -1,4 +1,5 @@
 import { channelListScope, folderScope } from './scope.js';
+import { mailboxWhy, verifyMailbox } from './mailbox.js';
 import type { FastifyInstance } from 'fastify';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
@@ -25,6 +26,7 @@ import {
   CUSTOM_CHANNEL,
   ResendError,
   isPublicMailDomain,
+  parseMailbox,
   dnsRows,
   domainReady,
   resendCreateDomain,
@@ -894,6 +896,85 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       });
 
       return { channelId, domain, address, status: dom.status, records: dnsRows(dom) };
+    },
+  );
+
+  /**
+   * Существующая почтовая скринька клиента.
+   *
+   * Второй способ подключить почту, и он же обычный: у компании уже
+   * есть info@фирма.com, и заводить рядом новый адрес — значит просить
+   * её клиентов переучиться. Здесь ничего не надо делать с DNS: письма
+   * читаются из самого ящика, ответы уходят из него же.
+   *
+   * Плата за это — пароль ящика у нас. Он шифруется ключом организации
+   * и наружу не возвращается никогда, как и все прочие ключи каналов.
+   */
+  app.post<{ Body: Record<string, unknown> }>(
+    '/settings/channels/mailbox',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const parsed = parseMailbox(req.body);
+      if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+      const creds = parsed.creds;
+
+      /*
+       * Тот же ящик у другой организации — это не ошибка ввода, а чужая
+       * почта: письма из него уехали бы в чужой инбокс.
+       */
+      const owner = await withSystem(pool, 'владелец почтового ящика', async (db) => {
+        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+          `SELECT channel_id, tenant_id FROM channel_routes
+            WHERE channel_type = 'email' AND external_id = $1 LIMIT 1`,
+          [creds.address],
+        );
+        return rows[0] ?? null;
+      });
+      if (owner && owner.tenant_id !== auth.tenantId) {
+        return reply.code(409).send({ error: 'address_taken' });
+      }
+
+      try {
+        await verifyMailbox(creds);
+      } catch (err) {
+        app.log.warn({ address: creds.address }, 'Ящик не пустил');
+        return reply.code(400).send({ error: 'mailbox_refused', detail: mailboxWhy(err) });
+      }
+
+      const channelId = owner?.channel_id ?? randomUUID();
+      const title = String(req.body?.displayName ?? '').trim().slice(0, 80) || creds.address;
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, 'email', $3, $4, $5, $6, 'active')
+           ON CONFLICT (type, external_id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 credentials_enc = EXCLUDED.credentials_enc,
+                 meta = EXCLUDED.meta, status = 'active', last_error = NULL`,
+          [
+            channelId,
+            auth.tenantId,
+            title,
+            creds.address,
+            encryptJson(masterKey, auth.tenantId, creds),
+            // Без пароля и без логина: в meta лежит то, что можно
+            // показать на экране, а показать пароль нельзя никогда.
+            JSON.stringify({
+              mode: 'mailbox',
+              address: creds.address,
+              imap: `${creds.imap.host}:${creds.imap.port}`,
+              smtp: `${creds.smtp.host}:${creds.smtp.port}`,
+            }),
+          ],
+        );
+      });
+
+      app.log.info({ tenantId: auth.tenantId, address: creds.address }, 'Почтовый ящик подключён');
+      return { channelId, address: creds.address };
     },
   );
 

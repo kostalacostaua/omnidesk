@@ -4148,8 +4148,37 @@ function tabChannels(){
       '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
 
       L('<div class="tile"><div class="t1"><div class="chico email">@</div>') +
-      L('<div><div class="ttl">Пошта</div><div class="sub">Листи на ваш піддомен</div></div></div>') +
-      L('<div class="sub" style="white-space:normal">Заведіть піддомен для звернень — help.firma.com. ') +
+      L('<div><div class="ttl">Пошта</div><div class="sub">Наявна скринька або свій піддомен</div></div></div>') +
+      '<div class="seg" style="margin-top:8px">' +
+      L('<button data-mlmode="box" class="on">Наявна скринька</button>') +
+      L('<button data-mlmode="dom">Свій піддомен</button>') + '</div>' +
+
+      /* Ящик, который уже есть. Стоит первым: у компании давно есть
+         info@, и просить клиентов писать на новый адрес — значит
+         просить их переучиться. */
+      '<div id="mbBox">' +
+      L('<div class="sub" style="white-space:normal;margin-top:8px">Листи читаються з вашої ') +
+      L('скриньки, відповіді йдуть з неї ж. DNS чіпати не треба.</div>') +
+      '<div class="row2" style="margin-top:8px">' +
+      L('<input id="mbAddr" placeholder="info@firma.com" autocomplete="off">') +
+      L('<input id="mbPass" type="password" placeholder="пароль скриньки" autocomplete="off">') +
+      '</div>' +
+      '<div class="hint" id="mbNote" style="margin-top:6px"></div>' +
+      L('<button class="ghost mini" id="mbMore" style="margin-top:7px">Сервери вручну</button>') +
+      '<div id="mbHosts" style="display:none;margin-top:7px">' +
+      '<div class="row2">' +
+      L('<input id="mbIH" placeholder="imap.firma.com">') +
+      L('<input id="mbIP" placeholder="993" style="max-width:90px">') + '</div>' +
+      '<div class="row2" style="margin-top:6px">' +
+      L('<input id="mbSH" placeholder="smtp.firma.com">') +
+      L('<input id="mbSP" placeholder="465" style="max-width:90px">') + '</div>' +
+      L('<input id="mbUser" placeholder="логін, якщо не збігається з адресою" style="margin-top:6px">') +
+      '</div>' +
+      L('<div class="acts"><button id="mbAdd">Підключити скриньку</button></div>') +
+      '<div class="err" id="mbErr"></div></div>' +
+
+      '<div id="mlDomBox" style="display:none">' +
+      L('<div class="sub" style="white-space:normal;margin-top:8px">Заведіть піддомен для звернень — help.firma.com. ') +
       L('Основний домен не підійде: у нього один запис MX, і переказавши його нам, ') +
       L('ви залишите без пошти співробітників.</div>') +
       '<div class="row2" style="margin-top:8px">' +
@@ -4157,6 +4186,7 @@ function tabChannels(){
       L('<input id="mlDom" placeholder="help.firma.com">') +
       L('<button id="mlAdd">Підключити</button></div>') +
       '<div class="err" id="mlcErr"></div></div>' +
+      '</div>' +
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
       L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +
@@ -4310,6 +4340,7 @@ function tabChannels(){
     };
     el('metaGo').onclick = startMeta;
     if (el('mlAdd')) el('mlAdd').onclick = mlConnect;
+    wireMailbox();
     if (S.metaError && !S.metaPick) { el('metaErr').textContent = S.metaError; S.metaError = null; }
     if (S.metaPick) showMetaPick(S.metaPick);
 
@@ -7711,6 +7742,30 @@ function mlPanel(id, c){
   var meta = (c && c.meta) || {};
   var box = el('mlBox');
   if (!box) return;
+
+  /*
+   * Ящик клиента. Здесь нет ни домена, ни записей DNS — есть адрес,
+   * сервера и то, пустила ли почта в последний обход. Показывать ему
+   * «очікує записів» значило бы просить добавить то, чего не нужно.
+   */
+  if (meta.mode === 'mailbox'){
+    box.innerHTML =
+      L('<div class="pg-sec"><h3>Поштова скринька</h3><div class="tile">') +
+      '<div class="kv">' +
+        L('<div class="k">Адреса</div><div><code>') + esc(meta.address || '') + '</code></div>' +
+        L('<div class="k">IMAP</div><div><code>') + esc(meta.imap || '') + '</code></div>' +
+        L('<div class="k">SMTP</div><div><code>') + esc(meta.smtp || '') + '</code></div>' +
+        L('<div class="k">Стан</div><div>') +
+          (c.lastError ? L('<span class="pill warn">не пускає</span>')
+                       : L('<span class="pill ok">читаємо</span>')) + '</div>' +
+      '</div>' +
+      (c.lastError ? '<div class="err" style="margin-top:8px">' + esc(c.lastError) + '</div>' : '') +
+      L('<div class="sub" style="white-space:normal;margin-top:10px">Нові листи забираємо раз на хвилину. ') +
+      L('Стару переписку не завантажуємо: у стрічці зʼявляться листи, що прийшли після підключення.</div>') +
+      '</div></div>';
+    return;
+  }
+
   box.innerHTML =
     L('<div class="pg-sec"><h3>Домен і записи DNS</h3><div class="tile">') +
     '<div class="kv">' +
@@ -7755,6 +7810,115 @@ function mlPanel(id, c){
 }
 
 /** Подключение почтового домена из витрины каналов. */
+/* ── Наявна поштова скринька ───────────────────────────────────── */
+
+/**
+ * Подключение ящика, который у компании уже есть.
+ *
+ * Адреса серверов не спрашиваем до последнего: по домену они известны
+ * у известных служб, а у своей почты на хостинге почти всегда
+ * imap.домен и smtp.домен. Поля рядом, под кнопкой «сервери вручну» —
+ * для тех, у кого иначе.
+ */
+function wireMailbox(){
+  if (!el('mbAdd')) return;
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-mlmode]'), function(b){
+    b.onclick = function(){
+      var box = b.dataset.mlmode === 'box';
+      Array.prototype.forEach.call(document.querySelectorAll('[data-mlmode]'), function(x){
+        x.classList.toggle('on', x === b);
+      });
+      el('mbBox').style.display = box ? '' : 'none';
+      el('mlDomBox').style.display = box ? 'none' : '';
+    };
+  });
+
+  el('mbMore').onclick = function(){
+    var open = el('mbHosts').style.display === 'none';
+    el('mbHosts').style.display = open ? '' : 'none';
+    if (open) mbGuess();
+  };
+
+  el('mbAddr').onchange = mbGuess;
+  el('mbAdd').onclick = mbConnect;
+}
+
+/** Известные службы и правило «imap.домен» — чтобы не спрашивать лишнего. */
+var MB_KNOWN = {
+  'gmail.com': ['imap.gmail.com', 993, 'smtp.gmail.com', 465,
+    L('Для Gmail потрібен пароль застосунку, звичайний пароль не підійде.')],
+  'ukr.net': ['imap.ukr.net', 993, 'smtp.ukr.net', 465,
+    L('Для ukr.net потрібен пароль для зовнішніх програм з налаштувань скриньки.')],
+  'i.ua': ['imap.i.ua', 993, 'smtp.i.ua', 465, ''],
+  'meta.ua': ['imap.meta.ua', 993, 'smtp.meta.ua', 465, ''],
+  'icloud.com': ['imap.mail.me.com', 993, 'smtp.mail.me.com', 587,
+    L('Для iCloud потрібен пароль застосунку Apple.')],
+  'zoho.eu': ['imap.zoho.eu', 993, 'smtp.zoho.eu', 465, ''],
+  'zoho.com': ['imap.zoho.com', 993, 'smtp.zoho.com', 465, ''],
+};
+
+var MB_MICROSOFT = ['outlook.com','hotmail.com','live.com','msn.com','office365.com'];
+
+function mbGuess(){
+  var addr = el('mbAddr').value.trim().toLowerCase();
+  var at = addr.lastIndexOf('@');
+  var dom = at < 0 ? '' : addr.slice(at + 1);
+  var note = el('mbNote');
+
+  if (dom && MB_MICROSOFT.filter(function(m){ return dom === m || dom.endsWith('.' + m) }).length){
+    note.textContent = L('Microsoft закрила вхід за паролем для пошти — Outlook і 365 сюди не підключаються.');
+  } else {
+    note.textContent = (MB_KNOWN[dom] && MB_KNOWN[dom][4]) || '';
+  }
+
+  var k = MB_KNOWN[dom];
+  var ih = k ? k[0] : (dom ? 'imap.' + dom : '');
+  var ip = k ? k[1] : 993;
+  var sh = k ? k[2] : (dom ? 'smtp.' + dom : '');
+  var sp = k ? k[3] : 465;
+  // Вписанное руками не затираем: человек мог поправить хост под себя.
+  if (!el('mbIH').value) el('mbIH').value = ih;
+  if (!el('mbIP').value) el('mbIP').value = String(ip);
+  if (!el('mbSH').value) el('mbSH').value = sh;
+  if (!el('mbSP').value) el('mbSP').value = String(sp);
+}
+
+function mbWhy(p){
+  return p.error === 'bad_address' ? L('Схоже на неправильну адресу')
+    : p.error === 'no_password' ? L('Впишіть пароль скриньки')
+    : p.error === 'microsoft_mail' ? L('Microsoft закрила вхід за паролем — Outlook і 365 сюди не підключаються')
+    : p.error === 'bad_imap' ? L('Перевірте сервер IMAP і порт')
+    : p.error === 'bad_smtp' ? L('Перевірте сервер SMTP і порт')
+    : p.error === 'mailbox_refused' ? (p.detail || L('Пошта не пустила'))
+    : p.error === 'address_taken' ? L('Цю скриньку вже підключила інша організація')
+    : (p.detail || L('Не вдалося підключити'));
+}
+
+function mbConnect(){
+  mbGuess();
+  el('mbErr').textContent = '';
+  var body = {
+    address: el('mbAddr').value.trim(),
+    pass: el('mbPass').value,
+    user: el('mbUser').value.trim(),
+    imap: { host: el('mbIH').value.trim(), port: Number(el('mbIP').value) },
+    smtp: { host: el('mbSH').value.trim(), port: Number(el('mbSP').value) }
+  };
+  busy(el('mbAdd'), true);
+  api('/settings/channels/mailbox', { method:'POST', body: body })
+    .then(function(r){
+      toast(L('Скриньку підключено'));
+      el('mbPass').value = '';
+      return api('/channels').then(function(d){
+        CHANNELS = d.channels || [];
+        openChannel(r.channelId);
+      });
+    })
+    .catch(function(e){ el('mbErr').textContent = mbWhy((e && e.payload) || {}) })
+    .then(function(){ busy(el('mbAdd'), false) });
+}
+
 function mlConnect(){
   var domain = el('mlDom').value.trim().toLowerCase();
   var local = el('mlLoc').value.trim().toLowerCase();

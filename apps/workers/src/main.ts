@@ -85,7 +85,16 @@ import {
   type MtprotoInboundPayload,
   type TelegramUpdate,
   type UnifiedMessage,
+  mailboxReceived,
+  type MailboxCreds,
 } from '@omnidesk/core';
+import {
+  fetchMail,
+  mailAuthFailed,
+  smtpSend,
+  type FetchedMail,
+  type MailboxState,
+} from './mailbox.js';
 
 /**
  * Воркер входящих сообщений.
@@ -2890,16 +2899,20 @@ async function viberTick(): Promise<void> {
  * читается как рассылка.
  */
 async function sendEmail(job: OutboundJob, row: OutboundRow): Promise<void> {
-  if (!RESEND) {
-    await markFailed(job, { reason: 'resend_not_configured' });
-    throw new UnrecoverableError('Ключ Resend не задан — письма не уходят');
-  }
-
-  const creds = decryptJson<{ domain: string; address: string }>(
+  const creds = decryptJson<{ domain?: string; address: string } & Partial<MailboxCreds>>(
     masterKey,
     job.tenantId,
     row.credentials_enc,
   );
+
+  // Ящик клиента или наш поддомен — видно по самим доступам: у ящика
+  // есть сервера, у поддомена только домен.
+  const mailbox = creds.imap && creds.smtp ? (creds as MailboxCreds) : null;
+
+  if (!mailbox && !RESEND) {
+    await markFailed(job, { reason: 'resend_not_configured' });
+    throw new UnrecoverableError('Ключ Resend не задан — письма не уходят');
+  }
 
   const about = await withTenant(pool, job.tenantId, async (db) => {
     // Тема и цепочка — из последнего входящего письма этого разговора.
@@ -2961,8 +2974,50 @@ async function sendEmail(job: OutboundJob, row: OutboundRow): Promise<void> {
     throw new UnrecoverableError('Пустое письмо не отправляем');
   }
 
+  /*
+   * Ящик клиента. Письмо уходит его же сервером и с его адреса —
+   * поэтому и заголовки цепочки те же, и вложения те же, а разница
+   * только в том, кто несёт.
+   */
+  if (mailbox) {
+    try {
+      const id = await smtpSend(mailbox, {
+        from: fromHeader(label, mailbox.address),
+        to: row.peer_id ?? '',
+        subject: replySubject(about?.subject),
+        ...(text ? { text } : {}),
+        headers: threadHeaders(about?.message_id, about?.refs),
+        ...(files.length
+          ? {
+              attachments: files.map((f) => ({
+                filename: f.filename,
+                content: Buffer.from(f.content, 'base64'),
+                ...(f.content_type ? { contentType: f.content_type } : {}),
+              })),
+            }
+          : {}),
+      });
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE messages SET status = 'sent', external_id = $2 WHERE id = $1 AND status = 'pending'`,
+          [job.messageId, id || null],
+        );
+      });
+      log('info', 'Письмо отправлено з ящика', { messageId: job.messageId });
+      return;
+    } catch (err) {
+      // Неверный пароль повтором не лечится: очередь будет долбиться в
+      // чужой сервер до блокировки адреса.
+      if (mailAuthFailed(err)) {
+        await markFailed(job, { reason: 'mailbox_auth' });
+        throw new UnrecoverableError(err instanceof Error ? err.message : String(err));
+      }
+      throw err;
+    }
+  }
+
   try {
-    const sent = await resendSend(RESEND, {
+    const sent = await resendSend(RESEND!, {
       from: fromHeader(label, creds.address),
       to: [row.peer_id ?? ''],
       subject: replySubject(about?.subject),
@@ -3318,6 +3373,158 @@ void (async function viberLoop(): Promise<void> {
       log('error', 'Цикл Viber упал', { error: err instanceof Error ? err.message : String(err) });
     }
     await new Promise((resolve) => setTimeout(resolve, VIBER_POLL_MS));
+  }
+})();
+
+/* ── Почтовый ящик клиента ──────────────────────────────────────── */
+
+/**
+ * Обход подключённых ящиков.
+ *
+ * Раз в минуту: письмо — не чат, минута задержки в переписке почтой
+ * незаметна, а держать постоянное соединение с чужим сервером ради
+ * трёх писем в день дорого и ненадёжно.
+ *
+ * Состояние обхода лежит в самом канале: номер последнего письма и
+ * uidValidity ящика. В Redis ему не место — оно должно пережить
+ * перезапуск и переезд, иначе вся переписка приедет в ленту заново.
+ */
+const MAIL_TICK_MS = 60_000;
+
+interface MailboxChannel {
+  id: string;
+  tenant_id: string;
+  display_name: string | null;
+  credentials_enc: Buffer;
+  meta: { mode?: string; mailbox?: MailboxState } | null;
+}
+
+async function mailTick(): Promise<void> {
+  const routes = await withSystem(pool, 'каналы почтовых ящиков', async (db) => {
+    const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+      `SELECT channel_id, tenant_id FROM channel_routes
+        WHERE channel_type = $1 AND status = 'active'`,
+      [EMAIL_CHANNEL],
+    );
+    return rows;
+  });
+
+  for (const route of routes) {
+    try {
+      const row = await withTenant(pool, route.tenant_id, async (db) => {
+        const { rows } = await db.query<MailboxChannel>(
+          `SELECT id, tenant_id, display_name, credentials_enc, meta
+             FROM channels WHERE id = $1 AND status = 'active' LIMIT 1`,
+          [route.channel_id],
+        );
+        return rows[0] ?? null;
+      });
+      // Почта на своём поддомене приходит вебхуком: обходить нечего.
+      if (!row || row.meta?.mode !== 'mailbox') continue;
+
+      const creds = decryptJson<MailboxCreds>(masterKey, route.tenant_id, row.credentials_enc);
+      const got = await fetchMail(creds, row.meta?.mailbox ?? null);
+
+      for (const item of got.mails) {
+        await saveMailbox(row, creds, item);
+      }
+
+      await withTenant(pool, route.tenant_id, async (db) => {
+        await db.query(
+          `UPDATE channels
+              SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('mailbox', $2::jsonb),
+                  last_error = NULL
+            WHERE id = $1`,
+          [row.id, JSON.stringify(got.state)],
+        );
+      });
+
+      if (got.mails.length) {
+        log('info', 'Письма из ящика забраны', { channelId: row.id, count: got.mails.length });
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      log('warn', 'Ящик не отвечает', { channelId: route.channel_id, reason });
+      /*
+       * Причину пишем в сам канал. Неверный пароль виден человеку на
+       * странице каналов, а не в журнале сервера, до которого он не
+       * доберётся никогда.
+       */
+      await withTenant(pool, route.tenant_id, async (db) => {
+        await db.query(`UPDATE channels SET last_error = $2 WHERE id = $1`, [
+          route.channel_id,
+          mailAuthFailed(err)
+            ? 'Пошта не пускає: перевірте адресу, пароль і сервери'
+            : reason.slice(0, 300),
+        ]);
+      });
+    }
+  }
+}
+
+/**
+ * Одно письмо из ящика — в ленту.
+ *
+ * Дальше по дороге оно ничем не отличается от письма с поддомена:
+ * тот же разбор, та же лента, тот же бот. Разница только в том, что
+ * вложения уже у нас на руках, и качать их отдельной очередью нечего.
+ */
+async function saveMailbox(
+  channel: MailboxChannel,
+  creds: MailboxCreds,
+  item: FetchedMail,
+): Promise<void> {
+  const received = mailboxReceived(item.mail, item.uid);
+
+  // Своё же письмо: копия отправленного, автоответ самому себе или
+  // правило «переслать себе». В ленте это выглядит как разговор с
+  // самим собой.
+  const from = parseAddress(received.from).email.toLowerCase();
+  if (!from || from === creds.address.toLowerCase()) return;
+
+  const m = normalizeEmail({ tenantId: channel.tenant_id, channelId: channel.id }, received);
+  if (!m) return;
+
+  const { inserted, messageId, conversationId, contactId } = await persistMessage(m);
+  if (!inserted || !messageId) return;
+
+  for (let i = 0; i < item.files.length; i++) {
+    const file = item.files[i]!;
+    if (file.body.length > MAX_MEDIA_BYTES) continue;
+    const key = mediaKey(channel.tenant_id, messageId, i);
+    await storage.put(key, file.body, file.contentType);
+    await withTenant(pool, channel.tenant_id, async (db) => {
+      await db.query(
+        `UPDATE messages
+            SET content = jsonb_set(
+                  content,
+                  ARRAY['attachments', $2::text],
+                  COALESCE(content->'attachments'->$3::int, '{}'::jsonb)
+                    || jsonb_build_object('storageKey', $4::text, 'mime', $5::text,
+                                          'size', $6::int, 'ready', true))
+          WHERE id = $1`,
+        [messageId, String(i), i, key, file.contentType, file.body.length],
+      );
+    });
+  }
+
+  if (contactId) await enqueueCrm(m, contactId, conversationId);
+  if (conversationId) {
+    const sent = await onInbound(m, conversationId);
+    if (sent) log('info', 'Бот ответил на письмо', { conversationId, replies: sent });
+  }
+}
+
+void (async function mailLoop(): Promise<void> {
+  for (;;) {
+    try {
+      await mailTick();
+    } catch (err) {
+      log('error', 'Обход почтовых ящиков упал', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, MAIL_TICK_MS));
   }
 })();
 

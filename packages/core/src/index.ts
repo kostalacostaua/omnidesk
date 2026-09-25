@@ -25,6 +25,7 @@ export * from './kpi.js';
 export * from './orders.js';
 export * from './zoho-order.js';
 export * from './order-settings.js';
+export * from './mailbox.js';
 export * from './comments.js';
 export * from './platform.js';
 export * from './email.js';
