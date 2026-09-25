@@ -9223,7 +9223,7 @@ function paintOrg(){
         : L('<div class="row2" style="margin-top:6px"><button class="ghost mini" data-days="7">+7 днів</button>') +
           L('<button class="ghost mini" data-days="14">+14 днів</button>') +
           L('<button class="ghost mini" data-days="30">+30 днів</button>') +
-          L('<button class="ghost mini" data-days="0">Завершити сьогодні</button>') +
+          L('<button class="ghost mini" data-days="-1">Закрити доступ</button>') +
           '<div class="hint" id="oleft" style="align-self:center"></div></div>') +
       /* Места сверх тарифа. Отдельной строкой, потому что это отдельные
          деньги: пятнадцать операторов на тарифе с десятью — не тот же

@@ -8,6 +8,7 @@ import {
   QUEUE_MEDIA,
   QUEUE_CRM_SYNC,
   QUEUE_MTPROTO_LOGIN,
+  accessOk,
   assertRlsIntegrity,
   canSendFreeform,
   isCommentChannel,
@@ -21,7 +22,6 @@ import {
   jobKey,
   messageEventKey,
   parseWorkHours,
-  payState as payStateOf,
   recordEvent,
   workedSeconds,
   encryptJson,
@@ -414,11 +414,8 @@ async function payOk(tenantId: string): Promise<{ ok: boolean; paidUntil: string
     row = { until: got?.until ?? null, kind: got?.kind ?? 'client', at: now };
     payState60.set(tenantId, row);
   }
-  // Партнёр не платит по определению. Пустая дата — тоже доступ: она
-  // означает «срок не назначен», а не «срок вышел»; отключать по
-  // отсутствию записи нельзя.
-  if (row.kind === 'partner' || !row.until) return { ok: true, paidUntil: row.until };
-  return { ok: payStateOf(row.until) !== 'unpaid', paidUntil: row.until };
+  const today = new Date().toISOString().slice(0, 10);
+  return { ok: accessOk(row.kind, row.until, today), paidUntil: row.until };
 }
 
 app.addHook('preHandler', async (req, reply) => {
@@ -441,28 +438,34 @@ app.addHook('preHandler', async (req, reply) => {
     return;
   }
 
-  const level = requiredLevel(req.method, path);
-  if (level === 'any') return;
-
   const auth = requireAuth(req as never);
-  // Не вошёл — пусть обработчик сам ответит 401: он знает, чем именно
-  // отвечать, а мы здесь занимаемся только правами.
-  if (!auth) return;
 
   /*
    * Срок оплаты вышел.
+   *
+   * Проверка стоит до разбора ролей, а не после. Роли требуются только
+   * на запись — чтение их не требует, — и проверка, поставленная после
+   * них, пропускала мимо себя весь кабинет: человек с истёкшим сроком
+   * спокойно читал переписку и не видел ничего.
    *
    * Ответ 402 и только он: интерфейс по этому коду показывает страницу
    * оплаты, а не ошибку. Отдавать 403 нельзя — «нет прав» человек
    * читает как поломку и идёт писать в поддержку вместо того, чтобы
    * заплатить.
    */
-  if (!payFree(path)) {
+  if (auth && !payFree(path)) {
     const pay = await payOk(auth.tenantId);
     if (!pay.ok) {
       return reply.code(402).send({ error: 'payment_required', paidUntil: pay.paidUntil });
     }
   }
+
+  const level = requiredLevel(req.method, path);
+  if (level === 'any') return;
+
+  // Не вошёл — пусть обработчик сам ответит 401: он знает, чем именно
+  // отвечать, а мы здесь занимаемся только правами.
+  if (!auth) return;
 
   const role = await roleOf(auth.tenantId, auth.userId);
   if (roleAllows(role, level)) return;

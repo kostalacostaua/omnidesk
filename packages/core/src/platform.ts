@@ -97,6 +97,30 @@ export function accountState(
   return payState(paidUntil, now);
 }
 
+/**
+ * Пускать ли в кабинет.
+ *
+ * Отдельно от payState, который отвечает на вопрос владельца «кто мне
+ * должен». Здесь вопрос другой и ответ строже: можно ли человеку
+ * работать прямо сейчас.
+ *
+ * Сравниваем днями, а не мгновениями. «Оплачено до 25 сентября» человек
+ * читает как «двадцать пятое включительно», и отключать его в полночь
+ * этого дня значило бы обмануть на сутки.
+ *
+ * Пустая дата — доступ есть: она означает «срок не назначен», а не
+ * «срок вышел». Партнёр не платит по определению.
+ */
+export function accessOk(
+  kind: string | null | undefined,
+  paidUntil: string | null | undefined,
+  today: string,
+): boolean {
+  if (kind === 'partner') return true;
+  if (!paidUntil) return true;
+  return String(paidUntil).slice(0, 10) >= today;
+}
+
 export function payState(paidUntil: string | Date | null | undefined, now: Date = new Date()): PayState {
   if (!paidUntil) return 'unpaid';
   const end = paidUntil instanceof Date ? paidUntil : new Date(paidUntil);
