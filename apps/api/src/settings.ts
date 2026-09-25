@@ -24,6 +24,7 @@ import {
   type DebugTokenReply,
   CUSTOM_CHANNEL,
   ResendError,
+  isPublicMailDomain,
   dnsRows,
   domainReady,
   resendCreateDomain,
@@ -821,6 +822,14 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
         return reply.code(400).send({ error: 'bad_domain' });
       }
+      /*
+       * Чужая почта. gmail.com, ukr.net и прочее — домены, где записи
+       * DNS человеку не принадлежат: подключить их нельзя никак. Без
+       * этой проверки он ждёт минуту и получает отказ Resend чужими
+       * словами.
+       */
+      if (isPublicMailDomain(domain)) return reply.code(400).send({ error: 'public_domain' });
+
       const local = (String(req.body?.localPart ?? '').trim().toLowerCase() || 'support')
         .replace(/[^a-z0-9._-]/g, '')
         .slice(0, 40);
@@ -851,7 +860,10 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         // «уже существует» без выхода.
         const found = err instanceof ResendError ? await resendFindDomain(opts, domain).catch(() => null) : null;
         if (!found) {
-          const detail = err instanceof ResendError ? err.detail.slice(0, 300) : String(err);
+          const detail =
+            err instanceof ResendError
+              ? err.reason || err.detail.slice(0, 300)
+              : String(err);
           app.log.warn({ err, domain }, 'Resend не завёл домен');
           return reply.code(502).send({ error: 'resend_refused', detail });
         }
@@ -925,7 +937,8 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     try {
       dom = await resendGetDomain(opts, creds.domainId);
     } catch (err) {
-      const detail = err instanceof ResendError ? err.detail.slice(0, 300) : String(err);
+      const detail =
+        err instanceof ResendError ? err.reason || err.detail.slice(0, 300) : String(err);
       return reply.code(502).send({ error: 'resend_refused', detail });
     }
 

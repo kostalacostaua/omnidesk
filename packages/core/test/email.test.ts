@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { ResendError, isPublicMailDomain } from '../src/resend.js';
 import {
   addressDomain,
   fromHeader,
@@ -233,5 +234,33 @@ describe('отправитель ответа', () => {
 
   it('кавычки и переводы строк в имени не проходят: это подделка заголовка', () => {
     expect(fromHeader('Зло"\r\nBcc: all@list', 'a@b.com')).toBe('ЗлоBcc: all@list <a@b.com>');
+  });
+});
+
+/**
+ * Отказ Resend приходит его отладочной строкой. Человек видит «401» и
+ * не знает, что дело в галочке при создании ключа.
+ */
+describe('отказы Resend', () => {
+  const body = (name: string, message: string) =>
+    new ResendError(401, JSON.stringify({ statusCode: 401, message, name }));
+
+  it('ключ только на отправку — называем галочку, а не номер ошибки', () => {
+    const err = body('restricted_api_key', 'This API key is restricted to only send emails');
+    expect(err.kind).toBe('restricted_api_key');
+    expect(err.reason).toContain('Full access');
+  });
+
+  it('незнакомый отказ не выдумываем', () => {
+    expect(body('whatever', 'nope').reason).toBe('');
+    expect(new ResendError(500, 'not json').kind).toBe('');
+  });
+
+  it('чужая почтовая служба узнаётся вместе с поддоменами', () => {
+    expect(isPublicMailDomain('gmail.com')).toBe(true);
+    expect(isPublicMailDomain('klsystems.kh.gmail.com')).toBe(true);
+    expect(isPublicMailDomain('OUTLOOK.COM')).toBe(true);
+    expect(isPublicMailDomain('help.klsystems.com.ua')).toBe(false);
+    expect(isPublicMailDomain('')).toBe(false);
   });
 });

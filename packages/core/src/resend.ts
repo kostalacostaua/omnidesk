@@ -33,6 +33,66 @@ export class ResendError extends Error {
   get rateLimited(): boolean {
     return this.status === 429;
   }
+
+  /** Имя ошибки, как его называет сам Resend. */
+  get kind(): string {
+    try {
+      const body = JSON.parse(this.detail) as { name?: unknown };
+      return typeof body.name === 'string' ? body.name : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Что делать, словами.
+   *
+   * Resend отвечает строкой вида {"statusCode":401,"message":"This API
+   * key is restricted to only send emails"}. Показать её человеку —
+   * значит показать ему чужой отладочный вывод: он видит «401» и не
+   * знает, что дело в галочке при создании ключа.
+   *
+   * Переводим только то, что узнали. Незнакомый отказ отдаётся как
+   * есть: выдумывать объяснение вреднее, чем показать чужое.
+   */
+  get reason(): string {
+    const kind = this.kind;
+    if (kind === 'restricted_api_key') {
+      return (
+        'Ключ Resend виданий лише на відправку листів. У Resend, у розділі API Keys, ' +
+        'створіть ключ з повним доступом (Full access) і замініть ним RESEND_API_KEY: ' +
+        'домени заводяться тільки повним ключем.'
+      );
+    }
+    if (kind === 'missing_api_key' || kind === 'invalid_api_key') {
+      return 'Ключ Resend не підійшов — перевірте RESEND_API_KEY у змінних сервера.';
+    }
+    if (kind === 'rate_limit_exceeded' || kind === 'daily_quota_exceeded') {
+      return 'Resend відповідає «занадто часто» — спробуйте за хвилину.';
+    }
+    return '';
+  }
+}
+
+/**
+ * Домены, на которых своей записи DNS не заведёшь.
+ *
+ * Люди вписывают сюда свою личную пошту — gmail.com, ukr.net, — и
+ * упираются в отказ Resend через минуту ожидания. Отказать сразу и
+ * объяснить честнее: домен должен быть свой, иначе добавить MX
+ * некуда.
+ */
+export const PUBLIC_MAIL_DOMAINS = [
+  'gmail.com', 'googlemail.com', 'ukr.net', 'i.ua', 'meta.ua', 'bigmir.net',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com',
+  'mail.ru', 'yandex.ru', 'yandex.ua', 'rambler.ru', 'aol.com', 'gmx.com', 'web.de',
+];
+
+export function isPublicMailDomain(domain: string): boolean {
+  const clean = (domain ?? '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+  if (!clean) return false;
+  return PUBLIC_MAIL_DOMAINS.some((d) => clean === d || clean.endsWith('.' + d));
 }
 
 /** Запись DNS, которую клиент добавляет у своего регистратора. */

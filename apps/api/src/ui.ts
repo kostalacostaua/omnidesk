@@ -7774,6 +7774,7 @@ function mlConnect(){
       el('mlcErr').textContent =
         p.error === 'bad_domain' ? L('Схоже на неправильний домен')
         : p.error === 'domain_taken' ? L('Цей домен уже підключила інша організація')
+        : p.error === 'public_domain' ? L('Це домен чужої поштової служби — записи DNS там не ваші. Потрібен власний домен або його піддомен')
         : p.error === 'email_unavailable' ? L('Пошта не налаштована на сервері')
         : (p.detail || L('Не вдалося підключити'));
       busy(el('mlAdd'), false);
