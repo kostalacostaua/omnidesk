@@ -96,6 +96,25 @@ describe('событие подписки', () => {
     expect(off?.paidUntil).toBe('2026-10-25');
   });
 
+  /*
+   * Число лицензий несёт сама подписка. Хранить его вторым местом у
+   * себя означало бы однажды разойтись: клиент оплатил двадцать мест, а
+   * в кабинете осталось пятнадцать.
+   */
+  it('число лицензий читается из подписки', () => {
+    const many = paddleUpdate({
+      ...EVENT,
+      data: { ...EVENT.data, items: [{ price: { id: 'pri_seat' }, quantity: 15 }] },
+    });
+    expect(many?.quantity).toBe(15);
+    // Ноль и мусор — не количество: лучше ничего, чем ноль мест.
+    const none = paddleUpdate({
+      ...EVENT,
+      data: { ...EVENT.data, items: [{ price: { id: 'pri_seat' }, quantity: 0 }] },
+    });
+    expect(none?.quantity).toBeNull();
+  });
+
   it('без tenant_id событие не наше: применить его некуда', () => {
     expect(paddleUpdate({ ...EVENT, data: { ...EVENT.data, custom_data: {} } })).toBeNull();
   });
@@ -206,7 +225,7 @@ describe('подписка по прямому запросу', () => {
   it('читается теми же полями, что и событие', async () => {
     const { paddleSubscription } = await import('../src/paddle.js');
     expect(paddleSubscription(SUB)).toEqual({
-      customerId: 'ctm_9', priceId: 'pri_y', status: 'active',
+      customerId: 'ctm_9', priceId: 'pri_y', quantity: 1, status: 'active',
       paidUntil: '2027-09-25', live: true,
     });
   });

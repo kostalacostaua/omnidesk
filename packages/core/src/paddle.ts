@@ -112,6 +112,16 @@ export interface PaddleUpdate {
   customerId: string | null;
   /** Идентификатор цены — по нему находим тариф. */
   priceId: string | null;
+  /**
+   * Сколько единиц куплено.
+   *
+   * У тарифа за пользователя это число лицензий: его выбирает клиент в
+   * окне оплаты, и хранить его отдельно у себя незачем — подписка сама
+   * его и несёт. Второе место для одного и того же числа однажды
+   * разойдётся с первым, и клиент заплатит за двадцать мест, а получит
+   * пятнадцать.
+   */
+  quantity: number | null;
   status: string | null;
   /** Конец оплаченного периода, дата без времени. */
   paidUntil: string | null;
@@ -121,6 +131,12 @@ export interface PaddleUpdate {
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null;
+}
+
+/** Целое положительное число или ничего: ноль мест — это не количество. */
+function count(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
 function day(v: unknown): string | null {
@@ -169,6 +185,7 @@ export function paddleUpdate(payload: unknown): PaddleUpdate | null {
     subscriptionId: str(data['id']),
     customerId: str(data['customer_id']),
     priceId: str(price['id']),
+    quantity: count(first['quantity']),
     status,
     paidUntil: day(period['ends_at']),
     live: status ? PADDLE_LIVE.includes(status) : false,
@@ -291,6 +308,7 @@ export function paddleAmount(price: unknown): string | null {
 export interface PaddleSubscriptionState {
   customerId: string | null;
   priceId: string | null;
+  quantity: number | null;
   status: string | null;
   paidUntil: string | null;
   live: boolean;
@@ -307,6 +325,7 @@ export function paddleSubscription(data: unknown): PaddleSubscriptionState | nul
   return {
     customerId: str(d['customer_id']),
     priceId: str(price['id']),
+    quantity: count(items[0]?.['quantity']),
     status,
     paidUntil: day(period['ends_at']),
     live: PADDLE_LIVE.includes(status),

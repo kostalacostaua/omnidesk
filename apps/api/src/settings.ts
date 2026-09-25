@@ -130,7 +130,12 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     const tenant = await withSystem(pool, 'профиль организации', async (db) => {
       const { rows } = await db.query(
         `SELECT id, slug, name, plan, seats_limit, region, created_at, bot_pause_minutes,
-                work_hours
+                work_hours, paid_until, kind,
+                -- Реквизиты: без них форма в профиле открывалась пустой,
+                -- хотя в базе они лежали, — человек вписывал их второй
+                -- раз и решал, что сохранение не работает.
+                legal_name, tax_id, vat_id, legal_address, bank_name, iban, bank_code,
+                vat_payer, signer
            FROM tenants WHERE id = $1 LIMIT 1`,
         [auth.tenantId],
       );

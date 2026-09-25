@@ -837,8 +837,11 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
           currency: string;
           period_end: string | null;
           status: string;
+          plan: string;
+          seats: number | null;
         }>(
-          `SELECT id, number, amount, currency, to_char(period_end, 'YYYY-MM-DD') AS period_end, status
+          `SELECT id, number, amount, currency, to_char(period_end, 'YYYY-MM-DD') AS period_end,
+                  status, plan, seats
              FROM platform_invoices WHERE id = $1 LIMIT 1`,
           [req.params.invoiceId],
         );
@@ -867,6 +870,25 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
               WHERE id = $1`,
             [req.params.id, inv.period_end],
           );
+        });
+      }
+
+      /*
+       * Счёт знает, что именно куплено, — и оплата переводит клиента на
+       * купленное. Без этого человек платит за корпоративный с двадцатью
+       * лицензиями, а остаётся на пробном с тремя, и разбирается с этим
+       * потом, вручную и по переписке.
+       */
+      if (inv.plan) {
+        await withSystem(pool, 'тариф по оплаченному счёту', async (db) => {
+          if (inv.seats && inv.seats > 0) {
+            await db.query(
+              `UPDATE tenants SET plan = $2, seats_limit = $3, seats_free = 0 WHERE id = $1`,
+              [req.params.id, inv.plan, inv.seats],
+            );
+          } else {
+            await db.query(`UPDATE tenants SET plan = $2 WHERE id = $1`, [req.params.id, inv.plan]);
+          }
         });
       }
 

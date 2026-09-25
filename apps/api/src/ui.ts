@@ -837,6 +837,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .pricerow{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:8px;
     align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:10px;
     background:var(--panel2)}
+  /* Строка тарифа кликабельна целиком: выбирают тариф, а не галочку.
+     Имя не .plan: так уже называется полоска заполнения, и общее имя
+     задавало строке её высоту в четыре пикселя. */
+  .prow.tariff{cursor:pointer;border-radius:10px;padding-left:8px;padding-right:8px}
+  .prow.tariff:hover{background:var(--hover)}
+  .prow.tariff.on{background:var(--railOnBg)}
+  .prow.tariff .pick{flex:none;width:22px;text-align:center;color:var(--accent);font-weight:700}
+  .prow.tariff .pk .s{font-size:11px;color:var(--t3);font-weight:400;margin-top:2px}
   .pricerow .t{font-weight:700;font-size:12.5px}
   .pricerow .t .s{font-weight:400;font-size:11px;color:var(--t3);margin-top:2px}
   .pricerow input{font-size:12.5px;padding:6px 8px}
@@ -4303,6 +4311,11 @@ var BILL = null;
 /* Год стоит первым и выбран по умолчанию: он дешевле, и человек должен
    увидеть сначала лучшую цену, а не худшую. */
 var BILL_PERIOD = 'year';
+/* Что выбрано к покупке: тариф и, для тарифа за пользователя, сколько
+   лицензий. Выбор живёт здесь, а не в разметке: перерисовка списка не
+   должна сбрасывать то, что человек уже выбрал. */
+var BILL_PLAN = '';
+var BILL_SEATS = 0;
 
 /*
  * Отказ подписки словами.
@@ -4368,14 +4381,37 @@ function planName(p){
  * не может, а «6 × 15» сверит сразу — и спорить будет о цене человека,
  * а не о том, откуда взялась цифра.
  */
-function billSeatMath(p){
+function billSeatMath(p, seats){
   var side = BILL_PERIOD === 'year' ? p.year : p.month;
   var prices = (side && side.price) || {};
   var one = billCur(prices);
-  if (!one || !p.seats) return '';
-  var total = BILL_PERIOD === 'year' ? prices[one] / 12 : prices[one];
-  var each = Math.round((total / p.seats) * 100) / 100;
-  return L('за користувача ') + each + ' ' + one + ' × ' + p.seats + L(' користувачів');
+  if (!one || !seats) return '';
+  // Цена приходит за одного человека, а не итогом: сколько их будет,
+  // решают здесь, на этой странице.
+  var each = BILL_PERIOD === 'year' ? Math.round((prices[one] / 12) * 100) / 100 : prices[one];
+  return L('за користувача ') + each + ' ' + one + ' × ' + seats + L(' користувачів');
+}
+
+/* Цена одного места в месяц: для тарифа за пользователя до выбора. */
+function billOne(p){
+  var side = BILL_PERIOD === 'year' ? p.year : p.month;
+  var prices = (side && side.price) || {};
+  var one = billCur(prices);
+  if (!one) return '';
+  var each = BILL_PERIOD === 'year' ? prices[one] / 12 : prices[one];
+  return (Math.round(each * 100) / 100) + ' ' + one + L(' / місяць за користувача');
+}
+
+/* Итог по выбранному тарифу в месяц: у обычного это его цена, у тарифа
+   за пользователя — цена одного, умноженная на число лицензий. */
+function billTotal(p, seats){
+  var side = BILL_PERIOD === 'year' ? p.year : p.month;
+  var prices = (side && side.price) || {};
+  var one = billCur(prices);
+  if (!one) return '';
+  var each = BILL_PERIOD === 'year' ? prices[one] / 12 : prices[one];
+  var total = p.perSeat ? each * Math.max(1, seats) : each;
+  return (Math.round(total * 100) / 100) + ' ' + one + L(' / місяць');
 }
 
 /* Оплаты берём у Paddle: своя копия однажды разойдётся с настоящей —
@@ -4494,7 +4530,8 @@ function invPaint(){
 function invMake(btn){
   el('bErr').textContent = '';
   busy(btn, true);
-  api('/billing/invoice', { method:'POST', body:{ period: BILL_PERIOD } })
+  api('/billing/invoice', { method:'POST',
+    body:{ plan: BILL_PLAN, period: BILL_PERIOD, seats: BILL_SEATS } })
     .then(function(){ busy(btn, false); invLoad() })
     .catch(function(e){ busy(btn, false); el('bErr').textContent = billWhy(e) });
 }
@@ -4534,49 +4571,69 @@ function billPaint(){
       L('Щомісяця') + '</button>' +
     '</div>';
 
+  /*
+   * Список тарифов с выбором.
+   *
+   * Раньше здесь был один тариф — тот, на котором клиент уже сидит, — и
+   * вырасти из кабинета было нельзя: чтобы перейти на корпоративный,
+   * приходилось писать в поддержку. Теперь тарифы стоят рядом, выбор
+   * отмечается, а у тарифа за пользователя рядом с ценой стоит поле,
+   * где называют число лицензий.
+   */
+  if (!BILL_PLAN) BILL_PLAN = BILL.current || 'pro';
+  if (!BILL_SEATS) BILL_SEATS = Math.max(1, Number(BILL.seats) || 1);
+
   var cards = (BILL.plans || []).map(function(p){
     var side = BILL_PERIOD === 'year' ? p.year : p.month;
     side = side || {};
-    var per = BILL_PERIOD === 'year'
-      ? billMonthOfYear(side.price)
-      : billMoney(p.month && p.month.price);
-    /* Тариф уже стоит, но подписки нет — значит его поставили руками,
-       и заплатить за него человек всё равно должен. Прятать кнопку по
-       одному совпадению названия значит запереть его без оплаты. */
-    var paid = p.plan === BILL.plan && BILL.subscribed;
-    /* Цена по головам: показываем, из чего она вышла. «90 доларів»
-       без «15 × 6» человек проверить не может, а проверить он захочет
-       первым делом. */
-    var math = p.perSeat ? billSeatMath(p) : '';
-    return '<div class="prow"><div class="pk">' + esc(planName(p.plan)) + '</div>' +
-      '<div class="pv">' + (per ? esc(per) : L('ціну ще не задано')) +
-      (math ? '<div class="hint" style="margin-top:2px">' + esc(math) + '</div>' : '') +
-      (BILL_PERIOD === 'year'
+    var on = p.plan === BILL_PLAN;
+    /* У невыбранного тарифа за пользователя показываем цену одного
+       места: итог зависит от числа лицензий, а его называют после
+       выбора — до него любая сумма была бы выдуманной. */
+    var total = p.perSeat && !on ? billOne(p) : billTotal(p, BILL_SEATS);
+    return '<div class="prow tariff' + (on ? ' on' : '') + '" data-plan="' + esc(p.plan) + '">' +
+      '<div class="pk">' + esc(planName(p.plan)) +
+        (p.plan === BILL.plan ? L('<div class="s">ваш тариф</div>') : '') + '</div>' +
+      '<div class="pv">' + (total ? esc(total) : L('ціну ще не задано')) +
+      (p.perSeat && on
+        ? '<div class="hint" style="margin-top:2px">' + esc(billSeatMath(p, BILL_SEATS)) + '</div>' +
+          L('<div class="row2" style="margin-top:6px"><input id="bSeats" type="number" min="1" max="1000" ') +
+          'value="' + esc(BILL_SEATS) + L('" style="max-width:110px"><div class="hint" style="align-self:center">ліцензій</div></div>')
+        : p.perSeat
+          ? L('<div class="hint" style="margin-top:2px">Ціна за одного користувача. Кількість — при виборі тарифу.</div>')
+          : '') +
+      (BILL_PERIOD === 'year' && on
         ? L('<div class="hint" style="margin-top:2px">Списання раз на рік. Два місяці у подарунок.</div>')
         : '') +
-      (BILL.individual
+      (on && p.individual
         ? L('<div class="hint" style="margin-top:2px">Індивідуальна ціна: оплата за рахунком. Напишіть нам.</div>')
-        : side.priceId ? ''
-        : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
+        : on && !side.priceId
+          ? L('<div class="hint" style="margin-top:2px">Карткою цей тариф поки не заведений у Paddle — платіть рахунком.</div>')
+          : '') +
       '</div>' +
-      (side.priceId && !paid
-        ? '<button class="mini" data-pay="' + esc(p.plan) + '">' +
-          (BILL.subscribed ? L('Перейти') : L('Оплатити')) + '</button>'
-        : '<span></span>') +
+      '<span class="pick">' + (on ? '✓' : '') + '</span>' +
       '</div>';
   }).join('');
 
-  box.innerHTML = head + seg + cards +
-    L('<div class="hint" style="margin-top:8px">Оплату проводить Paddle: він приймає картку, ') +
-    L('нараховує податок вашої країни і надсилає чек. Скасувати можна будь-коли — ') +
+  /* Кнопки одни на выбранный тариф, а не по кнопке в каждой строке:
+     покупают один тариф, и способов оплаты у него два. */
+  var chosen = (BILL.plans || []).filter(function(p){ return p.plan === BILL_PLAN })[0] || {};
+  var chosenSide = (BILL_PERIOD === 'year' ? chosen.year : chosen.month) || {};
+  var buttons = '<div class="row2" style="margin-top:10px">' +
+    (chosenSide.priceId && !chosen.individual
+      ? '<button class="mini" data-pay="' + esc(BILL_PLAN) + '">' +
+        (BILL.subscribed && BILL_PLAN === BILL.plan ? L('Продовжити') : L('Оплатити карткою')) + '</button>'
+      : '') +
+    L('<button class="ghost mini" id="bInv">Виставити рахунок</button>') +
+    '</div>';
+
+  box.innerHTML = head + seg + cards + buttons +
+    L('<div class="hint" style="margin-top:8px">Карткою оплату проводить Paddle: він приймає платіж, ') +
+    L('нараховує податок вашої країни і надсилає чек. Рахунок — для оплати з рахунку компанії, ') +
+    L('реквізити беремо з профілю організації. Скасувати можна будь-коли — ') +
     L('доступ триває до кінця оплаченого періоду.</div>') +
     '<div class="err" id="bErr"></div>' +
-    /* Счёт по безналу. Второй способ заплатить, а не запасной: для
-       организации счёт и акт часто единственный возможный путь. */
-    L('<div class="lbl" style="margin-top:14px">Рахунок на оплату</div>') +
-    L('<div class="hint">Для оплати з рахунку компанії. Реквізити беремо з профілю організації — ') +
-    L('без них рахунок не прийме бухгалтерія.</div>') +
-    L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="bInv">Виставити рахунок</button></div>') +
+    L('<div class="lbl" style="margin-top:14px">Рахунки</div>') +
     '<div id="invs" style="margin-top:8px"></div>' +
     L('<div class="lbl" style="margin-top:14px">Оплати карткою</div>') +
     '<div id="pays"></div>' +
@@ -4614,6 +4671,32 @@ function billPaint(){
   Array.prototype.forEach.call(box.querySelectorAll('[data-per]'), function(btn){
     btn.onclick = function(){ BILL_PERIOD = btn.dataset.per; billPaint() };
   });
+
+  /* Выбор тарифа. Перерисовываем целиком: цена, поле лицензий и кнопки
+     зависят от выбора, и чинить их по частям — верный способ показать
+     цену одного тарифа рядом с кнопкой другого. */
+  Array.prototype.forEach.call(box.querySelectorAll('[data-plan]'), function(rowEl){
+    rowEl.onclick = function(e){
+      if (e.target && e.target.id === 'bSeats') return;
+      BILL_PLAN = rowEl.dataset.plan;
+      billPaint();
+    };
+  });
+
+  if (el('bSeats')) {
+    el('bSeats').oninput = function(){
+      var n = Math.max(1, Math.min(1000, Math.round(Number(el('bSeats').value) || 1)));
+      BILL_SEATS = n;
+      // Перерисовываем только цифры вокруг: полная перерисовка забрала
+      // бы курсор из поля на каждой набранной цифре.
+      var p = (BILL.plans || []).filter(function(x){ return x.plan === BILL_PLAN })[0];
+      if (!p) return;
+      var pv = el('bSeats').closest('.pv');
+      if (pv && pv.firstChild) pv.firstChild.nodeValue = billTotal(p, n);
+      var hint = pv && pv.querySelector('.hint');
+      if (hint) hint.textContent = billSeatMath(p, n);
+    };
+  }
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-pay]'), function(btn){
     btn.onclick = function(){ billPay(btn.dataset.pay, btn) };
@@ -4666,7 +4749,8 @@ function billPay(plan, btn){
   var err = el('bErr');
   if (err) err.textContent = '';
   busy(btn, true);
-  api('/billing/checkout', { method:'POST', body:{ plan: plan, period: BILL_PERIOD } })
+  api('/billing/checkout', { method:'POST',
+    body:{ plan: plan, period: BILL_PERIOD, seats: BILL_SEATS } })
     .then(function(d){
       /* Окно оплаты открывается там, где Paddle разрешил продавать.
          Домен кабинета он одобряет отдельно от витрины и может не

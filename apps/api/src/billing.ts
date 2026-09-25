@@ -109,12 +109,30 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 const DEFAULT_PLAN = 'pro';
 
+/**
+ * Что можно купить.
+ *
+ * Оба тарифа продаются, и выбирает между ними клиент. Раньше ему
+ * показывали один — тот, на котором он уже сидит, — и вырасти из
+ * кабинета было нельзя: чтобы перейти на корпоративный, нужно было
+ * написать в поддержку.
+ */
+const SELLABLE = [DEFAULT_PLAN, ...PER_SEAT_PLANS];
+
+/** Тариф из запроса, если такой продаётся. Иначе — тот, что у клиента. */
 function sellPlan(plan: string): string {
-  return isPerSeatPlan(plan) ? plan : DEFAULT_PLAN;
+  return SELLABLE.includes(plan) ? plan : DEFAULT_PLAN;
+}
+
+/** Число лицензий: целое, от одной до тысячи. */
+function seatsOf(value: unknown, fallback: number): number {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 1) return Math.max(1, fallback);
+  return Math.min(1000, n);
 }
 
 /** Тарифы, которые заводим в Paddle: оба продаются картой. */
-const SYNC_PLANS = [DEFAULT_PLAN, ...PER_SEAT_PLANS];
+const SYNC_PLANS = SELLABLE;
 
 /**
  * Цена тарифа в той валюте, в которой он заведён в Paddle.
@@ -271,33 +289,8 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     if (!me) return reply.code(404).send({ error: 'no_tenant' });
 
     const plan = sellPlan(me.plan);
-    const perSeat = isPerSeatPlan(plan);
     const seats = Math.max(1, Number(me.seats_limit ?? 1));
-    // Цену за человека сверяем с прайсом, а не проверяем на пустоту.
-    // Вписанная руками, но совпадающая с прайсом — это та же цена, и
-    // в Paddle она заведена: платить картой можно. Другая — отдельная
-    // договорённость, продать по ней нечем, и клиент платит счётом.
     const own = Number(String(me.seat_price ?? '0').replace(',', '.')) || 0;
-    const deal = seatDeal(own, seatListed(planPrices, plan));
-    const individual = perSeat && deal.individual;
-
-    // Цена за месяц. Для тарифа по головам это цена человека, умноженная
-    // на число людей: пятнадцать по шесть — девяносто, и складывать это
-    // руками не должен никто.
-    const month: Record<string, number> = {};
-    for (const [cur, v] of Object.entries(planPrices[plan] ?? {})) {
-      month[cur] = perSeat
-        ? tenantMoney(
-            { plan, seatsLimit: seats, currency: cur, seatPrice: own > 0 ? own : null },
-            planPrices,
-          ).monthTotal
-        : Number(v);
-    }
-    // Годовую цену не храним отдельно: она выводится из месячной по
-    // одному правилу. Две цены в настройках однажды разошлись бы, и
-    // год оказался бы дороже двенадцати месяцев.
-    const year: Record<string, number> = {};
-    for (const [cur, v] of Object.entries(month)) year[cur] = yearPrice(v);
 
     return {
       plan: me.plan,
@@ -309,24 +302,38 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       portal: Boolean(me.paddle_customer_id && deps.apiKey),
       env: deps.env,
       clientToken: deps.clientToken,
-      perSeat,
+      // На чём клиент сидит сейчас: этот тариф в списке будет отмечен.
+      current: plan,
+      perSeat: isPerSeatPlan(me.plan),
       seats,
-      individual,
-      plans: [
-        {
+      plans: SELLABLE.map((plan) => {
+        const per = isPerSeatPlan(plan);
+        // Цена за человека сверяется с прайсом, а не проверяется на
+        // пустоту: вписанная руками, но совпавшая с прайсом — это та же
+        // цена, и в Paddle она заведена. Другая — договорённость,
+        // продать по ней нечем.
+        const deal = seatDeal(own, seatListed(planPrices, plan));
+        const individual = per && deal.individual;
+
+        // У тарифа за человека отдаём цену одного места, а не итог:
+        // сколько их будет, решает клиент прямо на этой странице, и
+        // умножать должен тот, кто видит его выбор.
+        const month: Record<string, number> = {};
+        for (const [cur, v] of Object.entries(planPrices[plan] ?? {})) {
+          month[cur] = per && own > 0 ? own : Number(v);
+        }
+        const year: Record<string, number> = {};
+        for (const [cur, v] of Object.entries(month)) year[cur] = yearPrice(v);
+
+        return {
           plan,
-          perSeat,
+          perSeat: per,
+          individual,
           seats,
-          month: {
-            price: month,
-            priceId: individual ? null : paddlePriceId(prices, plan, 'month'),
-          },
-          year: {
-            price: year,
-            priceId: individual ? null : paddlePriceId(prices, plan, 'year'),
-          },
-        },
-      ],
+          month: { price: month, priceId: individual ? null : paddlePriceId(prices, plan, 'month') },
+          year: { price: year, priceId: individual ? null : paddlePriceId(prices, plan, 'year') },
+        };
+      }),
     };
   });
 
@@ -340,7 +347,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
    * к чужой же организации. Здесь его ставим мы, и подменить его
    * снаружи нечем.
    */
-  app.post<{ Body: { plan?: string; period?: string } }>('/billing/checkout', async (req, reply) => {
+  app.post<{ Body: { plan?: string; period?: string; seats?: number } }>('/billing/checkout', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
     if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
@@ -348,13 +355,11 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const me = await tenantNow(a.tenantId);
     if (!me) return reply.code(404).send({ error: 'no_tenant' });
 
-    // Тариф берём не из тела запроса, а из организации: иначе тариф
-    // выбирает тот, кто сидит в браузере, и корпоративный клиент купит
-    // себе pro за пятьдесят.
-    const plan = sellPlan(me.plan);
-    if (String(req.body?.plan ?? plan) !== plan) {
-      return reply.code(400).send({ error: 'bad_plan' });
-    }
+    // Тариф и число лицензий выбирает клиент — это и есть покупка.
+    // Проверяем не «его ли это тариф», а «продаётся ли такой»: цену
+    // всё равно называет сервер, и подменить её из браузера нечем.
+    const plan = String(req.body?.plan ?? '');
+    if (!SELLABLE.includes(plan)) return reply.code(400).send({ error: 'bad_plan' });
     const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
 
     const p = await platform(pool);
@@ -370,10 +375,12 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     if (!priceId) return reply.code(409).send({ error: 'no_price' });
 
     const customer = await customerNow(a.tenantId, me.paddle_customer_id, req.log);
-    // За человека — столько единиц, сколько людей в тарифе. Paddle сам
+    // За человека — столько лицензий, сколько клиент выбрал. Paddle сам
     // умножит цену на количество, и сумма в окне оплаты совпадёт с той,
-    // что клиент видел на странице.
-    const quantity = isPerSeatPlan(plan) ? Math.max(1, Number(me.seats_limit ?? 1)) : 1;
+    // что он видел на странице.
+    const quantity = isPerSeatPlan(plan)
+      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1))
+      : 1;
 
     const made = await paddleFetch(deps, req.log, '/transactions', {
       method: 'POST',
@@ -663,6 +670,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       subscriptionId: string | null;
       customerId: string | null;
       priceId: string | null;
+      quantity?: number | null;
       status: string | null;
       paidUntil: string | null;
       live: boolean;
@@ -699,6 +707,13 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       if (plan && st.live) {
         vals.push(plan);
         sets.push(`plan = $${vals.length}`);
+        // Число лицензий приходит вместе с подпиской: клиент выбрал его
+        // в окне оплаты, и держать своё число рядом значило бы однажды
+        // разойтись с тем, за что он заплатил.
+        if (isPerSeatPlan(plan) && st.quantity) {
+          vals.push(st.quantity);
+          sets.push(`seats_limit = $${vals.length}`);
+        }
       }
       const done = await db.query(
         `UPDATE tenants SET ${sets.join(', ')} WHERE id = $1 RETURNING id`,
@@ -917,7 +932,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
    * выставляет сам себе покупатель, называется как угодно, только не
    * счётом.
    */
-  app.post<{ Body: { period?: string } }>('/billing/invoice', async (req, reply) => {
+  app.post<{ Body: { plan?: string; period?: string; seats?: number } }>('/billing/invoice', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
 
@@ -925,7 +940,10 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     if (!me) return reply.code(404).send({ error: 'no_tenant' });
 
     const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
-    const plan = sellPlan(me.plan);
+    const plan = sellPlan(String(req.body?.plan ?? ''));
+    const seats = isPerSeatPlan(plan)
+      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1))
+      : Math.max(1, Number(me.seats_limit ?? 1));
     const p = await platform(pool);
     const planPrices = p.plan_prices ?? {};
 
@@ -949,10 +967,12 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const month = tenantMoney(
       {
         plan,
-        seatsLimit: Math.max(1, Number(me.seats_limit ?? 1)),
+        seatsLimit: seats,
         currency,
         priceMonth: planPrices[plan]?.[currency],
-        seatsFree: me.seats_free,
+        // Включённых мест у купленного тарифа нет: клиент выбрал ровно
+        // столько лицензий, сколько ему нужно, и все они платные.
+        seatsFree: isPerSeatPlan(plan) ? 0 : me.seats_free,
         seatPrice: me.seat_price,
       },
       planPrices,
@@ -976,14 +996,16 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       return invoiceNumber(r?.invoice_seq ?? 1, Number(today.slice(0, 4)), r?.invoice_prefix ?? '');
     });
 
-    const subject = `Послуги Rozmovio, тариф ${plan}, ${period === 'year' ? 'рік' : 'місяць'}`;
+    const subject =
+      `Послуги Rozmovio, тариф ${plan}, ${period === 'year' ? 'рік' : 'місяць'}` +
+      (isPerSeatPlan(plan) ? `, ${seats} ліценз.` : '');
     const id = await withTenant(pool, a.tenantId, async (db) => {
       const { rows } = await db.query<{ id: string }>(
         `INSERT INTO platform_invoices
            (tenant_id, number, issued_on, due_on, amount, currency, rate, rate_day, rate_source,
-            amount_uah, period_start, period_end, subject, created_by)
+            amount_uah, period_start, period_end, subject, created_by, plan, seats)
          VALUES ($1, $2, $3::date, $3::date + $4::int, $5, $6, $7, $8::date, 'nbu', $9,
-                 $3::date, $3::date + $10::interval, $11, $12)
+                 $3::date, $3::date + $10::interval, $11, $12, $13, $14)
          RETURNING id`,
         [
           a.tenantId,
@@ -998,6 +1020,8 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
           period === 'year' ? '1 year' : '1 month',
           subject,
           'клієнт',
+          plan,
+          isPerSeatPlan(plan) ? seats : null,
         ],
       );
       return rows[0]!.id;
