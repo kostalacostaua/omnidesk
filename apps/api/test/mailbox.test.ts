@@ -35,4 +35,13 @@ describe('отказ почтового сервера', () => {
     expect(mailboxWhy(new Error('getaddrinfo ENOTFOUND imap.firma.com'))).toContain('не знайдено');
     expect(mailboxWhy(new Error('connect ETIMEDOUT'))).toContain('не відповідає');
   });
+
+  // «connect ENETUNREACH 2a06:6440:0:2c13::1:465» человек читает как
+  // поломку у себя, хотя это адрес, до которого нет сети.
+  it('недостижимая сеть названа сетью, а не паролем', () => {
+    const e = mailboxWhy(new Error('connect ENETUNREACH 2a06:6440:0:2c13::1:465 - Local (:::0)'));
+    expect(e).toContain('немає мережі');
+    expect(e).toContain('IPv6');
+    expect(mailboxWhy(new Error('connect EHOSTUNREACH'))).toContain('немає мережі');
+  });
 });

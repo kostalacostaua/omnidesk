@@ -13,13 +13,15 @@
 
 import { ImapFlow } from 'imapflow';
 import { createTransport } from 'nodemailer';
-import type { MailboxCreds } from '@omnidesk/core';
+import { mailAddress, type MailboxCreds } from '@omnidesk/core';
 
 export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
+  const ia = await mailAddress(creds.imap.host);
   const imap = new ImapFlow({
-    host: creds.imap.host,
+    host: ia.host,
     port: creds.imap.port,
     secure: creds.imap.secure,
+    ...(ia.servername ? { tls: { servername: ia.servername } } : {}),
     auth: { user: creds.user, pass: creds.pass },
     logger: false,
     socketTimeout: 30_000,
@@ -32,10 +34,12 @@ export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
     await imap.logout().catch(() => undefined);
   }
 
+  const sa = await mailAddress(creds.smtp.host);
   const smtp = createTransport({
-    host: creds.smtp.host,
+    host: sa.host,
     port: creds.smtp.port,
     secure: creds.smtp.secure,
+    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
     auth: { user: creds.user, pass: creds.pass },
     connectionTimeout: 20_000,
   });
@@ -77,6 +81,11 @@ export function mailboxWhy(err: unknown): string {
     return 'Пошта не прийняла адресу або пароль. У Gmail, ukr.net та iCloud потрібен окремий пароль застосунку.';
   }
   if (/enotfound|getaddrinfo|dns/i.test(text)) return 'Сервер з такою назвою не знайдено — перевірте адреси IMAP і SMTP.';
+  // Сеть до сервера не строится вовсе. Чаще всего это означает, что
+  // сервер отвечает только по IPv6, а наружу по нему хода нет.
+  if (/enetunreach|ehostunreach|enetdown/i.test(text)) {
+    return 'До цього сервера немає мережі — схоже, він доступний лише по IPv6. Спробуйте іншу адресу сервера.';
+  }
   if (/timeout|etimedout|econnrefused|econnreset/i.test(text)) {
     return 'Сервер не відповідає на цьому порту — перевірте порт або зачекайте хвилину.';
   }

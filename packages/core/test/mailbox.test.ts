@@ -111,3 +111,18 @@ describe('письмо из ящика', () => {
     expect(m?.content.email?.subject).toBe('Рахунок');
   });
 });
+
+describe('адрес почтового сервера', () => {
+  it('имя превращается в IPv4, а само уходит в servername', async () => {
+    const { mailAddress } = await import('../src/mailbox.js');
+    const got = await mailAddress('imap.gmail.com');
+    // Сертификат выписан на имя, поэтому имя обязано уехать отдельно.
+    expect(got.servername).toBe('imap.gmail.com');
+    expect(got.host).toMatch(/^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/);
+  });
+
+  it('без A-записи возвращаем имя как было: пусть решает система', async () => {
+    const { mailAddress } = await import('../src/mailbox.js');
+    expect(await mailAddress('imap.firma.invalid')).toEqual({ host: 'imap.firma.invalid' });
+  });
+});

@@ -16,7 +16,34 @@
  * остальное можно.
  */
 
+import { lookup } from 'node:dns/promises';
 import type { ReceivedEmail } from './email.js';
+
+/**
+ * Адрес почтового сервера, до которого мы действительно доедем.
+ *
+ * У большинства почтовых серверов есть и A, и AAAA. Node спрашивает
+ * систему и берёт первый ответ, а система в контейнере отдаёт сначала
+ * IPv6 — и соединение падает с «connect ENETUNREACH 2a06:...:465»,
+ * потому что наружу по IPv6 из контейнера хода нет. Для человека это
+ * выглядит так, будто не подошёл пароль.
+ *
+ * Поэтому адрес выбираем сами: спрашиваем A-запись и подключаемся по
+ * ней. Имя при этом передаётся отдельно, в servername: сертификат
+ * выписан на имя, а не на адрес, и без этого проверка не прошла бы.
+ *
+ * Если A-записи нет вовсе — сервер только на IPv6 — возвращаем имя как
+ * было. Пусть решает система: отказ в этом случае честный, и мы о нём
+ * скажем словами.
+ */
+export async function mailAddress(host: string): Promise<{ host: string; servername?: string }> {
+  try {
+    const found = await lookup(host, { family: 4 });
+    return { host: found.address, servername: host };
+  } catch {
+    return { host };
+  }
+}
 
 export interface MailHost {
   host: string;

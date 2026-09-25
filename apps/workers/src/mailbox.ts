@@ -23,7 +23,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { createTransport } from 'nodemailer';
-import type { MailboxCreds, ParsedMail } from '@omnidesk/core';
+import { mailAddress, type MailboxCreds, type ParsedMail } from '@omnidesk/core';
 
 /** Сколько писем берём за один обход: остальные приедут следующим. */
 export const MAIL_BATCH = 20;
@@ -43,11 +43,15 @@ export interface FetchedMail {
   files: Array<{ filename: string; contentType: string; body: Buffer }>;
 }
 
-function client(creds: MailboxCreds): ImapFlow {
+async function client(creds: MailboxCreds): Promise<ImapFlow> {
+  // Адрес сервера выбираем сами: система в контейнере отдаёт сначала
+  // IPv6, а наружу по нему хода нет. Имя уходит отдельно, в servername.
+  const ia = await mailAddress(creds.imap.host);
   return new ImapFlow({
-    host: creds.imap.host,
+    host: ia.host,
     port: creds.imap.port,
     secure: creds.imap.secure,
+    ...(ia.servername ? { tls: { servername: ia.servername } } : {}),
     auth: { user: creds.user, pass: creds.pass },
     // Журнал IMAP многословен до неприличия: каждая команда протокола
     // отдельной строкой. Нам нужны отказы, и их мы пишем сами.
@@ -64,7 +68,7 @@ function client(creds: MailboxCreds): ImapFlow {
  * ответа клиенту поздно.
  */
 export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
-  const imap = client(creds);
+  const imap = await client(creds);
   await imap.connect();
   try {
     await imap.mailboxOpen('INBOX', { readOnly: true });
@@ -72,10 +76,12 @@ export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
     await imap.logout().catch(() => undefined);
   }
 
+  const sa = await mailAddress(creds.smtp.host);
   const smtp = createTransport({
-    host: creds.smtp.host,
+    host: sa.host,
     port: creds.smtp.port,
     secure: creds.smtp.secure,
+    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
     auth: { user: creds.user, pass: creds.pass },
     connectionTimeout: 20_000,
   });
@@ -97,7 +103,7 @@ export async function fetchMail(
   creds: MailboxCreds,
   state: MailboxState | null,
 ): Promise<{ mails: FetchedMail[]; state: MailboxState }> {
-  const imap = client(creds);
+  const imap = await client(creds);
   await imap.connect();
 
   try {
@@ -164,10 +170,12 @@ export interface OutgoingMail {
 
 /** Отправка ответа из того же ящика. Возвращает Message-ID письма. */
 export async function smtpSend(creds: MailboxCreds, mail: OutgoingMail): Promise<string> {
+  const sa = await mailAddress(creds.smtp.host);
   const smtp = createTransport({
-    host: creds.smtp.host,
+    host: sa.host,
     port: creds.smtp.port,
     secure: creds.smtp.secure,
+    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
     auth: { user: creds.user, pass: creds.pass },
     connectionTimeout: 20_000,
   });
