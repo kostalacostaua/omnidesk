@@ -115,3 +115,77 @@ describe('вид кабинета', () => {
     expect(accountState('друг', null, now)).toBe('unpaid');
   });
 });
+
+/*
+ * Свод по деньгам. Считается на сервере и показывается владельцу
+ * платформы — то есть тем, по чему он принимает решения. Каждое число
+ * здесь должно быть объяснимо, поэтому и проверяется отдельно.
+ */
+describe('свод по деньгам', () => {
+  const T = (over: Record<string, unknown> = {}) => ({
+    id: '1', name: 'Ромашка', slug: 'romashka', plan: 'pro', kind: 'client',
+    status: 'active', seats_limit: 10, paid_until: '2027-01-01',
+    price_month: '60', currency: 'USD', created_at: '2026-01-01T00:00:00Z',
+    paddle_status: null, paddle_subscription_id: null, ...over,
+  }) as never;
+  const NO_INV = { issued: 0, paid: 0, debtUah: 0, paidUah: 0, lastPaidAt: null, byMonth: {} };
+  const NOW = new Date('2026-09-25T00:00:00Z');
+
+  it('живая подписка важнее старых счетов: деньги идут с карты', async () => {
+    const { billingRow } = await import('../src/billing-report.js');
+    const paddle = billingRow(
+      T({ paddle_status: 'active', paddle_subscription_id: 'sub_1' }),
+      { ...NO_INV, issued: 3 }, NOW,
+    );
+    expect(paddle.source).toBe('paddle');
+    // Отменённая подписка деньги уже не приносит — остаются счета.
+    const off = billingRow(
+      T({ paddle_status: 'canceled', paddle_subscription_id: 'sub_1' }),
+      { ...NO_INV, issued: 3 }, NOW,
+    );
+    expect(off.source).toBe('invoice');
+  });
+
+  it('партнёр в выручку не попадает, просроченный тоже', async () => {
+    const { billingRow, billingTotals } = await import('../src/billing-report.js');
+    const rows = [
+      billingRow(T(), NO_INV, NOW),
+      billingRow(T({ id: '2', kind: 'partner' }), NO_INV, NOW),
+      billingRow(T({ id: '3', paid_until: '2026-01-01' }), NO_INV, NOW),
+    ];
+    const t = billingTotals(rows);
+    expect(t.paying).toBe(1);
+    expect(t.partners).toBe(1);
+    expect(t.overdue).toBe(1);
+    // Шестьдесят, а не сто восемьдесят: партнёр и должник не платят.
+    expect(t.mrr).toEqual({ USD: 60 });
+  });
+
+  it('валюты не сводятся в одну', async () => {
+    const { billingRow, billingTotals } = await import('../src/billing-report.js');
+    const t = billingTotals([
+      billingRow(T(), NO_INV, NOW),
+      billingRow(T({ id: '2', currency: 'UAH', price_month: '2500' }), NO_INV, NOW),
+    ]);
+    expect(t.mrr).toEqual({ USD: 60, UAH: 2500 });
+  });
+
+  it('пустой месяц в отчёте остаётся: это тоже ответ', async () => {
+    const { billingMonths } = await import('../src/billing-report.js');
+    const m = billingMonths([{ '2026-09': { invoicedUah: 100, paidUah: 40 } }], NOW, 3);
+    expect(m).toHaveLength(3);
+    expect(m.map((x) => x.month)).toEqual(['2026-07', '2026-08', '2026-09']);
+    expect(m[0]).toEqual({ month: '2026-07', invoicedUah: 0, paidUah: 0 });
+    expect(m[2]).toEqual({ month: '2026-09', invoicedUah: 100, paidUah: 40 });
+  });
+
+  it('долг и полученное складываются по всем организациям', async () => {
+    const { billingRow, billingTotals } = await import('../src/billing-report.js');
+    const t = billingTotals([
+      billingRow(T(), { ...NO_INV, issued: 2, debtUah: 1000.5, paidUah: 2000.25 }, NOW),
+      billingRow(T({ id: '2' }), { ...NO_INV, issued: 1, debtUah: 500, paidUah: 0 }, NOW),
+    ]);
+    expect(t.debtUah).toBe(1500.5);
+    expect(t.paidUah).toBe(2000.25);
+  });
+});

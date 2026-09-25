@@ -10,8 +10,14 @@ import {
   nbuRate,
   payState,
   toUah,
+  billingByPlan,
+  billingMonths,
+  billingRow,
+  billingTotals,
   withSystem,
   withTenant,
+  type BillingInvoices,
+  type BillingTenant,
   type Pool,
 } from '@omnidesk/core';
 
@@ -179,6 +185,82 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
    * живых, сколько платят и сколько денег в месяц. Всё остальное
    * читается в списке.
    */
+  /**
+   * Свод по деньгам платформы.
+   *
+   * Отдельной страницей, а не строкой в списке организаций: деньги
+   * смотрят не тогда, когда ищут клиента, а тогда, когда считают месяц,
+   * и вопросы здесь другие — сколько выставлено, сколько пришло,
+   * сколько висит долгом и кто вот-вот отвалится.
+   *
+   * Счета лежат под изоляцией по организации, поэтому читаются по
+   * одной: системная роль их не видит, и это правильно — счёт называет
+   * клиента. Обходов у изоляции быть не должно даже ради отчёта.
+   */
+  app.get('/admin/billing', async (req, reply) => {
+    const who = await deps.owner(req);
+    if (!who) return reply.code(403).send({ error: 'forbidden' });
+
+    const tenants = await withSystem(pool, 'организации для свода', async (db) => {
+      const { rows } = await db.query<BillingTenant>(
+        `SELECT id, name, slug, plan, kind, status, seats_limit, paid_until,
+                price_month, currency, created_at, paddle_status, paddle_subscription_id
+           FROM tenants WHERE status <> 'deleted' ORDER BY created_at`,
+      );
+      return rows;
+    });
+
+    const rows = [];
+    const byMonth = [];
+    for (const t of tenants) {
+      const inv = await withTenant(pool, t.id, async (db) => {
+        const { rows: agg } = await db.query<{
+          issued: string; paid: string; debt: string; paid_uah: string; last_paid: string | null;
+        }>(
+          `SELECT count(*) FILTER (WHERE status <> 'void')            AS issued,
+                  count(*) FILTER (WHERE status = 'paid')             AS paid,
+                  coalesce(sum(amount_uah) FILTER (WHERE status = 'issued'), 0) AS debt,
+                  coalesce(sum(amount_uah) FILTER (WHERE status = 'paid'), 0)   AS paid_uah,
+                  max(paid_at) FILTER (WHERE status = 'paid')         AS last_paid
+             FROM platform_invoices`,
+        );
+        const { rows: months } = await db.query<{
+          month: string; invoiced: string; paid: string;
+        }>(
+          `SELECT to_char(issued_on, 'YYYY-MM') AS month,
+                  coalesce(sum(amount_uah) FILTER (WHERE status <> 'void'), 0) AS invoiced,
+                  coalesce(sum(amount_uah) FILTER (WHERE status = 'paid'), 0)  AS paid
+             FROM platform_invoices
+            WHERE issued_on >= (current_date - interval '13 months')
+            GROUP BY 1`,
+        );
+        const map: BillingInvoices['byMonth'] = {};
+        for (const m of months) {
+          map[m.month] = { invoicedUah: Number(m.invoiced), paidUah: Number(m.paid) };
+        }
+        const a = agg[0];
+        return {
+          issued: Number(a?.issued ?? 0),
+          paid: Number(a?.paid ?? 0),
+          debtUah: Number(a?.debt ?? 0),
+          paidUah: Number(a?.paid_uah ?? 0),
+          lastPaidAt: a?.last_paid ?? null,
+          byMonth: map,
+        } satisfies BillingInvoices;
+      });
+
+      rows.push(billingRow(t, inv));
+      byMonth.push(inv.byMonth);
+    }
+
+    return {
+      totals: billingTotals(rows),
+      months: billingMonths(byMonth),
+      byPlan: billingByPlan(rows),
+      rows,
+    };
+  });
+
   app.get('/admin/summary', async () => {
     const month = monthRange(new Date());
     const rows = await withSystem(pool, 'сводка по организациям', async (db) => {

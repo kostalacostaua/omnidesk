@@ -1138,6 +1138,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
     <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
+    <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
@@ -7841,7 +7842,8 @@ var ICONS = {
   smile:'<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
-  auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>'
+  auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>',
+  card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'
 };
 
 function icon(name){
@@ -8498,6 +8500,132 @@ function ownMoney(v){
   return v == null ? '—' : String(v);
 }
 
+/* ══════════════ Деньги платформы ══════════════ */
+
+/**
+ * Свод по деньгам.
+ *
+ * Отдельной страницей, а не строкой в списке организаций: деньги
+ * смотрят не тогда, когда ищут клиента, а тогда, когда считают месяц.
+ * Вопросы здесь другие — сколько выставлено, сколько пришло, сколько
+ * висит долгом и кто вот-вот отвалится.
+ */
+var BILLREP = null;
+
+function billMoneyMap(mrr){
+  var keys = Object.keys(mrr || {});
+  if (!keys.length) return '0';
+  return keys.map(function(c){ return mrr[c] + ' ' + c }).join(' + ');
+}
+
+function billState(r){
+  /* «Прострочено» в продукте уже занято нарушением обещания ответить.
+     Для денег своё слово: иначе в отчёте о выручке появляется SLA. */
+  return r.state === 'unpaid' ? L('не сплачено')
+    : r.state === 'due' ? L('ось-ось')
+    : L('оплачено');
+}
+
+function billSource(r){
+  return r.source === 'paddle' ? L('картка')
+    : r.source === 'invoice' ? L('рахунок')
+    : L('—');
+}
+
+function tabBilling(){
+  api('/admin/billing').then(function(d){
+    BILLREP = d;
+    var t = d.totals || {};
+
+    /* Месяцы рисуем тем же графиком, что и отчёты: выставлено и
+       оплачено рядом. Разрыв между столбиками — это и есть долг, и
+       увидеть его глазом полезнее, чем прочитать число. */
+    var months = (d.months || []).map(function(m){
+      return { day: m.month + '-01', inv: m.invoicedUah, paid: m.paidUah };
+    });
+
+    pageBox().innerHTML = '<div class="pg">' +
+      pageHead(L('Гроші'), L('Виставлено, отримано, борг і хто платить карткою.'),
+        L('<button class="ghost mini" id="billCsv">Вивантажити в Excel</button>')) +
+
+      '<div class="nums">' +
+        num(t.paying == null ? '—' : t.paying, L('платять')) +
+        num(t.overdue == null ? '—' : t.overdue, L('не сплатили')) +
+        num(t.paddleActive == null ? '—' : t.paddleActive, L('карткою')) +
+        num(t.partners == null ? '—' : t.partners, L('партнери')) +
+      '</div>' +
+
+      L('<div class="pg-sec"><h3>На місяць</h3><div class="card">') +
+        '<div class="prow"><div class="pk">' + L('План на місяць') + '</div>' +
+        '<div class="pv"><b>' + esc(billMoneyMap(t.mrr)) + '</b>' +
+        L('<div class="hint" style="margin-top:2px">Сума місячних цін тих, у кого оплата не прострочена. ') +
+        L('Валюти не зводимо: курс на сьогодні зробив би вчорашній звіт іншим.</div></div>') +
+        '<span></span></div>' +
+        '<div class="prow"><div class="pk">' + L('Борг') + '</div>' +
+        '<div class="pv"><b>' + esc(t.debtUah == null ? '—' : t.debtUah) + L(' грн</b>') +
+        L('<div class="hint" style="margin-top:2px">Виставлено рахунками і не оплачено.</div></div>') +
+        '<span></span></div>' +
+        '<div class="prow"><div class="pk">' + L('Отримано') + '</div>' +
+        '<div class="pv"><b>' + esc(t.paidUah == null ? '—' : t.paidUah) + L(' грн</b>') +
+        L('<div class="hint" style="margin-top:2px">За весь час, за курсом кожного рахунку.</div></div>') +
+        '<span></span></div>' +
+      '</div></div>' +
+
+      L('<div class="pg-sec"><h3>По місяцях</h3><div class="card">') +
+        vizDays(months, 'inv', 'paid', L('виставлено'), L('оплачено')) +
+      '</div></div>' +
+
+      L('<div class="pg-sec"><h3>За тарифами</h3><div class="card">') +
+        '<div class="mlrec">' + (d.byPlan || []).map(function(p){
+          return '<div class="prow"><div class="pk">' + esc(p.plan) + '</div>' +
+            '<div class="pv">' + esc(p.tenants) + L(' організацій · ') +
+            esc(billMoneyMap(p.mrr)) + L(' на місяць</div>') +
+            '<span></span></div>';
+        }).join('') + '</div>' +
+      '</div></div>' +
+
+      L('<div class="pg-sec"><h3>Організації</h3><div class="card">') +
+        '<div class="mlrec">' + (d.rows || []).map(function(r){
+          return '<div class="prow"><div class="pk">' + esc(r.name || r.slug) + '</div>' +
+            '<div class="pv">' + esc(r.plan) + ' · ' + esc(billSource(r)) +
+            (r.priceMonth ? ' · ' + esc(r.priceMonth) + ' ' + esc(r.currency) : '') +
+            L('<div class="hint" style="margin-top:2px">') + esc(billState(r)) +
+            (r.paidUntil ? L(' до ') + esc(fmtDate(r.paidUntil)) : '') +
+            (r.debtUah ? L(' · борг ') + esc(r.debtUah) + L(' грн') : '') +
+            '</div></div>' +
+            '<span class="pill' + (r.state === 'unpaid' ? ' crit' : r.state === 'due' ? ' warn' : ' ok') +
+            '">' + esc(billState(r)) + '</span></div>';
+        }).join('') + '</div>' +
+      '</div></div>' +
+    '</div>';
+
+    wireTips();
+    el('billCsv').onclick = billExport;
+  }).catch(sErr);
+}
+
+/**
+ * Выгрузка.
+ *
+ * Одна таблица со всеми полями, а не красивый отчёт: человек открывает
+ * её в Excel, чтобы посчитать своё — то, чего мы не предусмотрели.
+ * Красивое он сделает сам, а недостающую колонку не выдумает.
+ */
+function billExport(){
+  if (!BILLREP) return;
+  csvDump('rozmovio-groshi',
+    [L('Організація'), L('Ідентифікатор'), L('Тариф'), L('Вид'), L('Місць'),
+     L('Чим платить'), L('Ціна на місяць'), L('Валюта'), L('Стан'), L('Оплачено до'),
+     L('Рахунків'), L('Отримано, грн'), L('Борг, грн'), L('Остання оплата'),
+     L('Підписка Paddle'), L('Створено')],
+    (BILLREP.rows || []).map(function(r){
+      return [r.name, r.slug, r.plan, r.kind, r.seats, billSource(r), r.priceMonth, r.currency,
+        billState(r), r.paidUntil || '', r.invoices, r.paidUah, r.debtUah,
+        r.lastPaidAt ? String(r.lastPaidAt).slice(0, 10) : '',
+        r.paddleStatus || '', String(r.createdAt).slice(0, 10)];
+    }));
+}
+
 function tabOwner(){
   OWN.open = null;
   Promise.all([
@@ -9141,6 +9269,7 @@ function ownBar(){
 
 var VIEWS = {
   owner: tabOwner,
+  billing: tabBilling,
   channels: tabChannels,
   bots: renderBots,
   replies: tabReplies,
