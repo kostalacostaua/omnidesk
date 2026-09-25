@@ -15,6 +15,12 @@ RUN npx tsc --build apps/workers
 # Оставляем только production-зависимости
 RUN npm prune --omit=dev
 
+# Пакет, версия которого разошлась между приложениями, npm не
+# поднимает в общий node_modules — он остаётся в своём. Каталог
+# создаётся пустым заранее, чтобы копирование ниже не падало,
+# когда поднялось всё.
+RUN mkdir -p apps/workers/node_modules
+
 FROM node:22-alpine AS runtime
 WORKDIR /app
 
@@ -30,6 +36,7 @@ COPY --from=builder /app/packages/core/dist ./packages/core/dist
 COPY --from=builder /app/packages/core/package.json ./packages/core/
 COPY --from=builder /app/apps/workers/dist ./apps/workers/dist
 COPY --from=builder /app/apps/workers/package.json ./apps/workers/
+COPY --from=builder /app/apps/workers/node_modules ./apps/workers/node_modules
 
 # Каталог вложений создаётся ЗАРАНЕЕ и с правильным владельцем.
 # Docker при первом создании именованного тома копирует туда права

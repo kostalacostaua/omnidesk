@@ -30,6 +30,12 @@ RUN node scripts/check-rls.mjs
 # Оставляем только production-зависимости
 RUN npm prune --omit=dev
 
+# Пакет, версия которого разошлась между приложениями, npm не
+# поднимает в общий node_modules — он остаётся в своём. Каталог
+# создаётся пустым заранее, чтобы копирование ниже не падало,
+# когда поднялось всё.
+RUN mkdir -p apps/api/node_modules
+
 FROM node:22-alpine AS runtime
 WORKDIR /app
 
@@ -45,6 +51,7 @@ COPY --from=builder /app/packages/core/dist ./packages/core/dist
 COPY --from=builder /app/packages/core/package.json ./packages/core/
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 
 # Схема едет в образе: миграции запускаются перед каждым деплоем
 # (apps/api/dist/migrate.js), а у управляемой базы нет initdb.d.
