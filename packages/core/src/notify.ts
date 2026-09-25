@@ -18,6 +18,7 @@
 
 export const NOTIFY_EVENTS = [
   'conversation.new',
+  'message.new',
   'message.waiting',
   'sla.warning',
   'ai.handoff',
@@ -60,6 +61,7 @@ export interface NotifyMessage {
 /** Человеческие названия событий: ими подписаны переключатели. */
 export const NOTIFY_TITLES: Record<NotifyEvent, string> = {
   'conversation.new': 'Новий діалог',
+  'message.new': 'Нове повідомлення',
   'message.waiting': 'Клієнт чекає відповіді',
   'sla.warning': 'Ось-ось порушимо обіцянку',
   'ai.handoff': 'ШІ передав людині',
@@ -70,6 +72,8 @@ export const NOTIFY_TITLES: Record<NotifyEvent, string> = {
 /** Пояснение к переключателю: когда именно это придёт. */
 export const NOTIFY_HINTS: Record<NotifyEvent, string> = {
   'conversation.new': 'Перше повідомлення від нового клієнта.',
+  'message.new':
+    'Кожне повідомлення клієнта в уже відкритому діалозі. Приходить одразу, а не через час.',
   'message.waiting': 'Повідомлення клієнта без відповіді довше за визначений час.',
   'sla.warning':
     'Час на першу відповідь добігає кінця. Рахується в робочих годинах — уночі не турбує.',
@@ -107,6 +111,20 @@ export function renderNotify(event: NotifyEvent, p: NotifyPayload): NotifyMessag
       return {
         title: `Новий діалог${where}`,
         body: `${who}: ${said}`,
+        path,
+      };
+
+    /*
+     * Обычное сообщение в уже открытом диалоге.
+     *
+     * Заголовок — имя клиента, а не «новое сообщение»: на телефоне
+     * видно две строки, и первая должна отвечать на вопрос «кто», а не
+     * повторять то, что человек и так понял по значку.
+     */
+    case 'message.new':
+      return {
+        title: `${who}${where}`,
+        body: said,
         path,
       };
 

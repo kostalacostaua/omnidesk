@@ -1926,23 +1926,38 @@ async function announceNew(msg: UnifiedMessage, conversationId: string): Promise
       );
       return rows[0] ?? null;
     });
-    if (!first || Number(first.n) !== 1) return;
+    if (!first) return;
+
+    /*
+     * Первое сообщение — это новый диалог, остальные — просто
+     * сообщения. Раньше уведомление уходило только на первое, и в уже
+     * открытом диалоге клиент мог писать хоть десять раз: оператор
+     * узнавал об этом через пятнадцать минут, когда срабатывало
+     * «клієнт чекає». Для человека, который смотрит на телефон, это
+     * выглядело как «уведомления не работают», и справедливо.
+     *
+     * Ключ повтора — номер входящего в диалоге: он не меняется от
+     * повторной доставки той же задачи, и второй раз то же сообщение
+     * не прозвонит.
+     */
+    const count = Number(first.n);
+    const firstOne = count === 1;
 
     await notifier.notify(
       msg.tenantId,
-      'conversation.new',
+      firstOne ? 'conversation.new' : 'message.new',
       {
         who: first.name ?? msg.peerProfile.name ?? null,
         text: typeof msg.content.text === 'string' ? msg.content.text : null,
         channel: msg.channelType,
         conversationId,
       },
-      `conversation.new:${conversationId}`,
+      firstOne ? `conversation.new:${conversationId}` : `message.new:${conversationId}:${count}`,
     );
   } catch (err) {
     // Оповещение никогда не мешает переписке: не ушло — записали в лог
     // и пошли дальше.
-    log('warn', 'Оповещение о новом диалоге не поставлено', {
+    log('warn', 'Оповещение о сообщении не поставлено', {
       conversationId, error: err instanceof Error ? err.message : String(err),
     });
   }

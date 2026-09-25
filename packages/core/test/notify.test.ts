@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   NOTIFY_EVENTS,
+  NOTIFY_HINTS,
+  NOTIFY_TITLES,
   dedupKey,
   escapeHtml,
   isNotifyEvent,
@@ -157,5 +159,36 @@ describe('ctx не участвует в тексте', () => {
     const m = renderNotify('conversation.new', { who: 'Олена', conversationId: 'conv-1' });
     expect(m.body).not.toContain(ctx.tenantId);
     expect(m.body).not.toContain(ctx.channelId);
+  });
+});
+
+/*
+ * Сообщение в уже открытом диалоге.
+ *
+ * Раньше оповещение уходило только на первое сообщение, и клиент мог
+ * писать в открытый диалог хоть десять раз — оператор узнавал об этом
+ * через пятнадцать минут, когда срабатывало «клієнт чекає».
+ */
+describe('нове повідомлення', () => {
+  it('в заголовке имя клиента, а не слова о сообщении', () => {
+    const m = renderNotify('message.new', {
+      who: 'Оля', text: 'А є знижка?', channel: 'Instagram', conversationId: 'c1',
+    });
+    // На телефоне видно две строки: первая отвечает на «кто».
+    expect(m.title).toBe('Оля · Instagram');
+    expect(m.body).toBe('А є знижка?');
+    expect(m.path).toContain('c1');
+  });
+
+  it('без имени и без текста говорит правду, а не молчит', () => {
+    const m = renderNotify('message.new', { conversationId: 'c1' });
+    expect(m.title).toBe('клієнт');
+    expect(m.body).toContain('вкладення');
+  });
+
+  it('событие известно системе: иначе задача будет отброшена', () => {
+    expect(isNotifyEvent('message.new')).toBe(true);
+    expect(NOTIFY_TITLES['message.new']).toBeTruthy();
+    expect(NOTIFY_HINTS['message.new']).toBeTruthy();
   });
 });
