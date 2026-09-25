@@ -69,6 +69,7 @@ import {
   viberSend,
   type ViberCreds,
   AiError,
+  AI_HISTORY_SQL,
   askModel,
   needsHuman,
   type AiProvider,
@@ -1743,10 +1744,7 @@ async function aiAnswer(
 
   const turns = await withTenant(pool, msg.tenantId, async (db) => {
     const { rows } = await db.query<{ direction: string; body: string | null }>(
-      `SELECT direction, body FROM messages
-        WHERE conversation_id = $1 AND body IS NOT NULL AND body <> ''
-        ORDER BY created_at DESC
-        LIMIT $2`,
+      AI_HISTORY_SQL,
       [conversationId, row.history_size],
     );
     return rows.reverse().map<AiTurn>((m) => ({

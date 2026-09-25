@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  AI_HISTORY_SQL,
   AiError,
   askModel,
   PROVIDERS,
@@ -226,10 +227,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
 
     const turns = await withTenant(pool, a.tenantId, async (db) => {
       const { rows } = await db.query<{ direction: string; body: string | null }>(
-        `SELECT direction, body FROM messages
-          WHERE conversation_id = $1 AND body IS NOT NULL AND body <> ''
-          ORDER BY created_at DESC
-          LIMIT $2`,
+        AI_HISTORY_SQL,
         [req.params.id, row.history_size],
       );
       return rows.reverse().map<AiTurn>((m) => ({

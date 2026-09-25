@@ -300,17 +300,20 @@ export function guessColumns(cols: SubformColumn[]): {
 }
 
 /**
- * Колонки стандартной таблицы товаров.
+ * Колонки таблицы товаров в модулях продаж.
  *
- * Подформой она не считается, своего модуля у неё нет, и спросить её
- * колонки у Zoho нельзя — они зашиты в самом API. Поэтому список
- * здесь, а не приходит ответом.
+ * Своего модуля у неё нет, и спросить колонки у Zoho нельзя — они
+ * зашиты в самом API. Поэтому список здесь, а не приходит ответом.
+ * Zoho отдаёт саму таблицу обычным полем-подформой, но без модуля, из
+ * которого можно было бы прочитать её устройство: в настройках это
+ * выглядело как четыре пустых списка на месте выбора колонок.
  */
 export const STOCK_COLUMNS: SubformColumn[] = [
-  { api: 'product', label: 'Товар', lookup: 'Products' },
-  { api: 'quantity', label: 'Кількість', lookup: '' },
-  { api: 'list_price', label: 'Ціна', lookup: '' },
+  { api: 'Product_Name', label: 'Товар', lookup: 'Products' },
+  { api: 'Quantity', label: 'Кількість', lookup: '' },
+  { api: 'List_Price', label: 'Ціна', lookup: '' },
   { api: 'Discount', label: 'Знижка', lookup: '' },
+  { api: 'Description', label: 'Опис рядка', lookup: '' },
 ];
 
 export interface PipelineStage {

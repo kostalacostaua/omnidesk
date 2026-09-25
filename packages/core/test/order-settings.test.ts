@@ -44,7 +44,25 @@ describe('настройки заказа', () => {
   });
 
   it('таблица товаров без имени откатывается к стандартной', () => {
-    expect(parseOrderSettings({ subform: { api: '' } }).subform.api).toBe('Product_Details');
+    expect(parseOrderSettings({ subform: { api: '' } }).subform.api).toBe('Ordered_Items');
+  });
+
+  /*
+   * Во втором поколении API таблица товаров называлась Product_Details
+   * и колонки в ней были другие. Записанная тогда настройка означает
+   * заказ, который Zoho не примет, — читаем её как «не настроено».
+   */
+  it('настройка под старое имя таблицы читается как ненастроенная', () => {
+    const s = parseOrderSettings({
+      subform: { api: 'Product_Details', product: 'product', quantity: 'quantity' },
+    });
+    expect(s.subform).toEqual({
+      api: 'Ordered_Items',
+      product: 'Product_Name',
+      quantity: 'Quantity',
+      price: 'List_Price',
+      discount: 'Discount',
+    });
   });
 });
 

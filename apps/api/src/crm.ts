@@ -364,22 +364,20 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
      * полей её нет. Но складывать товары надо именно в неё, поэтому в
      * «Замовленнях» она стоит первой и с известными колонками.
      */
-    const found = subforms(own.body);
-    if (module === 'Sales_Orders' && !found.some((x) => x.api === STOCK_SUBFORM.api)) {
-      found.unshift({ api: STOCK_SUBFORM.api, label: 'Товари замовлення', module: '' });
-    }
-
-    for (const sub of found) {
+    for (const sub of subforms(own.body)) {
       let columns: SubformColumn[] = [];
       if (sub.module) {
         const got = await ask('fields', { module: sub.module });
         if (!('error' in got)) columns = subformColumns(got.body);
       }
       /*
-       * Стандартная таблица товаров приходит обычным полем-подформой,
-       * но своего модуля у неё нет, и колонки спросить не у кого: они
-       * зашиты в самом API. Без этого в настройках три пустых списка
-       * там, где всё известно заранее.
+       * Таблица товаров приходит обычным полем-подформой, но без
+       * модуля, из которого можно прочитать её устройство: её колонки
+       * зашиты в самом API. Своего списка сюда не подставляли — и в
+       * настройках на месте выбора колонок было четыре пустых списка.
+       *
+       * Узнаём её по имени: у заказа Ordered_Items, и это имя нам
+       * известно, потому что в этот модуль мы и создаём.
        */
       const stock = sub.api === STOCK_SUBFORM.api;
       if (!columns.length && stock) columns = STOCK_COLUMNS;

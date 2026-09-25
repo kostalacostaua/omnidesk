@@ -302,6 +302,26 @@ async function platformOwnerOf(req: {
  */
 const SLOW_MS = 1000;
 
+/**
+ * Упавший обработчик.
+ *
+ * Без журнала запросов Fastify не пишет и причину падения: остаётся
+ * пятисотка без единого слова, по которой не найти ни места, ни
+ * строки. Этот крюк возвращает потерянное — и только его: ошибки
+ * редки, и на объём журнала они не влияют.
+ */
+app.addHook('onError', async (req, _reply, err) => {
+  app.log.error(
+    {
+      method: req.method,
+      path: (req.raw.url ?? '').split('?')[0],
+      err: err.message,
+      stack: (err.stack ?? '').split('\n').slice(0, 4).join(' | '),
+    },
+    'Обработчик упал',
+  );
+});
+
 app.addHook('onResponse', async (req, reply) => {
   const ms = reply.elapsedTime;
   if (reply.statusCode < 400 && ms < SLOW_MS) return;

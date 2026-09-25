@@ -3023,10 +3023,9 @@ function osPaint(){
     s.pipelines = [];
     s.fields = [];
     s.discountField = '';
-    s.subform = s.module === 'Sales_Orders'
-      ? { api:'Product_Details', product:'product', quantity:'quantity',
-          price:'list_price', discount:'Discount' }
-      : { api:'', product:'', quantity:'', price:'', discount:'' };
+    // Таблицу товаров и её колонки выбирают заново: имена принадлежат
+    // модулю, и перенос их в другой — это имена полей, которых там нет.
+    s.subform = { api:'', product:'', quantity:'', price:'', discount:'' };
     osMeta(s.module);
   };
 

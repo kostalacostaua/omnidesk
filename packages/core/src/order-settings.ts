@@ -88,14 +88,26 @@ export interface OrderSettings {
   discountField: string;
 }
 
-/** Стандартная таблица товаров Sales_Orders: колонки известны Zoho. */
+/**
+ * Таблица товаров «Замовлень»: имена колонок зашиты в самой Zoho.
+ *
+ * Раньше здесь стояло Product_Details с колонками product, quantity и
+ * list_price — так это называлось во втором поколении API. С тех пор
+ * Zoho дала таблице имя своего модуля: у заказа Ordered_Items, у
+ * счёта Invoiced_Items, у предложения Quoted_Items. Старое имя
+ * означало заказ, который не создаётся, и три пустых списка в
+ * настройках.
+ */
 export const STOCK_SUBFORM: OrderSubform = {
-  api: 'Product_Details',
-  product: 'product',
-  quantity: 'quantity',
-  price: 'list_price',
+  api: 'Ordered_Items',
+  product: 'Product_Name',
+  quantity: 'Quantity',
+  price: 'List_Price',
   discount: 'Discount',
 };
+
+/** Имя, под которым таблица товаров жила во втором поколении API. */
+export const LEGACY_SUBFORM = 'Product_Details';
 
 export const ORDER_SETTINGS_DEFAULT: OrderSettings = {
   // Sales_Orders по умолчанию: так вело себя приложение до появления
@@ -153,7 +165,10 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
   const api = String(sub['api'] ?? '');
   const col = (key: string) =>
     NAME.test(String(sub[key] ?? '')) ? String(sub[key]) : '';
-  const subform: OrderSubform = NAME.test(api)
+  // Настройка, записанная под старое имя таблицы, читается как «не
+  // настроено»: её колонки в нынешней Zoho не существуют, и молча
+  // отправлять по ним заказ — значит получать отказ на каждом.
+  const subform: OrderSubform = NAME.test(api) && api !== LEGACY_SUBFORM
     ? {
         api,
         product: col('product'),
