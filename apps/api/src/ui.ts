@@ -613,8 +613,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .conv.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
   .av{width:38px;height:38px;border-radius:13px;font-weight:700;
     background:linear-gradient(140deg,var(--brand1),var(--brand2));color:#fff;
-    border:0;font-size:13px;letter-spacing:-.02em}
-  .av img{border-radius:13px}
+    border:0;font-size:13px;letter-spacing:-.02em;
+    /* Фото приезжает своего размера — у Telegram это 640 на 640, у
+       Instagram бывает больше. Без этих трёх строк браузер кладёт его
+       в кружок как есть, и в 38 пикселях видно случайный кусок щеки.
+       Размер задаётся после сокращения background: сокращение сбрасывает
+       его в auto, и порядок здесь не косметический. */
+    background-size:cover;background-position:center;background-repeat:no-repeat}
   .conv .nm{font-size:13.5px}
   .chip{border-radius:7px;padding:2px 7px;background:var(--panel2);color:var(--t2)}
   /* Свой статус — единственная цветная метка в строке, и цвет у неё
