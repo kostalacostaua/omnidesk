@@ -64,6 +64,8 @@ export interface BillingRow {
   paidUntil: string | null;
   /** paid — оплачено, due — вот-вот кончится, unpaid — просрочено. */
   state: 'paid' | 'due' | 'unpaid';
+  /** Цена задана за пользователя: платят за каждого, включённых мест нет. */
+  perSeat: boolean;
   priceMonth: number;
   /** Мест сверх включённых и сколько они стоят в месяц. */
   seatsFree: number;
@@ -116,9 +118,8 @@ const LIVE = ['active', 'trialing', 'past_due'];
  * десять, — то есть пять человек работали бесплатно, и заметить это
  * можно было только вручную, сверяя список команды с ценой.
  *
- * Корпоративный считается этой же формулой: включённых мест ноль, и вся
- * цена оказывается ценой мест. Отдельного правила для него не нужно —
- * отдельное правило означало бы второй способ посчитать деньги.
+ * Здесь только доплата за кабинетный тариф. Тарифы, где цена задана за
+ * человека, считает tenantMoney: там платят за всех, а не за лишних.
  */
 export function seatMoney(
   seatsLimit: number,
@@ -129,17 +130,117 @@ export function seatMoney(
   return { extra, month: Math.round(extra * seatPrice * 100) / 100 };
 }
 
+/**
+ * Тарифы, где цена задана за пользователя, а не за кабинет.
+ *
+ * Корпоративный продаётся по головам: цена одного человека умножается
+ * на число людей, и никакой базы сверху нет. Раньше это приходилось
+ * складывать руками — вписать цену места, вписать сколько мест входит
+ * в тариф, проверить, что входит ноль, — и любая из трёх цифр,
+ * оставшаяся от прошлого тарифа, давала сумму, которой нет в счёте.
+ *
+ * Пятнадцать человек по шесть — это девяносто, и считать это должен
+ * не человек.
+ */
+export const PER_SEAT_PLANS = ['custom'];
+
+export function isPerSeatPlan(plan: string | null | undefined): boolean {
+  return PER_SEAT_PLANS.includes(String(plan ?? ''));
+}
+
+/** Прайс владельца: тариф → валюта → цена. */
+export type PlanPrices = Record<string, Record<string, number | string>> | null | undefined;
+
+/** Цена тарифа по прайсу. Нет цены в этой валюте — ноль, а не догадка. */
+export function planPrice(prices: PlanPrices, plan: string, currency: string): number {
+  return money(prices?.[plan]?.[currency]);
+}
+
+export interface TenantMoneyInput {
+  plan: string;
+  seatsLimit: number;
+  currency: string;
+  priceMonth?: number | string | null;
+  seatsFree?: number | null;
+  seatPrice?: number | string | null;
+}
+
+export interface TenantMoney {
+  perSeat: boolean;
+  base: number;
+  seatsFree: number;
+  seatsExtra: number;
+  seatPrice: number;
+  seatsMonth: number;
+  monthTotal: number;
+}
+
+/**
+ * Сколько организация платит в месяц — одним расчётом на всё приложение.
+ *
+ * Два вида тарифов, и различие только в том, за что берут деньги. За
+ * кабинет: база плюс места сверх включённых. За человека: цена одного
+ * умножается на всех, и включённых мест нет — иначе часть команды
+ * работала бы бесплатно.
+ *
+ * Цену человека берём из прайса владельца, а не из поля в карточке:
+ * поле нужно ровно для индивидуальной договорённости, и заполненным по
+ * умолчанию оно означало бы, что у трёх клиентов на одном тарифе три
+ * разные цены, про которые через месяц никто не помнит, откуда они.
+ */
+export function tenantMoney(t: TenantMoneyInput, prices?: PlanPrices): TenantMoney {
+  const seats = Math.max(0, Math.round(Number(t.seatsLimit ?? 0)));
+  const currency = t.currency || 'UAH';
+  const listed = planPrice(prices, t.plan, currency);
+
+  if (isPerSeatPlan(t.plan)) {
+    const own = money(t.seatPrice);
+    const seatPrice = own > 0 ? own : listed;
+    const month = Math.round(seats * seatPrice * 100) / 100;
+    return {
+      perSeat: true,
+      base: 0,
+      seatsFree: 0,
+      seatsExtra: seats,
+      seatPrice,
+      seatsMonth: month,
+      monthTotal: month,
+    };
+  }
+
+  const free = Math.max(0, Math.round(Number(t.seatsFree ?? 0)));
+  const seatPrice = money(t.seatPrice);
+  const extra = seatMoney(seats, free, seatPrice);
+  const base = money(t.priceMonth);
+  return {
+    perSeat: false,
+    base,
+    seatsFree: free,
+    seatsExtra: extra.extra,
+    seatPrice,
+    seatsMonth: extra.month,
+    monthTotal: Math.round((base + extra.month) * 100) / 100,
+  };
+}
+
 export function billingRow(
   t: BillingTenant,
   inv: BillingInvoices,
   now: Date = new Date(),
+  prices?: PlanPrices,
 ): BillingRow {
   const paddle = Boolean(t.paddle_subscription_id && LIVE.includes(String(t.paddle_status ?? '')));
-  const seats = Number(t.seats_limit ?? 0);
-  const free = Number(t.seats_free ?? 0);
-  const seatPrice = money(t.seat_price);
-  const extra = seatMoney(seats, free, seatPrice);
-  const base = money(t.price_month);
+  const m = tenantMoney(
+    {
+      plan: t.plan,
+      seatsLimit: Number(t.seats_limit ?? 0),
+      currency: t.currency,
+      priceMonth: t.price_month,
+      seatsFree: t.seats_free,
+      seatPrice: t.seat_price,
+    },
+    prices,
+  );
   return {
     id: t.id,
     name: t.name,
@@ -149,12 +250,13 @@ export function billingRow(
     seats: Number(t.seats_limit ?? 0),
     paidUntil: t.paid_until,
     state: payState(t.paid_until, now),
-    priceMonth: base,
-    seatsFree: free,
-    seatsExtra: extra.extra,
-    seatPrice,
-    seatsMonth: extra.month,
-    monthTotal: Math.round((base + extra.month) * 100) / 100,
+    perSeat: m.perSeat,
+    priceMonth: m.base,
+    seatsFree: m.seatsFree,
+    seatsExtra: m.seatsExtra,
+    seatPrice: m.seatPrice,
+    seatsMonth: m.seatsMonth,
+    monthTotal: m.monthTotal,
     currency: t.currency || 'UAH',
     // Карта важнее счёта: если подписка жива, деньги идут оттуда, даже
     // когда в прошлом были счета по безналу.

@@ -18,6 +18,7 @@ import {
   withTenant,
   type BillingInvoices,
   type BillingTenant,
+  type PlanPrices,
   type Pool,
 } from '@omnidesk/core';
 
@@ -203,6 +204,15 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     const who = await deps.owner(req);
     if (!who) return reply.code(403).send({ error: 'forbidden' });
 
+    // Прайс нужен для тарифов, где цена задана за пользователя: там
+    // сумма выводится из цены человека, а не лежит в карточке.
+    const prices = await withSystem(pool, 'прайс для свода', async (db) => {
+      const { rows } = await db.query<{ plan_prices: PlanPrices }>(
+        `SELECT plan_prices FROM platform_settings WHERE id = 1`,
+      );
+      return rows[0]?.plan_prices ?? {};
+    });
+
     const tenants = await withSystem(pool, 'организации для свода', async (db) => {
       const { rows } = await db.query<BillingTenant>(
         `SELECT id, name, slug, plan, kind, status, seats_limit, seats_free, seat_price,
@@ -252,7 +262,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         } satisfies BillingInvoices;
       });
 
-      rows.push(billingRow(t, inv));
+      rows.push(billingRow(t, inv, new Date(), prices));
       byMonth.push(inv.byMonth);
     }
 

@@ -236,6 +236,98 @@ describe('места сверх тарифа', () => {
     expect(r.monthTotal).toBe(480);
   });
 
+  /*
+   * Цена за человека берётся из прайса, а не из полей карточки.
+   *
+   * Раньше владелец вписывал её трижды — цену места, сколько мест
+   * входит в тариф, цену кабинета, — и любая цифра, оставшаяся от
+   * прошлого тарифа, давала сумму, которой нет в счёте: пятнадцать
+   * человек по шесть выходили семьюдесятью двумя вместо девяноста,
+   * потому что три места «входили в тариф».
+   */
+  describe('тариф за каждого пользователя', () => {
+    const PRICES = { pro: { USD: 60 }, custom: { USD: 6, UAH: 250 } };
+
+    it('пятнадцать человек по шесть — это девяносто', async () => {
+      const { tenantMoney } = await import('../src/billing-report.js');
+      const m = tenantMoney(
+        { plan: 'custom', seatsLimit: 15, currency: 'USD' },
+        PRICES,
+      );
+      expect(m).toEqual({
+        perSeat: true, base: 0, seatsFree: 0, seatsExtra: 15,
+        seatPrice: 6, seatsMonth: 90, monthTotal: 90,
+      });
+    });
+
+    // Цифры, оставшиеся от прошлого тарифа, на сумму влиять не должны:
+    // иначе в счёте окажется то, чего на экране не видно.
+    it('включённые места и цена кабинета здесь не считаются', async () => {
+      const { tenantMoney } = await import('../src/billing-report.js');
+      const m = tenantMoney(
+        { plan: 'custom', seatsLimit: 15, currency: 'USD', seatsFree: 3, priceMonth: '60' },
+        PRICES,
+      );
+      expect(m.monthTotal).toBe(90);
+      expect(m.seatsFree).toBe(0);
+      expect(m.base).toBe(0);
+    });
+
+    it('своя цена за человека важнее прайса: это отдельная договорённость', async () => {
+      const { tenantMoney } = await import('../src/billing-report.js');
+      expect(tenantMoney(
+        { plan: 'custom', seatsLimit: 15, currency: 'USD', seatPrice: '4.5' },
+        PRICES,
+      ).monthTotal).toBe(67.5);
+    });
+
+    it('валюта своя у каждого: цену берём в валюте организации', async () => {
+      const { tenantMoney } = await import('../src/billing-report.js');
+      expect(tenantMoney(
+        { plan: 'custom', seatsLimit: 4, currency: 'UAH' }, PRICES,
+      ).monthTotal).toBe(1000);
+      // Цены в этой валюте нет — ноль, а не цена из другой валюты.
+      expect(tenantMoney(
+        { plan: 'custom', seatsLimit: 4, currency: 'PLN' }, PRICES,
+      ).monthTotal).toBe(0);
+    });
+
+    it('кабинетный тариф прайсом не пересчитывается', async () => {
+      const { tenantMoney, isPerSeatPlan } = await import('../src/billing-report.js');
+      const m = tenantMoney(
+        { plan: 'pro', seatsLimit: 15, currency: 'USD', seatsFree: 10, seatPrice: '5', priceMonth: '60' },
+        PRICES,
+      );
+      expect(m).toMatchObject({ perSeat: false, base: 60, seatsExtra: 5, monthTotal: 85 });
+      expect(isPerSeatPlan('pro')).toBe(false);
+      expect(isPerSeatPlan('custom')).toBe(true);
+    });
+
+    it('в своде корпоративный считается прайсом, а не полями', async () => {
+      const { billingRow } = await import('../src/billing-report.js');
+      const r = billingRow(
+        T({ plan: 'custom', seats_limit: 15, seats_free: 3, seat_price: null, price_month: '6' }),
+        NO_INV, NOW, PRICES,
+      );
+      expect(r.perSeat).toBe(true);
+      expect(r.monthTotal).toBe(90);
+    });
+
+    /*
+     * Год дешевле месяца тем же правилом, что и у кабинетного тарифа.
+     * Девяносто в месяц при месячной оплате — это девятьсот за год,
+     * то есть семьдесят пять в месяц. Второго правила для денег быть
+     * не должно.
+     */
+    it('год считается от посчитанной суммы, а не от цены человека', async () => {
+      const { tenantMoney } = await import('../src/billing-report.js');
+      const { yearPrice } = await import('../src/paddle.js');
+      const month = tenantMoney({ plan: 'custom', seatsLimit: 15, currency: 'USD' }, PRICES).monthTotal;
+      expect(yearPrice(month)).toBe(900);
+      expect(yearPrice(month)).toBeLessThan(month * 12);
+    });
+  });
+
   it('в итогах видно, сколько денег от тарифов и сколько от мест', async () => {
     const { billingRow, billingTotals } = await import('../src/billing-report.js');
     const t = billingTotals([

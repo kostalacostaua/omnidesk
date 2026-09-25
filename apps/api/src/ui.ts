@@ -838,6 +838,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:10px;
     background:var(--panel2)}
   .pricerow .t{font-weight:700;font-size:12.5px}
+  .pricerow .t .s{font-weight:400;font-size:11px;color:var(--t3);margin-top:2px}
   .pricerow input{font-size:12.5px;padding:6px 8px}
   @media(max-width:700px){ .pricerow{grid-template-columns:1fr 1fr} }
   .mlrow code{font-size:11.5px;word-break:break-all;white-space:normal}
@@ -4287,6 +4288,29 @@ function billMonthOfYear(prices){
   return Math.round((prices[one] / 12) * 100) / 100 + ' ' + one + L(' / місяць');
 }
 
+/* Название тарифа для клиента. «custom» — слово из базы, а не имя
+   тарифа: человек, которому его показали, идёт спрашивать, что это. */
+function planName(p){
+  return p === 'custom' ? L('Корпоративний') : p;
+}
+
+/*
+ * Цена по головам словами.
+ *
+ * Сумма без разложения не проверяется: «90 доларів» человек сверить
+ * не может, а «6 × 15» сверит сразу — и спорить будет о цене человека,
+ * а не о том, откуда взялась цифра.
+ */
+function billSeatMath(p){
+  var side = BILL_PERIOD === 'year' ? p.year : p.month;
+  var prices = (side && side.price) || {};
+  var one = billCur(prices);
+  if (!one || !p.seats) return '';
+  var total = BILL_PERIOD === 'year' ? prices[one] / 12 : prices[one];
+  var each = Math.round((total / p.seats) * 100) / 100;
+  return L('за користувача ') + each + ' ' + one + ' × ' + p.seats + L(' користувачів');
+}
+
 /* Оплаты берём у Paddle: своя копия однажды разойдётся с настоящей —
    после возврата или спора с банком, — и человек увидит у нас одно, а
    в выписке другое. */
@@ -4343,10 +4367,14 @@ function billPaint(){
     : '';
 
   var head = '<div class="prow"><div class="pk">' + L('Зараз') + '</div>' +
-    '<div class="pv"><b>' + esc(BILL.plan || 'trial') + '</b>' +
+    '<div class="pv"><b>' + esc(planName(BILL.plan || 'trial')) + '</b>' +
     (BILL.paidUntil ? L(' · оплачено до ') + esc(fmtDate(BILL.paidUntil)) : '') +
     (st ? ' · ' + esc(st) : '') +
-    L('<div class="hint" style="margin-top:2px">Місць у тарифі: ') + esc(BILL.seatsLimit) + '</div></div>' +
+    (BILL.perSeat
+      ? L('<div class="hint" style="margin-top:2px">Користувачів: ') + esc(BILL.seatsLimit) +
+        L(' — оплата за кожного</div>')
+      : L('<div class="hint" style="margin-top:2px">Місць у тарифі: ') + esc(BILL.seatsLimit) + '</div>') +
+    '</div>' +
     (BILL.portal ? L('<button class="ghost mini" id="bPortal">Керувати підпискою</button>') : '<span></span>') +
     '</div>';
 
@@ -4370,12 +4398,20 @@ function billPaint(){
        и заплатить за него человек всё равно должен. Прятать кнопку по
        одному совпадению названия значит запереть его без оплаты. */
     var paid = p.plan === BILL.plan && BILL.subscribed;
-    return '<div class="prow"><div class="pk">' + esc(p.plan) + '</div>' +
+    /* Цена по головам: показываем, из чего она вышла. «90 доларів»
+       без «15 × 6» человек проверить не может, а проверить он захочет
+       первым делом. */
+    var math = p.perSeat ? billSeatMath(p) : '';
+    return '<div class="prow"><div class="pk">' + esc(planName(p.plan)) + '</div>' +
       '<div class="pv">' + (per ? esc(per) : L('ціну ще не задано')) +
+      (math ? '<div class="hint" style="margin-top:2px">' + esc(math) + '</div>' : '') +
       (BILL_PERIOD === 'year'
         ? L('<div class="hint" style="margin-top:2px">Списання раз на рік. Два місяці у подарунок.</div>')
         : '') +
-      (side.priceId ? '' : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
+      (BILL.individual
+        ? L('<div class="hint" style="margin-top:2px">Індивідуальна ціна: оплата за рахунком. Напишіть нам.</div>')
+        : side.priceId ? ''
+        : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
       '</div>' +
       (side.priceId && !paid
         ? '<button class="mini" data-pay="' + esc(p.plan) + '">' +
@@ -8595,7 +8631,11 @@ function tabBilling(){
           return '<div class="prow"><div class="pk">' + esc(r.name || r.slug) + '</div>' +
             '<div class="pv">' + esc(r.plan) + ' · ' + esc(billSource(r)) +
             (r.monthTotal ? ' · ' + esc(r.monthTotal) + ' ' + esc(r.currency) : '') +
-            (r.seatsExtra
+            (r.perSeat
+              ? L('<div class="hint" style="margin-top:2px">Користувачів: ') + esc(r.seats) +
+                ' × ' + esc(r.seatPrice) + ' = ' + esc(r.seatsMonth) + ' ' + esc(r.currency) +
+                '</div>'
+              : r.seatsExtra
               ? L('<div class="hint" style="margin-top:2px">Місць: ') + esc(r.seats) +
                 L(', понад тариф ') + esc(r.seatsExtra) + ' × ' + esc(r.seatPrice) +
                 ' = ' + esc(r.seatsMonth) + ' ' + esc(r.currency) + '</div>'
@@ -8687,13 +8727,20 @@ function paintOwner(){
     L('<div class="pg-sec"><h3>Ціни за тарифами</h3><div class="card">') +
       '<div class="mlrec">' + PLANS.map(function(pl){
         var row = (st.plan_prices || {})[pl] || {};
-        return '<div class="pricerow"><div class="t">' + esc(pl) + '</div>' +
+        /* Что именно за цена — подписано у самого поля. «6» в строке
+           corporate означает шесть за человека, а не шесть за кабинет,
+           и перепутать это стоит дороже всего остального на экране. */
+        return '<div class="pricerow"><div class="t">' + esc(pl) +
+          (PER_SEAT_PLANS.indexOf(pl) >= 0 ? L('<div class="s">за користувача</div>') : '') +
+          '</div>' +
           INV_CUR.map(function(c){
             return '<input data-price="' + pl + '" data-cur="' + c + '" placeholder="' + c +
               '" value="' + esc(row[c] == null ? '' : row[c]) + '">';
           }).join('') + '</div>';
       }).join('') + '</div>' +
-      L('<div class="hint">Порожньо — ціни в цій валюті немає, і підставлятися вона не буде.</div>') +
+      L('<div class="hint">Порожньо — ціни в цій валюті немає, і підставлятися вона не буде. ') +
+      L('Ціна тут — це щомісячна оплата; за рік беремо десять таких, тобто два місяці у подарунок. ') +
+      L('У тарифі за користувача ціна множиться на кількість людей сама.</div>') +
       L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="pSave">Зберегти ціни</button>') +
       L('<button class="ghost mini" id="pPaddle">Завести тарифи в Paddle</button></div>') +
       '<span class="ok" id="pOk"></span>' +
@@ -8866,12 +8913,13 @@ function paintOrg(){
       '</div>' +
       /* Места сверх тарифа. Отдельной строкой, потому что это отдельные
          деньги: пятнадцать операторов на тарифе с десятью — не тот же
-         счёт, что десять. Корпоративный считается этой же парой полей:
-         включённых мест ноль, и вся цена оказывается ценой мест. */
+         счёт, что десять. На тарифе по головам эта пара полей не нужна
+         вовсе: там платят за каждого по цене из прайса, и поля гаснут
+         сами — заполненными они означали бы вторую цену на то же. */
       '<div class="row2" style="margin-top:8px">' +
         L('<input id="ofree" type="number" min="0" placeholder="місць у тарифі" value="') +
           esc(t.seatsFree == null ? '' : t.seatsFree) + '">' +
-        L('<input id="oseatp" placeholder="ціна місця понад тариф" value="') +
+        L('<input id="oseatp" placeholder="ціна за користувача" value="') +
           esc(t.seatPrice ? t.seatPrice : '') + '">' +
         '<div class="hint" id="oseatSum" style="align-self:center"></div>' +
       '</div>' +
@@ -8979,9 +9027,24 @@ function paintOrg(){
   el('osave').onclick = ownSave;
 
   /* Итог считаем прямо под полями. Человек, который ставит цену места,
-     должен видеть, во что она превращается, не открывая калькулятор. */
+     должен видеть, во что она превращается, не открывая калькулятор.
+
+     На тарифе по головам считать нечего вручную вовсе: цена человека
+     берётся из прайса, умножается на число людей — и поля базы и
+     включённых мест гаснут, чтобы оставшаяся в них цифра от прошлого
+     тарифа не давала суммы, которой нет в счёте. */
   function seatSum(){
+    var cur = el('ocur').value;
     var all = Number(el('oseats').value) || 0;
+    var per = ownPerSeat();
+    if (per) {
+      var one = ownSeatPrice();
+      el('oseatSum').textContent = one
+        ? all + ' × ' + one + ' = ' + (Math.round(all * one * 100) / 100) + ' ' + cur +
+          L(' / місяць')
+        : L('ціни за користувача немає в прайсі');
+      return;
+    }
     var free = Number(el('ofree').value) || 0;
     var price = Number(String(el('oseatp').value).replace(',', '.')) || 0;
     var extra = Math.max(0, all - free);
@@ -8990,20 +9053,37 @@ function paintOrg(){
         (Math.round(extra * price * 100) / 100) + ' ' + el('ocur').value
       : L('усі місця входять у тариф');
   }
+
+  /* Поля, которых на этом тарифе нет: гасим, а не прячем. Исчезнувшее
+     поле человек ищет, погасшее — понимает. */
+  function seatMode(){
+    var per = ownPerSeat();
+    el('oprice').disabled = per;
+    el('ofree').disabled = per;
+    // Погасшее поле с цифрой читается как цифра, которая считается.
+    // Она не считается — значит, её там быть не должно.
+    if (per) { el('oprice').value = ''; el('ofree').value = '' }
+    el('oprice').placeholder = per ? L('не застосовується') : L('ціна на місяць');
+    el('ofree').placeholder = per ? L('не застосовується') : L('місць у тарифі');
+    el('oseatp').placeholder = per ? L('своя ціна за користувача') : L('ціна місця понад тариф');
+    seatSum();
+  }
+
   ['oseats', 'ofree', 'oseatp', 'ocur'].forEach(function(id){
     if (el(id)) el(id).oninput = seatSum;
     if (el(id)) el(id).onchange = seatSum;
   });
-  seatSum();
-  el('oplan').onchange = ownPrice;
-  el('ocur').onchange = ownPrice;
+  seatMode();
+  el('oplan').onchange = function(){ ownPrice(); seatMode() };
+  el('ocur').onchange = function(){ ownPrice(); seatMode() };
   el('okind').onchange = function(){
     // Партнёру дата оплаты не нужна: он не платит.
     el('opaid').disabled = el('okind').value === 'partner';
   };
-  // Счёт по умолчанию — на цену тарифа в валюте тарифа. Девять раз из
+  // Счёт по умолчанию — на месячную цену организации в её валюте:
+  // базу плюс места или цену людей, смотря какой тариф. Девять раз из
   // десяти выставляют именно её, а десятый правится одним полем.
-  if (t.priceMonth != null && !el('iamt').value) el('iamt').value = t.priceMonth;
+  if (!el('iamt').value && ownMonth()) el('iamt').value = ownMonth();
   if (t.currency) el('icur').value = t.currency;
 
   el('iadd').onclick = invIssue;
@@ -9205,12 +9285,45 @@ function ownPrice(){
   var prices = (OWNSET && OWNSET.plan_prices) || {};
   var byCur = prices[el('oplan').value] || {};
   var v = byCur[el('ocur').value];
-  if (v != null) el('oprice').value = v;
+  /* На тарифе по головам цена из прайса — цена одного человека, а не
+     кабинета: подставить её в «ціна на місяць» значило бы приписать
+     сверху ещё одного оператора. Там базы нет вовсе. */
+  if (ownPerSeat()) el('oprice').value = '';
+  else if (v != null) el('oprice').value = v;
   // Валюта счёта идёт за валютой тарифа: счёт выставляют в той же.
   if (el('icur')) { el('icur').value = el('ocur').value; invRate() }
-  if (el('iamt') && !el('iamt').value && el('oprice').value) {
-    el('iamt').value = el('oprice').value;
-  }
+  if (el('iamt')) el('iamt').value = ownMonth() || el('iamt').value;
+}
+
+/** Тариф считается за каждого пользователя. То же правило, что в ядре. */
+var PER_SEAT_PLANS = ['custom'];
+
+function ownPerSeat(){
+  return PER_SEAT_PLANS.indexOf(el('oplan').value) >= 0;
+}
+
+/* Цена за человека: своя, если владелец договорился отдельно, иначе из
+   прайса. Ровно то же правило, что на сервере. */
+function ownSeatPrice(){
+  var own = Number(String(el('oseatp').value).replace(',', '.')) || 0;
+  if (own > 0) return own;
+  var byCur = ((OWNSET && OWNSET.plan_prices) || {})[el('oplan').value] || {};
+  return Number(String(byCur[el('ocur').value] || '').replace(',', '.')) || 0;
+}
+
+/**
+ * Сколько организация платит в месяц — по тем же правилам, что на сервере.
+ *
+ * Нужно для счёта: сумма в нём должна совпадать с той, что видит
+ * клиент, иначе спор начинается с вопроса «а откуда цифра».
+ */
+function ownMonth(){
+  var seats = Number(el('oseats').value) || 0;
+  if (ownPerSeat()) return Math.round(seats * ownSeatPrice() * 100) / 100;
+  var base = Number(String(el('oprice').value).replace(',', '.')) || 0;
+  var free = Number(el('ofree').value) || 0;
+  var seat = Number(String(el('oseatp').value).replace(',', '.')) || 0;
+  return Math.round((base + Math.max(0, seats - free) * seat) * 100) / 100;
 }
 
 function ownSave(){
@@ -9222,9 +9335,12 @@ function ownSave(){
     kind: el('okind').value,
     status: el('ostatus').value,
     seatsLimit: Number(el('oseats').value) || 1,
-    seatsFree: Number(el('ofree').value) || 0,
+    /* На тарифе по головам включённых мест нет и базы нет: пишем нули,
+       а не оставляем цифры от прошлого тарифа. Оставленные, они не
+       видны на экране, но попадают в свод по деньгам. */
+    seatsFree: ownPerSeat() ? 0 : Number(el('ofree').value) || 0,
     seatPrice: el('oseatp').value,
-    priceMonth: el('oprice').value,
+    priceMonth: ownPerSeat() ? 0 : el('oprice').value,
     currency: el('ocur').value,
     paidUntil: el('opaid').value || null,
     note: el('onote').value

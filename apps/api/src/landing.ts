@@ -485,6 +485,7 @@ export const LANDING_HTML = `<!DOCTYPE html>
       </ul>
       <button class="grad big" id="priceGo" type="button" data-t="pr.go"></button>
       <p class="note" data-t="pr.note"></p>
+      <p class="note" data-t="pr.ent"></p>
     </div>
   </div>
 </section>
@@ -603,6 +604,7 @@ var T = {
     'pr.i3':'Віджет у Zoho CRM і замовлення просто з переписки',
     'pr.i4':'Штучний інтелект, шаблони, сценарії','pr.i5':'Підтримка українською',
     'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата карткою або рахунком. Скасувати можна будь-коли — доступ триває до кінця оплаченого періоду.',
+    'pr.ent':'Велика команда — корпоративний тариф: ціна за кожного користувача, рахунок і договір. Напишіть нам.',
     'tr.h':'Заявка на тестування','tr.lead':'Залиште пошту — надішлю доступ і допоможу підключити перший канал.',
     'tr.name':'Ім’я','tr.company':'Компанія','tr.mail':'Робоча пошта','tr.phone':'Телефон або Telegram',
     'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
@@ -661,6 +663,7 @@ var T = {
     'pr.i3':'Widget in Zoho CRM and orders straight from the chat',
     'pr.i4':'AI replies, templates, scenarios','pr.i5':'Support in English and Ukrainian',
     'pr.go':'Start 14 days free','pr.note':'Pay by card or by invoice. Cancel at any time — access lasts until the end of the period already paid for.',
+    'pr.ent':'Large team — enterprise plan: a price per user, invoice and contract. Write to us.',
     'tr.h':'Request a trial','tr.lead':'Leave your email — I will send access and help connect the first channel.',
     'tr.name':'Name','tr.company':'Company','tr.mail':'Work email','tr.phone':'Phone or Telegram',
     'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',
