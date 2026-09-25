@@ -3,9 +3,11 @@ import {
   paddleAmount,
   paddleApi,
   paddlePlan,
+  paddlePriceId,
   paddleSign,
   paddleSignatureOk,
   paddleUpdate,
+  yearPrice,
 } from '../src/paddle.js';
 
 const SECRET = 'pdl_ntfset_secret';
@@ -105,18 +107,39 @@ describe('событие подписки', () => {
   });
 });
 
-describe('тариф по цене', () => {
-  const prices = { start: 'pri_start', pro: 'pri_pro' };
+describe('тариф и период по цене', () => {
+  const prices = {
+    pro: { product: 'pro_1', month: 'pri_m', year: 'pri_y' },
+  };
 
-  it('находится обратным поиском', () => {
-    expect(paddlePlan('pri_pro', prices)).toBe('pro');
-    expect(paddlePlan('pri_start', prices)).toBe('start');
+  it('находятся обратным поиском', () => {
+    expect(paddlePlan('pri_m', prices)).toEqual({ plan: 'pro', period: 'month' });
+    expect(paddlePlan('pri_y', prices)).toEqual({ plan: 'pro', period: 'year' });
+  });
+
+  it('прямой поиск отдаёт цену нужного периода', () => {
+    expect(paddlePriceId(prices, 'pro', 'year')).toBe('pri_y');
+    expect(paddlePriceId(prices, 'start', 'month')).toBeNull();
   });
 
   // Товар, заведённый в Paddle мимо нас, не должен понизить клиента.
-  it('незнакомая цена не меняет тариф', () => {
+  // Идентификатор товара в обратный поиск попасть тоже не должен.
+  it('незнакомая цена и товар тариф не меняют', () => {
     expect(paddlePlan('pri_чужой', prices)).toBeNull();
+    expect(paddlePlan('pro_1', prices)).toBeNull();
     expect(paddlePlan(null, prices)).toBeNull();
+  });
+});
+
+describe('год дешевле месяца на два месяца', () => {
+  it('считается одним правилом, а не второй ценой в настройках', () => {
+    expect(yearPrice(60)).toBe(600);
+    expect(yearPrice(19.9)).toBe(199);
+  });
+
+  // Смысл правила: год обязан быть дешевле двенадцати месяцев.
+  it('год всегда дешевле двенадцати месячных', () => {
+    for (const m of [19, 49, 60, 99.5]) expect(yearPrice(m)).toBeLessThan(m * 12);
   });
 });
 

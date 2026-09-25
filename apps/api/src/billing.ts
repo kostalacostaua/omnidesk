@@ -17,8 +17,14 @@ import {
   paddleApi,
   paddleAmount,
   paddlePlan,
+  paddlePriceId,
   paddleSignatureOk,
   paddleUpdate,
+  isPaddlePeriod,
+  yearPrice,
+  PADDLE_PERIODS,
+  type PaddlePeriod,
+  type PaddlePrices,
   withSystem,
   withTenant,
   type PaddleEnv,
@@ -40,12 +46,19 @@ export interface BillingDeps {
 
 const auth401 = { error: 'unauthorized' };
 
-/** Тарифы, которые вообще можно купить. trial и custom не продаются. */
-const SELLABLE = ['start', 'pro'];
+/**
+ * Тарифы, которые вообще можно купить картой.
+ *
+ * Один. trial раздаётся сам, custom считается руками и оплачивается
+ * счётом, а start остался в списке тарифов как след прошлой линейки:
+ * продавать его больше нельзя, но у тех, кто на нём сидит, он обязан
+ * продолжать работать.
+ */
+const SELLABLE = ['pro'];
 
 interface PlatformRow {
   plan_prices: Record<string, Record<string, number>> | null;
-  paddle_prices: Record<string, string> | null;
+  paddle_prices: PaddlePrices | null;
 }
 
 async function platform(pool: Pool): Promise<PlatformRow> {
@@ -132,11 +145,19 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       portal: Boolean(me.paddle_customer_id && deps.apiKey),
       env: deps.env,
       clientToken: deps.clientToken,
-      plans: SELLABLE.map((plan) => ({
-        plan,
-        priceId: prices[plan] ?? null,
-        prices: planPrices[plan] ?? {},
-      })),
+      plans: SELLABLE.map((plan) => {
+        const month = planPrices[plan] ?? {};
+        // Годовую цену не храним отдельно: она выводится из месячной по
+        // одному правилу. Две цены в настройках однажды разошлись бы, и
+        // год оказался бы дороже двенадцати месяцев.
+        const year: Record<string, number> = {};
+        for (const [cur, v] of Object.entries(month)) year[cur] = yearPrice(v);
+        return {
+          plan,
+          month: { price: month, priceId: paddlePriceId(prices, plan, 'month') },
+          year: { price: year, priceId: paddlePriceId(prices, plan, 'year') },
+        };
+      }),
     };
   });
 
@@ -150,16 +171,17 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
    * к чужой же организации. Здесь его ставим мы, и подменить его
    * снаружи нечем.
    */
-  app.post<{ Body: { plan?: string } }>('/billing/checkout', async (req, reply) => {
+  app.post<{ Body: { plan?: string; period?: string } }>('/billing/checkout', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
     if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
 
     const plan = String(req.body?.plan ?? '');
     if (!SELLABLE.includes(plan)) return reply.code(400).send({ error: 'bad_plan' });
+    const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
 
     const p = await platform(pool);
-    const priceId = (p.paddle_prices ?? {})[plan];
+    const priceId = paddlePriceId(p.paddle_prices ?? {}, plan, period);
     if (!priceId) return reply.code(409).send({ error: 'no_price' });
 
     const customer = await withTenant(pool, a.tenantId, async (db) => {
@@ -233,58 +255,77 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
 
     const p = await platform(pool);
     const planPrices = p.plan_prices ?? {};
-    const have = { ...(p.paddle_prices ?? {}) };
-    const done: Array<{ plan: string; priceId: string }> = [];
-    const failed: Array<{ plan: string; why: string }> = [];
+    const have: PaddlePrices = { ...(p.paddle_prices ?? {}) };
+    const done: Array<{ plan: string; period: PaddlePeriod; priceId: string }> = [];
+    const failed: Array<{ plan: string; period?: PaddlePeriod; why: string }> = [];
 
     for (const plan of SELLABLE) {
-      if (have[plan]) continue; // уже заведён — второй раз не создаём
+      const ids = { ...(have[plan] ?? {}) };
+      // Обе цены уже на месте — тариф пропускаем целиком.
+      if (ids.month && ids.year) continue;
+
       const byCur = planPrices[plan] ?? {};
       // Валюту берём одну: Paddle сам показывает её в пересчёте тому,
       // кто платит из другой страны, а вторая цена на тот же тариф
       // означала бы два разных товара на одно и то же.
       const currency = byCur['USD'] !== undefined ? 'USD' : Object.keys(byCur)[0];
-      const amount = currency ? paddleAmount(byCur[currency]) : null;
-      if (!currency || !amount) {
+      const monthly = currency ? byCur[currency] : undefined;
+      if (!currency || monthly === undefined || !paddleAmount(monthly)) {
         failed.push({ plan, why: 'no_price' });
         continue;
       }
 
-      const product = await paddleFetch(deps, '/products', {
-        method: 'POST',
-        body: { name: `Rozmovio ${plan}`, tax_category: 'standard' },
-      });
-      if (!product.ok) {
-        failed.push({ plan, why: product.message });
-        continue;
-      }
-      const productId = (product.data as { id?: string } | null)?.id;
-      if (!productId) {
-        failed.push({ plan, why: 'no_product_id' });
-        continue;
-      }
-
-      const price = await paddleFetch(deps, '/prices', {
-        method: 'POST',
-        body: {
-          product_id: productId,
-          description: `Rozmovio ${plan}, місяць`,
-          unit_price: { amount, currency_code: currency },
-          billing_cycle: { interval: 'month', frequency: 1 },
-        },
-      });
-      if (!price.ok) {
-        failed.push({ plan, why: price.message });
-        continue;
-      }
-      const priceId = (price.data as { id?: string } | null)?.id;
-      if (!priceId) {
-        failed.push({ plan, why: 'no_price_id' });
-        continue;
+      // Товар заводим один на тариф и запоминаем: вторая цена должна
+      // лечь к нему же, а не создать рядом второй с тем же названием.
+      if (!ids.product) {
+        const product = await paddleFetch(deps, '/products', {
+          method: 'POST',
+          body: { name: `Rozmovio ${plan}`, tax_category: 'standard' },
+        });
+        if (!product.ok) {
+          failed.push({ plan, why: product.message });
+          continue;
+        }
+        const productId = (product.data as { id?: string } | null)?.id;
+        if (!productId) {
+          failed.push({ plan, why: 'no_product_id' });
+          continue;
+        }
+        ids.product = productId;
       }
 
-      have[plan] = priceId;
-      done.push({ plan, priceId });
+      for (const period of PADDLE_PERIODS) {
+        if (ids[period]) continue;
+        // Год — десять месяцев: два в подарок. Правило одно и здесь, и
+        // на витрине, поэтому разойтись им негде.
+        const amount = paddleAmount(period === 'year' ? yearPrice(monthly) : monthly);
+        if (!amount) {
+          failed.push({ plan, period, why: 'no_price' });
+          continue;
+        }
+        const price = await paddleFetch(deps, '/prices', {
+          method: 'POST',
+          body: {
+            product_id: ids.product,
+            description: `Rozmovio ${plan}, ${period === 'year' ? 'рік' : 'місяць'}`,
+            unit_price: { amount, currency_code: currency },
+            billing_cycle: { interval: period, frequency: 1 },
+          },
+        });
+        if (!price.ok) {
+          failed.push({ plan, period, why: price.message });
+          continue;
+        }
+        const priceId = (price.data as { id?: string } | null)?.id;
+        if (!priceId) {
+          failed.push({ plan, period, why: 'no_price_id' });
+          continue;
+        }
+        ids[period] = priceId;
+        done.push({ plan, period, priceId });
+      }
+
+      have[plan] = ids;
     }
 
     if (done.length) {
@@ -333,7 +374,8 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     if (!update) return { ok: true, skipped: 'not_subscription' };
 
     const p = await platform(pool);
-    const plan = paddlePlan(update.priceId, p.paddle_prices ?? {});
+    const found = paddlePlan(update.priceId, p.paddle_prices ?? {});
+    const plan = found?.plan ?? null;
 
     const applied = await withSystem(pool, 'подписка Paddle', async (db) => {
       const seen = await db.query(

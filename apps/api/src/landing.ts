@@ -270,6 +270,9 @@ export const LANDING_HTML = `<!DOCTYPE html>
   .price li::before{content:"✓";width:16px;height:16px;border-radius:50%;flex:none;
     background:var(--good-bg);color:var(--good);font-size:9.5px;font-weight:700;
     display:flex;align-items:center;justify-content:center;margin-top:2px}
+  /* Месячная цена рядом с годовой: мельче, но не сноска. Человек
+     должен увидеть обе и выбрать, а не искать вторую глазами. */
+  .price .alt{font-size:12.5px;color:var(--t3);margin:-8px 0 var(--s4)}
   .price button{width:100%}
 
   /* Заявка. Поля подписаны сверху: подпись внутри поля исчезает,
@@ -472,6 +475,7 @@ export const LANDING_HTML = `<!DOCTYPE html>
       <div class="h3" data-t="pr.plan"></div>
       <div class="amt">50 $</div>
       <div class="per" data-t="pr.per"></div>
+      <div class="alt" data-t="pr.alt"></div>
       <ul>
         <li data-t="pr.i1"></li>
         <li data-t="pr.i2"></li>
@@ -593,10 +597,12 @@ var T = {
     'zh.crm':'Zoho CRM · Контакт','zh.f1':'Ім’я','zh.f2':'Телефон','zh.f3':'Джерело','zh.f3v':'Instagram Direct',
     'zh.m1':'Доброго дня, чи є доставка?','zh.m2':'Так, відправляємо Новою поштою',
     'pr.h':'Ціна','pr.lead':'Один тариф, без прихованих доплат за канал чи за оператора.',
-    'pr.plan':'Компанія','pr.per':'за місяць, за всю компанію',
-    'pr.i1':'Усі доступні канали','pr.i2':'До 10 операторів у команді','pr.i3':'Віджет у Zoho CRM',
-    'pr.i4':'Шаблони, сценарії, вкладення','pr.i5':'Підтримка українською',
-    'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата виставляється рахунком. Відмовитися можна будь-коли.',
+    'pr.plan':'Компанія','pr.per':'за місяць при оплаті за рік',
+    'pr.alt':'або 60 $ на місяць при щомісячній оплаті — за рік виходить на два місяці дешевше',
+    'pr.i1':'Усі доступні канали','pr.i2':'10 операторів у команді, далі 5 $ за місце',
+    'pr.i3':'Віджет у Zoho CRM і замовлення просто з переписки',
+    'pr.i4':'Штучний інтелект, шаблони, сценарії','pr.i5':'Підтримка українською',
+    'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата карткою або рахунком. Скасувати можна будь-коли — доступ триває до кінця оплаченого періоду.',
     'tr.h':'Заявка на тестування','tr.lead':'Залиште пошту — надішлю доступ і допоможу підключити перший канал.',
     'tr.name':'Ім’я','tr.company':'Компанія','tr.mail':'Робоча пошта','tr.phone':'Телефон або Telegram',
     'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
@@ -649,10 +655,12 @@ var T = {
     'zh.crm':'Zoho CRM · Contact','zh.f1':'Name','zh.f2':'Phone','zh.f3':'Source','zh.f3v':'Instagram Direct',
     'zh.m1':'Hello, do you deliver?','zh.m2':'Yes, we ship the same day',
     'pr.h':'Pricing','pr.lead':'One plan, no hidden charges per channel or per seat.',
-    'pr.plan':'Company','pr.per':'per month, for the whole company',
-    'pr.i1':'All available channels','pr.i2':'Up to 10 agents','pr.i3':'Widget in Zoho CRM',
-    'pr.i4':'Templates, scenarios, attachments','pr.i5':'Support in English and Ukrainian',
-    'pr.go':'Start 14 days free','pr.note':'Billed by invoice. Cancel at any time.',
+    'pr.plan':'Company','pr.per':'per month, billed yearly',
+    'pr.alt':'or 60 $ per month billed monthly — a year costs two months less',
+    'pr.i1':'All available channels','pr.i2':'10 agents included, 5 $ per extra seat',
+    'pr.i3':'Widget in Zoho CRM and orders straight from the chat',
+    'pr.i4':'AI replies, templates, scenarios','pr.i5':'Support in English and Ukrainian',
+    'pr.go':'Start 14 days free','pr.note':'Pay by card or by invoice. Cancel at any time — access lasts until the end of the period already paid for.',
     'tr.h':'Request a trial','tr.lead':'Leave your email — I will send access and help connect the first channel.',
     'tr.name':'Name','tr.company':'Company','tr.mail':'Work email','tr.phone':'Phone or Telegram',
     'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',

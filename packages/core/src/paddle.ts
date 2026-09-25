@@ -155,17 +155,65 @@ export function paddleUpdate(payload: unknown): PaddleUpdate | null {
 }
 
 /**
- * Тариф по идентификатору цены.
+ * Период оплаты.
  *
- * Обратный поиск по карте «тариф → цена», которую мы сами и записали,
- * когда заводили товары в Paddle. Цена, которой нет в карте, — это
- * товар, заведённый мимо нас; тариф в таком случае не трогаем, чтобы
- * чужая покупка не понизила клиента до trial.
+ * Год дешевле месяца ровно на два месяца: платишь за десять, работаешь
+ * двенадцать. Правило записано одним числом, а не двумя ценами в
+ * настройках, — иначе они однажды разойдутся, и годовая окажется
+ * дороже двенадцати месячных.
  */
-export function paddlePlan(priceId: string | null, prices: Record<string, string>): string | null {
+export type PaddlePeriod = 'month' | 'year';
+export const PADDLE_PERIODS: PaddlePeriod[] = ['month', 'year'];
+export const PLAN_YEAR_MONTHS = 10;
+
+export function isPaddlePeriod(v: unknown): v is PaddlePeriod {
+  return v === 'month' || v === 'year';
+}
+
+/** Цена за год из месячной: десять месяцев вместо двенадцати. */
+export function yearPrice(monthly: number): number {
+  return Math.round(monthly * PLAN_YEAR_MONTHS * 100) / 100;
+}
+
+/**
+ * Что мы завели в Paddle под один тариф: товар и две цены.
+ *
+ * Товар запоминаем, чтобы вторая цена легла к тому же товару, а не
+ * создала рядом второй с тем же названием.
+ */
+export interface PaddlePlanIds {
+  product?: string;
+  month?: string;
+  year?: string;
+}
+
+export type PaddlePrices = Record<string, PaddlePlanIds>;
+
+export function paddlePriceId(
+  prices: PaddlePrices,
+  plan: string,
+  period: PaddlePeriod,
+): string | null {
+  return prices[plan]?.[period] ?? null;
+}
+
+/**
+ * Тариф и период по идентификатору цены.
+ *
+ * Обратный поиск по карте, которую мы сами и записали, когда заводили
+ * товары. Цена, которой в карте нет, — это товар, заведённый мимо нас;
+ * тариф в таком случае не трогаем, чтобы чужая покупка не понизила
+ * клиента до trial.
+ */
+export function paddlePlan(
+  priceId: string | null,
+  prices: PaddlePrices,
+): { plan: string; period: PaddlePeriod } | null {
   if (!priceId) return null;
-  for (const [plan, id] of Object.entries(prices)) {
-    if (id === priceId) return plan;
+  for (const [plan, ids] of Object.entries(prices ?? {})) {
+    for (const period of PADDLE_PERIODS) {
+      if (ids?.[period] === priceId) return { plan, period };
+    }
   }
   return null;
 }

@@ -4234,17 +4234,32 @@ function wirePass(){
 
 var PADDLE_ON = false;
 var BILL = null;
+/* Год стоит первым и выбран по умолчанию: он дешевле, и человек должен
+   увидеть сначала лучшую цену, а не худшую. */
+var BILL_PERIOD = 'year';
 
 function billLoad(){
   api('/billing').then(function(d){ BILL = d; billPaint() })
     .catch(function(e){ var b = el('bill'); if (b) b.innerHTML = '<div class="err">' + esc(sErr(e)) + '</div>' });
 }
 
-function billMoney(prices){
+function billCur(prices){
   var cur = Object.keys(prices || {});
-  if (!cur.length) return '';
-  var one = prices.USD !== undefined ? 'USD' : cur[0];
-  return prices[one] + ' ' + one + L(' / місяць');
+  if (!cur.length) return null;
+  return prices.USD !== undefined ? 'USD' : cur[0];
+}
+
+function billMoney(prices){
+  var one = billCur(prices);
+  return one ? prices[one] + ' ' + one + L(' / місяць') : '';
+}
+
+/* Годовую цену показываем в месяцах. Сравнивать 600 с 60 человек не
+   станет, а 50 с 60 сравнит сразу — и увидит, зачем платить за год. */
+function billMonthOfYear(prices){
+  var one = billCur(prices);
+  if (!one) return '';
+  return Math.round((prices[one] / 12) * 100) / 100 + ' ' + one + L(' / місяць');
 }
 
 function billPaint(){
@@ -4268,21 +4283,38 @@ function billPaint(){
     (BILL.portal ? L('<button class="ghost mini" id="bPortal">Керувати підпискою</button>') : '<span></span>') +
     '</div>';
 
+  // Переключатель периода. Годовая цена показывается в месяцах, а не
+  // одной суммой за год: сравнивать 600 с 60 человек не станет, а 50 с
+  // 60 сравнит сразу.
+  var seg = '<div class="seg" style="margin:10px 0">' +
+    '<button data-per="year"' + (BILL_PERIOD === 'year' ? ' class="on"' : '') + '>' +
+      L('За рік') + '</button>' +
+    '<button data-per="month"' + (BILL_PERIOD === 'month' ? ' class="on"' : '') + '>' +
+      L('Щомісяця') + '</button>' +
+    '</div>';
+
   var cards = (BILL.plans || []).map(function(p){
-    var price = billMoney(p.prices);
+    var side = BILL_PERIOD === 'year' ? p.year : p.month;
+    side = side || {};
+    var per = BILL_PERIOD === 'year'
+      ? billMonthOfYear(side.price)
+      : billMoney(p.month && p.month.price);
     var now = p.plan === BILL.plan;
     return '<div class="prow"><div class="pk">' + esc(p.plan) + '</div>' +
-      '<div class="pv">' + (price ? esc(price) : L('ціну ще не задано')) +
-      (p.priceId ? '' : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
+      '<div class="pv">' + (per ? esc(per) : L('ціну ще не задано')) +
+      (BILL_PERIOD === 'year'
+        ? L('<div class="hint" style="margin-top:2px">Списання раз на рік. Два місяці у подарунок.</div>')
+        : '') +
+      (side.priceId ? '' : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
       '</div>' +
-      (p.priceId && !now
+      (side.priceId && !now
         ? '<button class="mini" data-pay="' + esc(p.plan) + '">' +
           (BILL.subscribed ? L('Перейти') : L('Оплатити')) + '</button>'
         : '<span></span>') +
       '</div>';
   }).join('');
 
-  box.innerHTML = head + cards +
+  box.innerHTML = head + seg + cards +
     L('<div class="hint" style="margin-top:8px">Оплату проводить Paddle: він приймає картку, ') +
     L('нараховує податок вашої країни і надсилає чек. Скасувати можна будь-коли — ') +
     L('доступ триває до кінця оплаченого періоду.</div>') +
@@ -4297,6 +4329,10 @@ function billPaint(){
       if (d && d.url) window.open(d.url, '_blank', 'noopener');
     }).catch(function(e){ busy(b, false); el('bErr').textContent = sErr(e) });
   };
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-per]'), function(btn){
+    btn.onclick = function(){ BILL_PERIOD = btn.dataset.per; billPaint() };
+  });
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-pay]'), function(btn){
     btn.onclick = function(){ billPay(btn.dataset.pay, btn) };
@@ -4342,7 +4378,7 @@ function billPay(plan, btn){
   var err = el('bErr');
   if (err) err.textContent = '';
   busy(btn, true);
-  api('/billing/checkout', { method:'POST', body:{ plan: plan } })
+  api('/billing/checkout', { method:'POST', body:{ plan: plan, period: BILL_PERIOD } })
     .then(function(d){
       return paddleReady(d).then(function(){
         busy(btn, false);
