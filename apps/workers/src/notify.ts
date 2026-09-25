@@ -4,6 +4,8 @@ import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import {
   QUEUE_NOTIFY,
+  billingAudience,
+  billingLetter,
   createHttpMailer,
   decryptJson,
   defaultJobOptions,
@@ -19,6 +21,7 @@ import {
   withSystem,
   withTenant,
   type NotifyEvent,
+  type BillingLetter,
   type NotifyJob,
   type NotifyPayload,
 } from '@omnidesk/core';
@@ -610,6 +613,107 @@ export function createNotifier(deps: NotifyDeps) {
     }
   }
 
+
+  /**
+   * Письма про срок: скоро кончится и кончился.
+   *
+   * Обход раз в несколько часов, а не по событию: срок кончается сам,
+   * без чьего-либо действия, и узнать об этом можно только посмотрев на
+   * календарь.
+   *
+   * Пишем дважды: за три дня и в последний день. Каждый день подряд —
+   * это давление, а не забота, и на четвёртом письме человек заносит
+   * отправителя в спам вместе с теми письмами, которые ему нужны.
+   * Третье письмо уходит, когда доступ уже закрыт: оно объясняет, что
+   * данные целы, — без него человек читает молчание как «нас удалили».
+   */
+  async function billingTick(): Promise<void> {
+    const rows = await withSystem(pool, 'сроки оплаты', async (db) => {
+      const { rows: list } = await db.query<{
+        id: string;
+        until: string;
+        days: number;
+      }>(
+        `SELECT id, to_char(paid_until, 'YYYY-MM-DD') AS until,
+                (paid_until - current_date) AS days
+           FROM tenants
+          WHERE paid_until IS NOT NULL
+            AND kind <> 'partner'
+            AND status = 'active'
+            AND paid_until BETWEEN current_date - 1 AND current_date + 3`,
+      );
+      return list;
+    });
+
+    for (const t of rows) {
+      const days = Number(t.days);
+      // Три дня, последний день и первый день после — три письма, и
+      // между ними пауза. Остальные дни молчим.
+      const kind: BillingLetter | null =
+        days === 3 ? 'soon' : days === 0 ? 'soon' : days === -1 ? 'over' : null;
+      if (!kind) continue;
+
+      const mark = `billing.${kind}.${days}:${t.until}`;
+      const fresh = await withTenant(pool, t.id, async (db) => {
+        const { rowCount } = await db.query(
+          `INSERT INTO notify_sent (tenant_id, dedup_key) VALUES ($1, $2)
+           ON CONFLICT (tenant_id, dedup_key) DO NOTHING`,
+          [t.id, mark],
+        );
+        return (rowCount ?? 0) > 0;
+      });
+      if (!fresh) continue;
+
+      await sendBilling(t.id, kind, t.until, days);
+    }
+  }
+
+  /**
+   * Само письмо — каждому на его языке.
+   *
+   * Отказ почты не должен ронять обход: у одной организации может быть
+   * выключен адрес, а письма остальным уйти обязаны.
+   */
+  async function sendBilling(
+    tenantId: string,
+    kind: BillingLetter,
+    day: string,
+    days: number,
+  ): Promise<void> {
+    const who = await billingAudience(pool, tenantId);
+    if (!who || !who.people.length) return;
+
+    for (const person of who.people) {
+      const letter = billingLetter(kind, person.lang, {
+        company: who.company,
+        day: dayText(day),
+        days: Math.max(0, days),
+        link: `${deps.appUrl.replace(/[/]+$/, '')}/app`,
+      });
+      try {
+        await mailer.send({
+          to: person.email,
+          subject: letter.subject,
+          text: letter.text,
+          html: letter.html,
+        });
+        log('info', 'Письмо о сроке отправлено', { tenantId, kind, to: person.email });
+      } catch (err) {
+        log('warn', 'Письмо о сроке не ушло', {
+          tenantId,
+          to: person.email,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  /** Дата в письме — как её пишут люди, а не как её хранит база. */
+  function dayText(day: string): string {
+    const [y, m, d] = day.split('-');
+    return d && m && y ? `${d}.${m}.${y}` : day;
+  }
+
   /** Отметки старше недели больше ничего не защищают — чистим. */
   async function cleanupTick(): Promise<void> {
     await withSystem(pool, 'чистка отметок оповещений', async (db) => {
@@ -617,7 +721,7 @@ export function createNotifier(deps: NotifyDeps) {
     });
   }
 
-  return { queue, worker, notify, notifyTest, waitingTick, cleanupTick, pushReady };
+  return { queue, worker, notify, notifyTest, waitingTick, billingTick, sendBilling, cleanupTick, pushReady };
 }
 
 export type Notifier = ReturnType<typeof createNotifier>;

@@ -45,6 +45,8 @@ import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
 import { registerBilling } from './billing.js';
 import { registerPay } from './pay.js';
+import { mailRenewed } from './mail-notice.js';
+
 import { registerLanding, landingPage } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
@@ -731,6 +733,7 @@ registerAdmin(app, {
   // Отметка imp остаётся в токене — по ней видно, чей это вход.
   impersonate: (tenantId, userId, actorEmail) =>
     signJwt({ sub: userId, tid: tenantId, imp: actorEmail }, 3600),
+  mailRenewed: renewedLetter,
 });
 
 registerCrm(app, {
@@ -784,6 +787,23 @@ const PAY_URL =
       ? `https://${SITE_HOSTS[0]}/pay`
       : '';
 
+/**
+ * Письмо «оплату отримано».
+ *
+ * Одно на оба пути оплаты — карту и счёт: два похожих письма о деньгах
+ * выглядят как ошибка биллинга.
+ */
+function renewedLetter(tenantId: string, paidUntil: string): Promise<void> {
+  return mailRenewed({
+    pool,
+    mailer: createMailer(process.env, (line) => app.log.info(line)),
+    appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+    tenantId,
+    paidUntil,
+    log: (o, m) => app.log.warn(o as Record<string, unknown>, m),
+  });
+}
+
 registerBilling(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
@@ -798,6 +818,7 @@ registerBilling(app, {
   // Оповещение уходит в нашу же компанию: тем же путём, что и заявка с
   // сайта, — в группу поддержки и пушем. Место, куда мы смотрим, одно.
   announcePaid: (info) => notify.announceInvoicePaid(info),
+  mailRenewed: renewedLetter,
 });
 
 registerPay(app, {

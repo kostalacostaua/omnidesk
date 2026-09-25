@@ -55,6 +55,8 @@ export interface AdminDeps {
   impersonate: (tenantId: string, userId: string, actorEmail: string) => string;
   /** Курс берём из НБУ; в проверках его подменяют. */
   fetchImpl?: typeof fetch;
+  /** Письмо «оплату отримано» после того, как счёт отмечен оплаченным. */
+  mailRenewed: (tenantId: string, paidUntil: string) => Promise<void>;
 }
 
 interface TenantRow {
@@ -890,6 +892,12 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
             await db.query(`UPDATE tenants SET plan = $2 WHERE id = $1`, [req.params.id, inv.plan]);
           }
         });
+      }
+
+      // Письмо «оплату отримано» уходит сразу: между «заплатил» и
+      // «увидел подтверждение» человек волнуется и пишет в поддержку.
+      if (inv.period_end) {
+        await deps.mailRenewed(req.params.id, inv.period_end).catch(() => {});
       }
 
       await note(req.params.id, who?.email ?? '', 'invoice.paid', { number: inv.number });

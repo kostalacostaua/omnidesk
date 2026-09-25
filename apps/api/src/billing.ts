@@ -62,6 +62,8 @@ export interface BillingDeps {
    * деньги, оповещения — про телеграм, и связывать их напрямую значит
    * тащить одно в тесты другого.
    */
+  /** Письмо «оплату отримано»: уходит сразу после продления срока. */
+  mailRenewed: (tenantId: string, paidUntil: string) => Promise<void>;
   announcePaid: (info: {
     tenantId: string;
     who: string;
@@ -721,6 +723,12 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       );
       return done.rows.length ? 'applied' : 'no_tenant';
     });
+
+    // Письмо о продлении — только когда срок действительно сдвинулся и
+    // подписка жива. На отмену подписки такое письмо было бы насмешкой.
+    if (applied === 'applied' && st.live && st.paidUntil) {
+      await deps.mailRenewed(tenantId, st.paidUntil).catch(() => {});
+    }
 
     return { applied, plan };
   }

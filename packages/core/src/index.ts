@@ -37,3 +37,4 @@ export * from './mail.js';
 export * from './paddle.js';
 export * from './billing-report.js';
 export * from './words.js';
+export * from './mail-billing.js';

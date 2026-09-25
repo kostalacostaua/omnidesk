@@ -16,6 +16,7 @@ import {
   MetaApiError,
   decryptJson,
   graphGet,
+  mailLang,
   parseTemplates,
   folderNames,
   groupByFolder,
@@ -111,7 +112,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     const data = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows: users } = await db.query(
         // Сам хэш пароля наружу не идёт — только признак «задан».
-        `SELECT id, email, full_name, role, last_seen_at, created_at, password_set_at
+        `SELECT id, email, full_name, role, last_seen_at, created_at, password_set_at, lang
            FROM users WHERE id = $1 LIMIT 1`,
         [auth.userId],
       );
@@ -163,9 +164,37 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
    * входа, и смена почты — это смена ключа от аккаунта, такое делается
    * через приглашение, а не текстовым полем в профиле.
    */
-  app.patch<{ Body: { fullName?: string } }>('/me', async (req, reply) => {
+  app.patch<{ Body: { fullName?: string; lang?: string } }>('/me', async (req, reply) => {
     const auth = requireAuth(req);
     if (!auth) return reply.code(401).send(auth401);
+
+    /*
+     * Язык. Раньше выбор жил только в браузере, и письмо человеку
+     * написать было не на чем: мы не знали, на каком языке с ним
+     * говорить, когда его нет на экране. Письмо о деньгах на чужом
+     * языке читается как спам.
+     *
+     * Приходит отдельно от имени: язык переключают одним движением, а
+     * имя правят в другом месте и в другой момент.
+     */
+    if (req.body?.lang !== undefined) {
+      const lang = mailLang(req.body.lang);
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(`UPDATE users SET lang = $2 WHERE id = $1`, [auth.userId, lang]);
+      });
+      // Язык организации — запасной для писем «в компанию», где
+      // получателей несколько. Ставит его владелец, просто выбирая
+      // язык себе: отдельная настройка ради этого была бы лишним
+      // экраном.
+      await withSystem(pool, 'язык организации', async (db) => {
+        await db.query(
+          `UPDATE tenants SET lang = $2 WHERE id = $1
+            AND EXISTS (SELECT 1 FROM users u WHERE u.id = $3 AND u.role = 'owner')`,
+          [auth.tenantId, lang, auth.userId],
+        );
+      });
+      if (req.body.fullName === undefined) return { ok: true, lang };
+    }
 
     const fullName = (req.body?.fullName ?? '').trim().slice(0, 120);
     if (!fullName) return reply.code(400).send({ error: 'name_required' });

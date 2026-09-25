@@ -3566,6 +3566,32 @@ void (async function waitingLoop(): Promise<void> {
   }
 })();
 
+/**
+ * Обход сроков оплаты.
+ *
+ * Раз в шесть часов, а не раз в сутки: сутки означают, что письмо
+ * уйдёт в тот час, когда однажды перезапустился воркер, — в три ночи,
+ * например. Шесть часов дают четыре попытки за день, а отметка об
+ * отправке всё равно не даст написать дважды.
+ */
+const BILLING_TICK_MS = 6 * 3600_000;
+
+void (async function billingLoop(): Promise<void> {
+  // Минута форы после запуска: на старте и без того очередь задач,
+  // миграции и прогрев соединений.
+  await new Promise((resolve) => setTimeout(resolve, 60_000));
+  for (;;) {
+    try {
+      await notifier.billingTick();
+    } catch (err) {
+      log('error', 'Обход сроков оплаты упал', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, BILLING_TICK_MS));
+  }
+})();
+
 void (async function notifyCleanupLoop(): Promise<void> {
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, NOTIFY_CLEANUP_MS));
