@@ -46,6 +46,9 @@ export interface BillingDeps {
 
 const auth401 = { error: 'unauthorized' };
 
+/** Тот же вид, что и у идентификаторов в базе: иначе withTenant упадёт. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Тарифы, которые вообще можно купить картой.
  *
@@ -377,7 +380,19 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const found = paddlePlan(update.priceId, p.paddle_prices ?? {});
     const plan = found?.plan ?? null;
 
-    const applied = await withSystem(pool, 'подписка Paddle', async (db) => {
+    // Идентификатор приходит из события, а не из нашей сессии. Кривое
+    // значение уронило бы обработчик, Paddle получил бы ошибку и ломился
+    // бы с этим событием сутки. Поэтому отвечаем «принято, не наше».
+    if (!UUID_RE.test(update.tenantId)) return { ok: true, skipped: 'bad_tenant' };
+
+    /*
+     * Отметка о событии и применение — в одной транзакции и от имени
+     * того клиента, чей это платёж. Системная роль тут не подходит: у
+     * таблицы событий включена изоляция по арендатору в режиме FORCE,
+     * и запись без контекста она не примет — что правильно, потому что
+     * событие оплаты называет клиента.
+     */
+    const applied = await withTenant(pool, update.tenantId, async (db) => {
       const seen = await db.query(
         `INSERT INTO paddle_events (id, event_type, tenant_id) VALUES ($1, $2, $3)
          ON CONFLICT (id) DO NOTHING RETURNING id`,

@@ -26,6 +26,13 @@ ALTER TABLE platform_settings
 CREATE TABLE IF NOT EXISTS paddle_events (
   id          text PRIMARY KEY,
   event_type  text NOT NULL,
-  tenant_id   uuid,
+  tenant_id   uuid NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Защита по арендатору обязательна всюду, где есть tenant_id, и эта
+-- таблица не исключение: событие оплаты называет клиента, и читать его
+-- из-под другого клиента нельзя. Пишет сюда вебхук из-под системной
+-- роли — она проверку проходит, потому что знает, чей это платёж, из
+-- самого события.
+SELECT apply_tenant_rls('paddle_events');
