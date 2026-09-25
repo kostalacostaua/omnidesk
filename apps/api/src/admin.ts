@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { makeRateFor } from './rate.js';
 import {
   INVOICE_CURRENCIES,
   accountState,
@@ -7,7 +8,7 @@ import {
   isInvoiceCurrency,
   isoDay,
   monthRange,
-  nbuRate,
+  moneyWords,
   payState,
   toUah,
   billingByPlan,
@@ -67,6 +68,15 @@ interface TenantRow {
   seats_limit: number;
   seats_free: number;
   seat_price: string | null;
+  legal_name: string;
+  tax_id: string;
+  vat_id: string;
+  legal_address: string;
+  bank_name: string;
+  iban: string;
+  bank_code: string;
+  vat_payer: boolean;
+  signer: string;
   paid_until: string | null;
   price_month: string | null;
   currency: string;
@@ -324,7 +334,9 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     const t = await withSystem(pool, 'организация', async (db) => {
       const { rows } = await db.query<TenantRow>(
         `SELECT id, name, slug, plan, kind, status, source, seats_limit,
-                seats_free, seat_price, paid_until, price_month, currency, note, created_at
+                seats_free, seat_price, paid_until, price_month, currency, note, created_at,
+                legal_name, tax_id, vat_id, legal_address, bank_name, iban, bank_code,
+                vat_payer, signer
            FROM tenants WHERE id = $1 LIMIT 1`,
         [req.params.id],
       );
@@ -352,7 +364,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
           WHERE sent_at >= date_trunc('month', now()) - interval '5 months'
           GROUP BY 1 ORDER BY 1`,
       );
-      const { rows: invoices } = await db.query(
+      const { rows: rawInvoices } = await db.query(
         `SELECT id, number, issued_on, due_on, amount, currency, rate, rate_day, rate_source,
                 amount_uah, period_start, period_end, subject, status, paid_at, created_at
            FROM platform_invoices ORDER BY issued_on DESC, created_at DESC LIMIT 50`,
@@ -365,6 +377,13 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         `SELECT actor_email, action, detail, created_at
            FROM admin_audit ORDER BY created_at DESC LIMIT 20`,
       );
+      // Сумма прописью — из ядра: в браузере словаря числительных нет
+      // и быть не должно.
+      const invoices = rawInvoices.map((r) => {
+        const row = r as Record<string, unknown>;
+        const uah = String(row['currency'] ?? 'UAH') !== 'UAH';
+        return { ...row, words: moneyWords(String(uah ? row['amount_uah'] : row['amount']), 'UAH') };
+      });
       return { users, channels, months, invoices, payments, audit };
     });
 
@@ -385,6 +404,18 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         currency: t.currency,
         note: t.note,
         createdAt: t.created_at,
+        // Реквизиты для счетов: владелец правит их вместе с клиентом,
+        // потому что чаще всего клиент присылает их письмом, а не
+        // вписывает сам.
+        legalName: t.legal_name,
+        taxId: t.tax_id,
+        vatId: t.vat_id,
+        legalAddress: t.legal_address,
+        bankName: t.bank_name,
+        iban: t.iban,
+        bankCode: t.bank_code,
+        vatPayer: t.vat_payer,
+        signer: t.signer,
         pay: accountState(t.kind, t.paid_until),
       },
       ...inside,
@@ -410,6 +441,15 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       seatsLimit?: number;
       seatsFree?: number;
       seatPrice?: number | string;
+      legalName?: string;
+      taxId?: string;
+      vatId?: string;
+      legalAddress?: string;
+      bankName?: string;
+      iban?: string;
+      bankCode?: string;
+      vatPayer?: boolean;
+      signer?: string;
       paidUntil?: string | null;
       priceMonth?: number | string;
       currency?: string;
@@ -448,6 +488,18 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       put('seats_free', n);
     }
     if (b.seatPrice !== undefined) put('seat_price', money(b.seatPrice));
+    // Реквизиты для счетов. Каждое поле отдельно: панель правит по
+    // одному, и присланное частично не должно обнулять остальное.
+    const text = (v: unknown, limit: number) => String(v ?? '').trim().slice(0, limit);
+    if (b.legalName !== undefined) put('legal_name', text(b.legalName, 300));
+    if (b.taxId !== undefined) put('tax_id', text(b.taxId, 32));
+    if (b.vatId !== undefined) put('vat_id', text(b.vatId, 32));
+    if (b.legalAddress !== undefined) put('legal_address', text(b.legalAddress, 300));
+    if (b.bankName !== undefined) put('bank_name', text(b.bankName, 160));
+    if (b.iban !== undefined) put('iban', text(b.iban, 64).replace(/\s+/g, '').toUpperCase());
+    if (b.bankCode !== undefined) put('bank_code', text(b.bankCode, 16));
+    if (b.vatPayer !== undefined) put('vat_payer', Boolean(b.vatPayer));
+    if (b.signer !== undefined) put('signer', text(b.signer, 160));
     if (b.paidUntil !== undefined) put('paid_until', day(b.paidUntil));
     if (b.priceMonth !== undefined) put('price_month', money(b.priceMonth));
     if (b.currency !== undefined) put('currency', String(b.currency).slice(0, 8).toUpperCase());
@@ -580,8 +632,9 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
   app.get('/admin/settings', async () => {
     const row = await withSystem(pool, 'реквизиты', async (db) => {
       const { rows } = await db.query(
-        `SELECT seller_name, seller_tax_id, seller_iban, seller_bank,
-                seller_address, seller_note, invoice_prefix, invoice_seq, plan_prices
+        `SELECT seller_name, seller_tax_id, seller_iban, seller_bank, seller_bank_code,
+                seller_address, seller_phone, seller_signer, seller_note,
+                invoice_prefix, invoice_seq, plan_prices
            FROM platform_settings WHERE id = 1`,
       );
       return rows[0] ?? null;
@@ -595,7 +648,10 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       sellerTaxId?: string;
       sellerIban?: string;
       sellerBank?: string;
+      sellerBankCode?: string;
       sellerAddress?: string;
+      sellerPhone?: string;
+      sellerSigner?: string;
       sellerNote?: string;
       invoicePrefix?: string;
       /** Прайс: тариф → валюта → цена. Пустая цена значит «нет в прайсе». */
@@ -608,7 +664,10 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       ['seller_tax_id', b.sellerTaxId],
       ['seller_iban', b.sellerIban],
       ['seller_bank', b.sellerBank],
+      ['seller_bank_code', b.sellerBankCode],
       ['seller_address', b.sellerAddress],
+      ['seller_phone', b.sellerPhone],
+      ['seller_signer', b.sellerSigner],
       ['seller_note', b.sellerNote],
       ['invoice_prefix', b.invoicePrefix],
     ];
@@ -647,48 +706,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     return { ok: true };
   });
 
-  /**
-   * Курс НБУ на дату.
-   *
-   * Сначала смотрим свой справочник: курс за прошедший день больше не
-   * меняется, и ходить за ним в чужой сервис на каждое открытие формы
-   * незачем. Отказ возвращается значением, а не ошибкой: НБУ может
-   * молчать, а счёт выставить надо — тогда курс вписывают руками.
-   */
-  async function rateFor(
-    code: string,
-    day: string,
-  ): Promise<{ rate: number; day: string; source: 'nbu' | 'cache' } | null> {
-    if (code === 'UAH') return { rate: 1, day, source: 'nbu' };
-
-    const cached = await withSystem(pool, 'курс из справочника', async (db) => {
-      const { rows } = await db.query<{ rate: string; day: string }>(
-        `SELECT rate, to_char(day, 'YYYY-MM-DD') AS day
-           FROM nbu_rates WHERE code = $1 AND day <= $2::date
-          ORDER BY day DESC LIMIT 1`,
-        [code, day],
-      );
-      return rows[0] ?? null;
-    });
-    // Курс из справочника годится, только если он за сам этот день:
-    // более ранний мог быть последним известным, а мог просто значить,
-    // что за свежие дни мы ещё не спрашивали.
-    if (cached && cached.day === day) {
-      return { rate: Number(cached.rate), day: cached.day, source: 'cache' };
-    }
-
-    const got = await nbuRate(code, day, deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {});
-    if (!got) return cached ? { rate: Number(cached.rate), day: cached.day, source: 'cache' } : null;
-
-    await withSystem(pool, 'запись курса', async (db) => {
-      await db.query(
-        `INSERT INTO nbu_rates (day, code, rate) VALUES ($1::date, $2, $3)
-         ON CONFLICT (day, code) DO UPDATE SET rate = EXCLUDED.rate, fetched_at = now()`,
-        [got.day, code, got.rate],
-      );
-    });
-    return { ...got, source: 'nbu' };
-  }
+  const rateFor = makeRateFor(pool, deps.fetchImpl);
 
   /** Курс для формы: видно до того, как счёт выставлен. */
   app.get<{ Querystring: { code?: string; day?: string } }>('/admin/rate', async (req, reply) => {

@@ -3920,6 +3920,42 @@ function tabProfile(){
 
       (admin ? whPanel(t) : '') +
 
+      /* Реквизиты для счетов. Только администратору и только рядом с
+         подпиской: их вписывают один раз, в тот день, когда впервые
+         понадобился счёт, — и больше не вспоминают. */
+      (admin
+        ? L('<div class="pg-sec"><h3>Реквізити для рахунків</h3><div class="card">') +
+          L('<div class="hint">Їх бачить ваша бухгалтерія у рахунку. Без коду та адреси ') +
+          L('рахунок не проведуть.</div>') +
+          '<div class="row2" style="margin-top:8px">' +
+            L('<input id="rqName" placeholder="повна назва, напр. ТОВ «Ромашка»" value="') +
+              esc(t.legal_name || t.name || '') + '">' +
+            L('<input id="rqTax" placeholder="ЄДРПОУ або РНОКПП" value="') +
+              esc(t.tax_id || '') + '">' +
+          '</div>' +
+          '<div class="row2" style="margin-top:8px">' +
+            L('<input id="rqVat" placeholder="ІПН (якщо платник ПДВ)" value="') +
+              esc(t.vat_id || '') + '">' +
+            L('<input id="rqAddr" placeholder="юридична адреса" value="') +
+              esc(t.legal_address || '') + '">' +
+          '</div>' +
+          '<div class="row2" style="margin-top:8px">' +
+            L('<input id="rqIban" placeholder="IBAN" value="') + esc(t.iban || '') + '">' +
+            L('<input id="rqBank" placeholder="банк" value="') + esc(t.bank_name || '') + '">' +
+            L('<input id="rqMfo" placeholder="МФО" style="max-width:120px" value="') +
+              esc(t.bank_code || '') + '">' +
+          '</div>' +
+          '<div class="row2" style="margin-top:8px">' +
+            L('<input id="rqSign" placeholder="хто підписує, напр. директор Іваненко І. І." value="') +
+              esc(t.signer || '') + '">' +
+            '<label class="ochk" style="align-self:center"><input type="checkbox" id="rqVatp"' +
+              (t.vat_payer ? ' checked' : '') + '> ' + L('платник ПДВ') + '</label>' +
+          '</div>' +
+          L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="rqSave">Зберегти</button></div>') +
+          '<span class="ok" id="rqOk"></span><div class="err" id="rqErr"></div>' +
+          '</div></div>'
+        : '') +
+
       /* Подписка. Только администратору: оператор не решает, чем платит
          компания, и кнопка оплаты у него была бы тупиком. */
       (admin
@@ -3937,6 +3973,34 @@ function tabProfile(){
     wirePass();
     wireWh();
     if (el('bill')) billLoad();
+
+    /* Реквизиты сохраняются целиком, одной кнопкой: это один документ,
+       а не девять настроек, и вписывают их за один подход. */
+    if (el('rqSave')) el('rqSave').onclick = function(){
+      var b = el('rqSave');
+      el('rqErr').textContent = '';
+      el('rqOk').textContent = '';
+      busy(b, true);
+      api('/tenant/requisites', { method:'PATCH', body:{
+        legalName: el('rqName').value,
+        taxId: el('rqTax').value,
+        vatId: el('rqVat').value,
+        legalAddress: el('rqAddr').value,
+        bankName: el('rqBank').value,
+        iban: el('rqIban').value,
+        bankCode: el('rqMfo').value,
+        vatPayer: el('rqVatp').checked,
+        signer: el('rqSign').value
+      }}).then(function(){
+        el('rqOk').textContent = L('збережено');
+        // Счета читают реквизиты при печати, поэтому список перечитываем:
+        // иначе только что исправленный код уедет в старом виде.
+        INV = null;
+        if (el('invs')) invLoad();
+      }).catch(function(e){
+        el('rqErr').textContent = ((e && e.payload) || {}).error || L('Не вдалося зберегти');
+      }).then(function(){ busy(b, false) });
+    };
 
     if (el('pfFree')) el('pfFree').onclick = function(){
       var b = el('pfFree');
@@ -4353,6 +4417,85 @@ function billPaysPaint(){
   });
 }
 
+/* ── Рахунок по безналу ──────────────────────────────────────────── */
+
+/*
+ * Счета организации: список, печать и «оплату здійснено».
+ *
+ * Держатся рядом с картой намеренно. Способа заплатить два, и выбор
+ * между ними — это выбор клиента, а не двух разных разделов в разных
+ * концах кабинета.
+ */
+var INV = null;
+
+function invLoad(){
+  api('/billing/invoices')
+    .then(function(d){ INV = d; invPaint() })
+    .catch(function(){ INV = { invoices: [] }; invPaint() });
+}
+
+function invState(v){
+  return v.status === 'paid' ? L('оплачено')
+    : v.claimed_at ? L('очікує підтвердження')
+    : L('не сплачено');
+}
+
+function invPaint(){
+  var box = el('invs');
+  if (!box) return;
+  var list = (INV && INV.invoices) || [];
+  if (!list.length){
+    box.innerHTML = L('<div class="dim" style="font-size:12.5px">Рахунків ще не було.</div>');
+    return;
+  }
+  box.innerHTML = list.map(function(v){
+    var cur = v.currency || 'UAH';
+    var sum = cur === 'UAH' ? money2(v.amount) + L(' грн')
+      : money2(v.amount) + ' ' + cur + ' (' + money2(v.amount_uah) + L(' грн)');
+    return '<div class="item"><div><div class="t">' + L('Рахунок ') + esc(v.number) + ' · ' +
+      esc(sum) + '</div><div class="s">' + esc(fmtDate(v.issued_on)) + ' · ' + esc(invState(v)) +
+      (v.due_on && v.status !== 'paid' ? L(' · сплатити до ') + esc(fmtDate(v.due_on)) : '') +
+      '</div></div><div style="flex:none;display:flex;gap:6px">' +
+      '<button class="ghost mini" data-inv="' + esc(v.id) + L('">Друк</button>') +
+      (v.status === 'paid' || v.claimed_at
+        ? ''
+        : '<button class="ghost mini" data-paid="' + esc(v.id) + L('">Оплату здійснено</button>')) +
+      '</div></div>';
+  }).join('');
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-inv]'), function(btn){
+    btn.onclick = function(){
+      var v = list.filter(function(x){ return x.id === btn.dataset.inv })[0];
+      if (!v) return;
+      invoicePrint(invoiceHtml(v, INV.seller, INV.buyer, INV.dueDays), function(){
+        el('bErr').textContent = L('Браузер заблокував вікно друку');
+      });
+    };
+  });
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-paid]'), function(btn){
+    btn.onclick = function(){
+      busy(btn, true);
+      api('/billing/invoices/' + btn.dataset.paid + '/paid', { method:'POST' })
+        .then(function(){
+          toast(L('Дякуємо. Перевіримо надходження і підтвердимо.'));
+          invLoad();
+        })
+        .catch(function(e){ busy(btn, false); el('bErr').textContent = billWhy(e) });
+    };
+  });
+}
+
+/* Счёт выставляется на тот же период, что выбран переключателем: иначе
+   человек смотрит на годовую цену, а получает счёт на месяц. */
+function invMake(btn){
+  el('bErr').textContent = '';
+  busy(btn, true);
+  api('/billing/invoice', { method:'POST', body:{ period: BILL_PERIOD } })
+    .then(function(){ busy(btn, false); invLoad() })
+    .catch(function(e){ busy(btn, false); el('bErr').textContent = billWhy(e) });
+}
+
 function billPaint(){
   var box = el('bill');
   if (!box || !BILL) return;
@@ -4425,7 +4568,14 @@ function billPaint(){
     L('нараховує податок вашої країни і надсилає чек. Скасувати можна будь-коли — ') +
     L('доступ триває до кінця оплаченого періоду.</div>') +
     '<div class="err" id="bErr"></div>' +
-    L('<div class="lbl" style="margin-top:14px">Оплати</div>') +
+    /* Счёт по безналу. Второй способ заплатить, а не запасной: для
+       организации счёт и акт часто единственный возможный путь. */
+    L('<div class="lbl" style="margin-top:14px">Рахунок на оплату</div>') +
+    L('<div class="hint">Для оплати з рахунку компанії. Реквізити беремо з профілю організації — ') +
+    L('без них рахунок не прийме бухгалтерія.</div>') +
+    L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="bInv">Виставити рахунок</button></div>') +
+    '<div id="invs" style="margin-top:8px"></div>' +
+    L('<div class="lbl" style="margin-top:14px">Оплати карткою</div>') +
     '<div id="pays"></div>' +
     L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="bSync">Оновити з Paddle</button></div>');
 
@@ -4441,6 +4591,10 @@ function billPaint(){
 
   billPaysPaint();
   if (PAYS === null) billPays();
+
+  el('bInv').onclick = function(){ invMake(el('bInv')) };
+  invPaint();
+  if (INV === null) invLoad();
 
   /* Кнопка на случай, когда вебхук не дошёл. Она не должна была бы
      понадобиться — но оплата это то место, где «не должно было» стоит
@@ -8770,7 +8924,16 @@ function paintOwner(){
         L('<input id="sBank" placeholder="банк" value="') + esc(st.seller_bank || '') + '">' +
       '</div>' +
       '<div class="row2" style="margin-top:8px">' +
+        L('<input id="sMfo" placeholder="МФО банку" style="max-width:150px" value="') +
+          esc(st.seller_bank_code || '') + '">' +
+        L('<input id="sPhone" placeholder="телефон" value="') + esc(st.seller_phone || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
         L('<input id="sAddr" placeholder="адреса" value="') + esc(st.seller_address || '') + '">' +
+        L('<input id="sSign" placeholder="хто підписує, напр. К. В. Сластін" value="') +
+          esc(st.seller_signer || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
         L('<input id="sPref" placeholder="префікс номера" style="max-width:150px" value="') +
           esc(st.invoice_prefix || '') + '">' +
       '</div>' +
@@ -8832,16 +8995,22 @@ function paintOwner(){
     api('/admin/settings', { method:'PATCH', body:{
       sellerName: el('sName').value, sellerTaxId: el('sTax').value,
       sellerIban: el('sIban').value, sellerBank: el('sBank').value,
+      sellerBankCode: el('sMfo').value, sellerPhone: el('sPhone').value,
+      sellerSigner: el('sSign').value,
       sellerAddress: el('sAddr').value, sellerNote: el('sNote').value,
       invoicePrefix: el('sPref').value
     }}).then(function(){
       el('sOk').textContent = L('збережено');
-      OWNSET = {
+      // Прайс не трогаем: он в этом же объекте, и собрать OWNSET заново
+      // из полей формы значило бы стереть его до следующей загрузки.
+      OWNSET = Object.assign({}, OWNSET, {
         seller_name: el('sName').value, seller_tax_id: el('sTax').value,
         seller_iban: el('sIban').value, seller_bank: el('sBank').value,
+        seller_bank_code: el('sMfo').value, seller_phone: el('sPhone').value,
+        seller_signer: el('sSign').value,
         seller_address: el('sAddr').value, seller_note: el('sNote').value,
         invoice_prefix: el('sPref').value
-      };
+      });
     }).catch(showErr).then(function(){ busy(el('sSave'), false) });
   };
   el('oq').onkeydown = function(e){ if (e.key === 'Enter') el('ofind').click() };
@@ -8935,6 +9104,27 @@ function paintOrg(){
       (t.kind === 'partner'
         ? L('<div class="hint">Партнерський кабінет: оплата не потрібна, у списку він завжди «партнер».</div>')
         : '') +
+      /* Реквизиты клиента. Их вписывает и сам клиент у себя, но чаще
+         они приезжают письмом в поддержку — и тогда вписывать их
+         должно быть где-то здесь, а не «попросите клиента зайти». */
+      L('<div class="lbl" style="margin-top:12px">Реквізити для рахунків</div>') +
+      '<div class="row2" style="margin-top:6px">' +
+        L('<input id="tqName" placeholder="повна назва" value="') + esc(t.legalName || '') + '">' +
+        L('<input id="tqTax" placeholder="ЄДРПОУ / РНОКПП" value="') + esc(t.taxId || '') + '">' +
+        L('<input id="tqVat" placeholder="ІПН" value="') + esc(t.vatId || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="tqAddr" placeholder="юридична адреса" value="') + esc(t.legalAddress || '') + '">' +
+        L('<input id="tqSign" placeholder="хто підписує" value="') + esc(t.signer || '') + '">' +
+      '</div>' +
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="tqIban" placeholder="IBAN" value="') + esc(t.iban || '') + '">' +
+        L('<input id="tqBank" placeholder="банк" value="') + esc(t.bankName || '') + '">' +
+        L('<input id="tqMfo" placeholder="МФО" style="max-width:120px" value="') +
+          esc(t.bankCode || '') + '">' +
+      '</div>' +
+      '<label class="ochk"><input type="checkbox" id="tqVatp"' + (t.vatPayer ? ' checked' : '') +
+        '> ' + L('платник ПДВ') + '</label>' +
       L('<textarea id="onote" rows="2" placeholder="Нотатка про клієнта" style="margin-top:8px">') +
         esc(t.note || '') + '</textarea>' +
       L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="osave">Зберегти</button>') +
@@ -9231,53 +9421,166 @@ function invIssue(){
  * историю браузера и в чужие руки. Печать в PDF — средствами самого
  * браузера, ничего своего изобретать не нужно.
  */
-function invPrint(v){
-  var s = OWNSET || {};
-  var t = OWN.open.tenant;
+/*
+ * Счёт на оплату в том виде, в каком его принимает чужая бухгалтерия.
+ *
+ * Сверху — образец заполнения платёжного поручения: его вырезают и
+ * несут в банк те, кто платит бумагой, а остальные списывают оттуда
+ * реквизиты. Дальше сам счёт: кто продавец, кто покупатель, что именно
+ * куплено, сумма цифрами и прописью, подписи сторон.
+ *
+ * Пропись обязательна: это защита от дописанной цифры и первое, что
+ * сверяет бухгалтер. Счёт без неё возвращают.
+ *
+ * Одна разметка на кабинет и на панель владельца: два счёта за одну
+ * услугу не должны выглядеть по-разному оттого, что их печатали из
+ * разных мест.
+ */
+function invoiceHtml(v, seller, buyer, due){
+  var s = seller || {}, b = buyer || {};
   var cur = v.currency || 'UAH';
-  var rows = [
-    [L('Постачальник'), esc(s.seller_name || '—')],
-    [L('Код'), esc(s.seller_tax_id || '—')],
-    [L('Рахунок'), esc(s.seller_iban || '—')],
-    [L('Банк'), esc(s.seller_bank || '—')],
-    [L('Адреса'), esc(s.seller_address || '—')],
-    [L('Платник'), esc(t.name)],
-    [L('Призначення'), esc(v.subject || L('Послуги Rozmovio'))],
-  ];
-  if (v.period_start || v.period_end) {
-    rows.push([L('Період'), esc(fmtDate(v.period_start)) + ' — ' + esc(fmtDate(v.period_end))]);
+  var uah = cur !== 'UAH';
+  // Платят в гривне: валюта тарифа — это то, в чём считали, а платёжка
+  // всегда в гривне, по курсу дня выставления.
+  var total = uah ? Number(v.amount_uah) : Number(v.amount);
+  var words = v.words || '';
+  // Отметка о НДС в назначении платежа и под суммой — про продавца:
+  // платит покупатель, но налог начисляет тот, кто выставил счёт. Мы
+  // не плательщики НДС, и в счёте это должно стоять прямо.
+  var vatSum = L('без ПДВ');
+  // А вот эта строка — про покупателя: её ищет его же бухгалтерия.
+  var vatBuyer = b.vat_payer ? L('Включений до реєстру платників ПДВ') : L('Не платник ПДВ');
+
+  function line(label, value){
+    return value ? '<div><span class="k">' + esc(label) + '</span> ' + esc(value) + '</div>' : '';
   }
 
-  var html =
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(v.number) + '</title>' +
-    '<style>body{font:14px/1.5 system-ui,sans-serif;color:#111;margin:40px;max-width:720px}' +
-    'h1{font-size:20px;margin:0 0 4px}.d{color:#666;font-size:13px;margin-bottom:22px}' +
-    'table{width:100%;border-collapse:collapse;margin-bottom:18px}' +
-    'td{padding:7px 0;vertical-align:top;border-bottom:1px solid #eee}' +
-    'td:first-child{color:#666;width:190px}' +
-    '.sum{font-size:22px;font-weight:700;margin:16px 0 4px}' +
-    '.note{color:#666;font-size:12.5px;margin-top:26px}' +
-    '@media print{body{margin:0}}</style></head><body>' +
-    '<h1>' + L('Рахунок № ') + esc(v.number) + '</h1>' +
-    '<div class="d">' + L('від ') + esc(fmtDate(v.issued_on)) + '</div>' +
-    '<table>' + rows.map(function(r){
-      return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
-    }).join('') + '</table>' +
-    '<div class="sum">' + esc(money2(v.amount)) + ' ' + esc(cur) + '</div>' +
-    (cur !== 'UAH'
-      ? '<div class="d">' + esc(money2(v.amount_uah)) + L(' грн за курсом НБУ ') +
-        esc(rate4(v.rate)) + L(' на ') + esc(fmtDate(v.rate_day || v.issued_on)) + '</div>'
-      : '') +
-    (s.seller_note ? '<div class="note">' + esc(s.seller_note) + '</div>' : '') +
-    '</body></html>';
+  var sellerBlock =
+    line(L('Адреса: '), s.seller_address) +
+    line('IBAN: ', s.seller_iban) +
+    line(L('Банк: '), s.seller_bank) +
+    line(L('МФО: '), s.seller_bank_code) +
+    line(L('Код: '), s.seller_tax_id) +
+    line(L('Телефон: '), s.seller_phone);
 
+  var buyerBlock =
+    line(L('Код ЄДРПОУ / РНОКПП: '), b.tax_id) +
+    line(L('ІПН: '), b.vat_id) +
+    line(L('Адреса: '), b.legal_address) +
+    line('IBAN: ', b.iban) +
+    line(L('Банк: '), b.bank_name) +
+    line(L('МФО: '), b.bank_code);
+
+  return '<!DOCTYPE html><html lang="uk"><head><meta charset="utf-8"><title>' +
+    esc(L('Рахунок ') + v.number) + '</title><style>' +
+    'body{font:13px/1.45 "Times New Roman",Georgia,serif;color:#000;margin:28px;max-width:760px}' +
+    '.pay{border:1px solid #000;padding:10px 12px;margin-bottom:26px}' +
+    '.pay h2{font-size:12px;text-align:center;margin:0 0 10px;font-weight:700}' +
+    '.pay .r{display:flex;gap:10px;margin:4px 0}.pay .r b{min-width:150px}' +
+    'h1{font-size:16px;margin:0 0 14px;text-decoration:underline}' +
+    '.side{display:flex;gap:10px;margin-bottom:8px}' +
+    '.side .t{min-width:96px;color:#000}.side .n{font-weight:700}' +
+    '.side .k{display:inline-block;min-width:0}' +
+    'table{width:100%;border-collapse:collapse;margin:16px 0 10px}' +
+    'th,td{border:1px solid #000;padding:5px 7px;font-size:12.5px}' +
+    'th{background:#faf7e8;text-align:center;font-weight:700}' +
+    'td.n{text-align:right}td.c{text-align:center}' +
+    '.tot{text-align:right;font-weight:700}' +
+    '.words{margin:10px 0 18px}' +
+    '.sign{display:flex;border:1px solid #000;margin-top:10px}' +
+    '.sign>div{flex:1;padding:10px 12px;font-size:12.5px}' +
+    '.sign>div:first-child{border-right:1px solid #000}' +
+    '.sign .h{font-weight:700;margin-bottom:6px}' +
+    '.sign .l{margin-top:26px;border-top:1px solid #000;width:200px;text-align:center;font-size:11px}' +
+    '.note{margin-top:18px;font-size:11.5px;color:#333}' +
+    '@media print{body{margin:10mm}}</style></head><body>' +
+
+    '<div class="pay"><h2>' + L('Зразок заповнення платіжного доручення') + '</h2>' +
+    '<div class="r"><b>' + L('Одержувач') + '</b><span>' + esc(s.seller_name || '—') + '</span></div>' +
+    '<div class="r"><b>' + L('Код') + '</b><span>' + esc(s.seller_tax_id || '—') + '</span></div>' +
+    '<div class="r"><b>' + L('Рахунок') + '</b><span>' + esc(s.seller_iban || '—') + '</span></div>' +
+    '<div class="r"><b>' + L('Банк одержувача') + '</b><span>' + esc(s.seller_bank || '—') +
+      (s.seller_bank_code ? L(', МФО ') + esc(s.seller_bank_code) : '') + '</span></div>' +
+    '<div class="r" style="margin-top:10px"><span>' + L('Оплата згідно рахунку № ') +
+      esc(v.number) + L(' від ') + esc(fmtDate(v.issued_on)) + ' ' + esc(vatSum) +
+      '</span></div></div>' +
+
+    '<h1>' + L('Рахунок на оплату № ') + esc(v.number) + L(' від ') + esc(fmtDate(v.issued_on)) + '</h1>' +
+
+    '<div class="side"><div class="t">' + L('Постачальник:') + '</div><div>' +
+      '<div class="n">' + esc(s.seller_name || '—') + '</div>' + sellerBlock + '</div></div>' +
+
+    '<div class="side"><div class="t">' + L('Покупець:') + '</div><div>' +
+      '<div class="n">' + esc(b.legal_name || b.name || '—') + '</div>' + buyerBlock +
+      '<div>' + esc(vatBuyer) + '</div></div></div>' +
+
+    '<table><tr><th style="width:36px">№</th><th>' + L('Найменування послуги') + '</th>' +
+    '<th style="width:60px">' + L('Кіл-сть') + '</th><th style="width:52px">' + L('Од.') + '</th>' +
+    '<th style="width:96px">' + L('Ціна, грн') + '</th><th style="width:110px">' +
+    L('Вартість, грн') + '</th></tr>' +
+    '<tr><td class="c">1</td><td>' + esc(v.subject || L('Послуги Rozmovio')) +
+      (v.period_start || v.period_end
+        ? '<br><span style="font-size:11.5px">' + L('період ') + esc(fmtDate(v.period_start)) +
+          ' — ' + esc(fmtDate(v.period_end)) + '</span>'
+        : '') +
+      '</td><td class="c">1,00</td><td class="c">' + L('посл.') + '</td>' +
+      '<td class="n">' + esc(money2(total)) + '</td><td class="n">' + esc(money2(total)) + '</td></tr>' +
+    '<tr><td colspan="5" class="tot">' + L('Всього до сплати:') + '</td>' +
+      '<td class="n"><b>' + esc(money2(total)) + '</b></td></tr></table>' +
+
+    '<div class="words">' + L('Всього найменувань 1, на суму ') + esc(money2(total)) +
+      L(' грн (') + esc(words) + '), ' + esc(vatSum) + '.' +
+      (uah
+        ? '<div style="font-size:11.5px;margin-top:4px">' + L('Тариф ') + esc(money2(v.amount)) +
+          ' ' + esc(cur) + L(' за курсом НБУ ') + esc(rate4(v.rate)) + L(' на ') +
+          esc(fmtDate(v.rate_day || v.issued_on)) + '</div>'
+        : '') +
+    '</div>' +
+
+    '<div class="sign"><div><div class="h">' + L('Виконавець') + '</div>' +
+      '<div>' + esc(s.seller_name || '—') + '</div>' + sellerBlock +
+      '<div class="l">' + esc(s.seller_signer || '') + L('<br>(підпис)</div></div>') +
+    '<div><div class="h">' + L('Замовник') + '</div>' +
+      '<div>' + esc(b.legal_name || b.name || '—') + '</div>' + buyerBlock +
+      '<div class="l">' + esc(b.signer || '') + L('<br>(підпис)</div></div></div>') +
+
+    '<div class="note">' + L('Рахунок дійсний до ') +
+      esc(fmtDate(v.due_on || v.issued_on)) + L(' Якщо протягом ') + esc(due || 3) +
+      L(' днів кошти не надійдуть, ми попросимо квитанцію про оплату; без неї доступ до кабінету призупиняється до підтвердження платежу.') +
+      (s.seller_note ? '<br>' + esc(s.seller_note) : '') +
+    '</div></body></html>';
+}
+
+/* Печать: окно открывается ради неё одной, поэтому сразу и печатаем. */
+function invoicePrint(html, onBlocked){
   var w = window.open('', '_blank');
-  if (!w){ el('ierr').textContent = L('Браузер заблокував вікно друку'); return }
+  if (!w){ if (onBlocked) onBlocked(); return }
   w.document.write(html);
   w.document.close();
   w.focus();
-  // Печать сразу: окно открыто ради неё одной.
-  setTimeout(function(){ try { w.print() } catch(e){} }, 200);
+  setTimeout(function(){ try { w.print() } catch(e){} }, 250);
+}
+
+function invPrint(v){
+  var t = OWN.open.tenant;
+  // Карточка организации отдаёт реквизиты в своём написании — приводим
+  // к тому, в каком их ждёт бланк. Второго бланка ради этого заводить
+  // не станем: счёт один, откуда бы его ни печатали.
+  var buyer = {
+    name: t.name,
+    legal_name: t.legalName,
+    tax_id: t.taxId,
+    vat_id: t.vatId,
+    legal_address: t.legalAddress,
+    bank_name: t.bankName,
+    iban: t.iban,
+    bank_code: t.bankCode,
+    vat_payer: t.vatPayer,
+    signer: t.signer
+  };
+  invoicePrint(invoiceHtml(v, OWNSET || {}, buyer, 3), function(){
+    el('ierr').textContent = L('Браузер заблокував вікно друку');
+  });
 }
 
 /**
@@ -9350,6 +9653,15 @@ function ownSave(){
     seatsFree: ownPerSeat() ? 0 : Number(el('ofree').value) || 0,
     seatPrice: el('oseatp').value,
     priceMonth: ownPerSeat() ? 0 : el('oprice').value,
+    legalName: el('tqName').value,
+    taxId: el('tqTax').value,
+    vatId: el('tqVat').value,
+    legalAddress: el('tqAddr').value,
+    bankName: el('tqBank').value,
+    iban: el('tqIban').value,
+    bankCode: el('tqMfo').value,
+    vatPayer: el('tqVatp').checked,
+    signer: el('tqSign').value,
     currency: el('ocur').value,
     paidUntil: el('opaid').value || null,
     note: el('onote').value

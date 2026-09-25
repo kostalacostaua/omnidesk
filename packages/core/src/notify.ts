@@ -24,6 +24,7 @@ export const NOTIFY_EVENTS = [
   'ai.handoff',
   'channel.down',
   'lead.new',
+  'invoice.paid',
 ] as const;
 
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
@@ -67,6 +68,7 @@ export const NOTIFY_TITLES: Record<NotifyEvent, string> = {
   'ai.handoff': 'ШІ передав людині',
   'channel.down': 'Канал відвалився',
   'lead.new': 'Заявка з сайту',
+  'invoice.paid': 'Клієнт сплатив рахунок',
 };
 
 /** Пояснение к переключателю: когда именно это придёт. */
@@ -80,6 +82,7 @@ export const NOTIFY_HINTS: Record<NotifyEvent, string> = {
   'ai.handoff': 'ШІ зупинився і чекає на оператора.',
   'channel.down': 'Канал перестав працювати: відкликаний токен, негодящий ключ.',
   'lead.new': 'Хтось залишив заявку на промо-сторінці.',
+  'invoice.paid': 'Клієнт натиснув «оплату здійснено» у своєму кабінеті. Гроші треба звірити з випискою.',
 };
 
 export function isNotifyEvent(value: string): value is NotifyEvent {
@@ -164,6 +167,15 @@ export function renderNotify(event: NotifyEvent, p: NotifyPayload): NotifyMessag
         title: `Канал не працює${channel ? `: ${channel}` : ''}`,
         body: shorten(p.text) || 'Потрібно перепідключити канал у налаштуваннях.',
         path: '/#view=channels',
+      };
+
+    case 'invoice.paid':
+      return {
+        // Заголовок называет не «оплату», а слова клиента: денег мы ещё
+        // не видели, и путать одно с другим в оповещении нельзя.
+        title: `Клієнт каже, що сплатив${who ? `: ${who}` : ''}`,
+        body: shorten(p.text) || 'Перевірте виписку і позначте рахунок оплаченим.',
+        path: '/#view=billing',
       };
 
     case 'lead.new': {

@@ -160,6 +160,10 @@ access continues until the end of the period already paid for.</li>
 suspended, and its data is kept for 30 days so nothing is lost by a late card.</li>
 <li>Prices may change. A change never applies to a period already paid for, and we announce it at least
 30 days before it takes effect.</li>
+<li><b>Bank transfer.</b> A business may pay by invoice instead of a card. An invoice is issued from the
+account and is due within <b>3 days</b>. If the money has not arrived by then, we ask for proof of payment;
+without it, access is suspended until the payment is confirmed. Access resumes as soon as the money or the
+proof arrives, and nothing is deleted meanwhile.</li>
 </ul>
 <h2>Acceptable use</h2>
 <p>The Service must not be used to send unsolicited bulk messages, to impersonate another business or person,
@@ -191,7 +195,11 @@ by agreement in your country of residence.</p>
 з оплатою наперед; платежі проводить Paddle як продавець запису, він же нараховує податки вашої країни
 та видає чек. Підписка продовжується автоматично, скасувати її можна будь-коли — доступ триває до кінця
 вже оплаченого періоду. Листування й картки клієнтів належать компанії, яка їх створила. Сервісом не можна
-розсилати непрохані повідомлення й видавати себе за іншу компанію. Питання: <a href="mailto:${email}">${email}</a>.</p>`,
+розсилати непрохані повідомлення й видавати себе за іншу компанію.</p>
+<p><b>Оплата за рахунком.</b> Компанія може платити не карткою, а за рахунком: рахунок виставляється з
+кабінету і дійсний <b>3 дні</b>. Якщо кошти за цей час не надійдуть, ми попросимо квитанцію про оплату;
+без неї доступ до кабінету призупиняється до з'ясування. Доступ повертається одразу, щойно надійдуть гроші
+або квитанція, дані при цьому не видаляються. Питання: <a href="mailto:${email}">${email}</a>.</p>`,
   );
 
   const refunds = page(

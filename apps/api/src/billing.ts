@@ -13,6 +13,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { makeRateFor } from './rate.js';
 import {
   paddleApi,
   paddleAmount,
@@ -24,7 +25,10 @@ import {
   paddleUpdate,
   isPaddlePeriod,
   isPerSeatPlan,
+  invoiceNumber,
+  isoDay,
   keyShape,
+  moneyWords,
   paddleCurrency,
   seatDeal,
   tenantMoney,
@@ -33,6 +37,7 @@ import {
   PER_SEAT_PLANS,
   type PaddlePeriod,
   type PaddlePrices,
+  toUah,
   withSystem,
   withTenant,
   type PaddleEnv,
@@ -51,6 +56,20 @@ export interface BillingDeps {
   /** Открытый токен для окна оплаты в браузере. */
   clientToken: string;
   /**
+   * Оповестить нас о том, что клиент сказал «оплатил».
+   *
+   * Отдельной зависимостью, а не прямым вызовом очереди: счета — про
+   * деньги, оповещения — про телеграм, и связывать их напрямую значит
+   * тащить одно в тесты другого.
+   */
+  announcePaid: (info: {
+    tenantId: string;
+    who: string;
+    number: string;
+    amount: string;
+    currency: string;
+  }) => Promise<void>;
+  /**
    * Страница оплаты на одобренном Paddle домене.
    *
    * Пустая строка означает «открывать окно прямо в кабинете» — так
@@ -61,6 +80,16 @@ export interface BillingDeps {
 }
 
 const auth401 = { error: 'unauthorized' };
+
+/**
+ * Сколько дней ждём денег по счёту.
+ *
+ * Три дня — не срок перевода, а срок терпения: банковский платёж внутри
+ * страны идёт день, и если через три дня денег нет, значит их и не
+ * отправляли. Дальше просим квитанцию, а не отключаем молча: у человека
+ * может быть и платёжка, и болезнь бухгалтера.
+ */
+export const INVOICE_DUE_DAYS = 3;
 
 /** Тот же вид, что и у идентификаторов в базе: иначе withTenant упадёт. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,6 +179,7 @@ async function paddleFetch(
 
 export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
   const { pool, requireAuth } = deps;
+  const rateFor = makeRateFor(pool);
 
   /**
    * Забыть привязку к Paddle, которой в этом кабинете нет.
@@ -194,6 +224,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     plan: string;
     paid_until: string | null;
     seats_limit: number;
+    seats_free: number;
     seat_price: string | null;
     currency: string;
     paddle_status: string | null;
@@ -205,13 +236,14 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
         plan: string;
         paid_until: string | null;
         seats_limit: number;
+        seats_free: number;
         seat_price: string | null;
         currency: string;
         paddle_status: string | null;
         paddle_customer_id: string | null;
         paddle_subscription_id: string | null;
       }>(
-        `SELECT plan, paid_until, seats_limit, seat_price, currency, paddle_status,
+        `SELECT plan, paid_until, seats_limit, seats_free, seat_price, currency, paddle_status,
                 paddle_customer_id, paddle_subscription_id
            FROM tenants WHERE id = $1`,
         [tenantId],
@@ -801,6 +833,211 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       'Состояние подписки забрано у Paddle',
     );
     return { ok: true, applied: done.applied, status: got.status };
+  });
+
+  /* ══════════════ Счёт по безналу ══════════════ */
+
+  /**
+   * Реквизиты продавца: они одни на все счета.
+   *
+   * Лежат в настройках платформы, потому что это наши реквизиты, а не
+   * клиентские. Клиенту их показываем целиком — он по ним платит.
+   */
+  async function sellerSide(): Promise<Record<string, unknown>> {
+    return withSystem(pool, 'реквизиты продавца', async (db) => {
+      const { rows } = await db.query(
+        `SELECT seller_name, seller_tax_id, seller_iban, seller_bank, seller_bank_code,
+                seller_address, seller_phone, seller_signer, seller_note
+           FROM platform_settings WHERE id = 1`,
+      );
+      return (rows[0] ?? {}) as Record<string, unknown>;
+    });
+  }
+
+  /** Реквизиты покупателя: их вписывает сама организация. */
+  async function buyerSide(tenantId: string): Promise<Record<string, unknown>> {
+    return withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query(
+        `SELECT name, legal_name, tax_id, vat_id, legal_address, bank_name, iban,
+                bank_code, vat_payer, signer
+           FROM tenants WHERE id = $1`,
+        [tenantId],
+      );
+      return (rows[0] ?? {}) as Record<string, unknown>;
+    });
+  }
+
+  /**
+   * Счета организации: список, реквизиты обеих сторон и правило трёх дней.
+   *
+   * Всё одним ответом, потому что печатать счёт без реквизитов нельзя,
+   * а спрашивать их тремя запросами — значит однажды напечатать счёт,
+   * у которого одна половина пришла, а вторая нет.
+   */
+  app.get('/billing/invoices', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const invoices = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query(
+        `SELECT id, number, issued_on, due_on, amount, currency, rate, rate_day,
+                amount_uah, period_start, period_end, subject, status, paid_at,
+                claimed_at, created_at
+           FROM platform_invoices
+          WHERE status <> 'void'
+          ORDER BY issued_on DESC, created_at DESC LIMIT 24`,
+      );
+      return rows;
+    });
+
+    return {
+      // Сумма прописью считается здесь: словарь числительных живёт в
+      // ядре, и второй его копии в браузере быть не должно.
+      invoices: invoices.map((r) => {
+        const row = r as Record<string, unknown>;
+        const uah = String(row['currency'] ?? 'UAH') !== 'UAH';
+        return { ...row, words: moneyWords(String(uah ? row['amount_uah'] : row['amount']), 'UAH') };
+      }),
+      seller: await sellerSide(),
+      buyer: await buyerSide(a.tenantId),
+      dueDays: INVOICE_DUE_DAYS,
+    };
+  });
+
+  /**
+   * Выставить счёт самому себе.
+   *
+   * Раньше счёт мог выставить только владелец платформы, и путь клиента
+   * выглядел так: написать в поддержку, дождаться ответа, получить
+   * счёт письмом. Между «решил заплатить» и «смог заплатить» стоял
+   * человек, а человек спит и болеет.
+   *
+   * Цена берётся оттуда же, откуда её берёт карта, — из тарифа
+   * организации. Вписать свою сумму клиент не может: счёт, который
+   * выставляет сам себе покупатель, называется как угодно, только не
+   * счётом.
+   */
+  app.post<{ Body: { period?: string } }>('/billing/invoice', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const me = await tenantNow(a.tenantId);
+    if (!me) return reply.code(404).send({ error: 'no_tenant' });
+
+    const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
+    const plan = sellPlan(me.plan);
+    const p = await platform(pool);
+    const planPrices = p.plan_prices ?? {};
+    const currency = String(me.currency || 'UAH').toUpperCase();
+
+    // Сумма — цена тарифа за выбранный период, по тем же правилам, что
+    // и на кнопке оплаты картой. Два способа посчитать одну цену — это
+    // два разных счёта за один и тот же месяц.
+    const month = tenantMoney(
+      {
+        plan,
+        seatsLimit: Math.max(1, Number(me.seats_limit ?? 1)),
+        currency,
+        priceMonth: planPrices[plan]?.[currency],
+        seatsFree: me.seats_free,
+        seatPrice: me.seat_price,
+      },
+      planPrices,
+    ).monthTotal;
+    const amount = period === 'year' ? yearPrice(month) : month;
+    if (!(amount > 0)) return reply.code(409).send({ error: 'no_price' });
+
+    const today = isoDay(new Date());
+    const got = await rateFor(currency, today);
+    if (!got) return reply.code(502).send({ error: 'no_rate', day: today });
+
+    const number = await withSystem(pool, 'номер счёта', async (db) => {
+      const { rows } = await db.query<{ invoice_seq: number; invoice_prefix: string }>(
+        `UPDATE platform_settings SET invoice_seq = invoice_seq + 1 WHERE id = 1
+         RETURNING invoice_seq, invoice_prefix`,
+      );
+      const r = rows[0];
+      return invoiceNumber(r?.invoice_seq ?? 1, Number(today.slice(0, 4)), r?.invoice_prefix ?? '');
+    });
+
+    const subject = `Послуги Rozmovio, тариф ${plan}, ${period === 'year' ? 'рік' : 'місяць'}`;
+    const id = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO platform_invoices
+           (tenant_id, number, issued_on, due_on, amount, currency, rate, rate_day, rate_source,
+            amount_uah, period_start, period_end, subject, created_by)
+         VALUES ($1, $2, $3::date, $3::date + $4::int, $5, $6, $7, $8::date, 'nbu', $9,
+                 $3::date, $3::date + $10::interval, $11, $12)
+         RETURNING id`,
+        [
+          a.tenantId,
+          number,
+          today,
+          INVOICE_DUE_DAYS,
+          amount,
+          currency,
+          got.rate,
+          got.day,
+          toUah(amount, got.rate),
+          period === 'year' ? '1 year' : '1 month',
+          subject,
+          'клієнт',
+        ],
+      );
+      return rows[0]!.id;
+    });
+
+    req.log.info({ tenantId: a.tenantId, number, amount, currency }, 'Клиент выставил себе счёт');
+    return reply.code(201).send({ id, number, amount, currency, amountUah: toUah(amount, got.rate) });
+  });
+
+  /**
+   * «Оплату здійснено».
+   *
+   * Это не оплата, и отмечать счёт оплаченным нельзя: деньги приходят
+   * на счёт и сверяются с выпиской. Но между «заплатил» и «увидели»
+   * проходит день-другой, и всё это время человек не знает, дошло ли.
+   * Кнопка закрывает разрыв с обеих сторон: клиент видит, что нажатие
+   * принято, мы получаем оповещение туда, куда смотрим.
+   */
+  app.post<{ Params: { id: string } }>('/billing/invoices/:id/paid', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+    if (!UUID_RE.test(String(req.params?.id ?? ''))) {
+      return reply.code(400).send({ error: 'bad_id' });
+    }
+
+    const inv = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ number: string; amount: string; currency: string }>(
+        `UPDATE platform_invoices SET claimed_at = coalesce(claimed_at, now())
+          WHERE id = $1 AND status = 'issued'
+        RETURNING number, amount, currency`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!inv) return reply.code(404).send({ error: 'not_found' });
+
+    const who = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ name: string }>(`SELECT name FROM tenants WHERE id = $1`, [
+        a.tenantId,
+      ]);
+      return rows[0]?.name ?? '';
+    });
+
+    // Оповещение не должно ронять ответ: клиент своё сделал, и сказать
+    // ему «не получилось» из-за нашей очереди было бы враньём.
+    await deps
+      .announcePaid({
+        tenantId: a.tenantId,
+        who,
+        number: inv.number,
+        amount: inv.amount,
+        currency: inv.currency,
+      })
+      .catch((err: unknown) => req.log.warn({ err }, 'Оповещение об оплате не поставлено'));
+
+    return { ok: true };
   });
 
   /**

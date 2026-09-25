@@ -67,6 +67,13 @@ const KINDS = ['telegram', 'email', 'push'];
 
 export interface NotifyApi {
   /** Оповестить о заявке с промо-страницы. Вызывает обработчик /leads. */
+  announceInvoicePaid: (info: {
+    tenantId: string;
+    who: string;
+    number: string;
+    amount: string;
+    currency: string;
+  }) => Promise<void>;
   announceLead: (lead: {
     id: string;
     name?: string | null;
@@ -616,7 +623,34 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
       .send(SERVICE_WORKER),
   );
 
-  return { announceLead };
+  /**
+   * Клиент сказал, что оплатил счёт.
+   *
+   * Адресат — наша компания, как и у заявки с сайта: платит клиент, а
+   * смотреть на это должны мы. Ключ повтора — номер счёта: нажать
+   * кнопку можно сколько угодно раз, оповещение придёт одно.
+   */
+  async function announceInvoicePaid(info: {
+    tenantId: string;
+    who: string;
+    number: string;
+    amount: string;
+    currency: string;
+  }): Promise<void> {
+    const tenantId = await ourTenant();
+    if (!tenantId) return;
+    await enqueue(
+      tenantId,
+      'invoice.paid',
+      {
+        who: info.who || null,
+        text: `Рахунок ${info.number} на ${info.amount} ${info.currency}`,
+      },
+      `invoice.paid:${info.number}`,
+    );
+  }
+
+  return { announceLead, announceInvoicePaid };
 }
 
 /**

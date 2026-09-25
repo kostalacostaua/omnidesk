@@ -717,6 +717,9 @@ registerBilling(app, {
   webhookSecret: process.env['PADDLE_WEBHOOK_SECRET'] ?? '',
   clientToken: process.env['PADDLE_CLIENT_TOKEN'] ?? '',
   payUrl: PAY_URL,
+  // Оповещение уходит в нашу же компанию: тем же путём, что и заявка с
+  // сайта, — в группу поддержки и пушем. Место, куда мы смотрим, одно.
+  announcePaid: (info) => notify.announceInvoicePaid(info),
 });
 
 registerPay(app, {

@@ -220,6 +220,59 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
   });
 
   /**
+   * Реквизиты организации для счетов.
+   *
+   * Счёт по безналу уходит в чужую бухгалтерию, и там его сверяют по
+   * реквизитам, а не по названию. Пока у нас было одно имя, счёт
+   * выглядел запиской — с такой бумагой бухгалтер не работает, и клиент
+   * возвращался с просьбой переделать, иногда через неделю.
+   *
+   * Правит их администратор: это данные компании, а не подпись
+   * оператора, и ошибка в коде ЄДРПОУ стоит клиенту платежа.
+   */
+  app.patch<{
+    Body: {
+      legalName?: string;
+      taxId?: string;
+      vatId?: string;
+      legalAddress?: string;
+      bankName?: string;
+      iban?: string;
+      bankCode?: string;
+      vatPayer?: boolean;
+      signer?: string;
+    };
+  }>('/tenant/requisites', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const b = req.body ?? {};
+    const text = (v: unknown, limit: number) => String(v ?? '').trim().slice(0, limit);
+    await withSystem(pool, 'реквизиты организации', async (db) => {
+      await db.query(
+        `UPDATE tenants SET legal_name = $2, tax_id = $3, vat_id = $4, legal_address = $5,
+                            bank_name = $6, iban = $7, bank_code = $8, vat_payer = $9, signer = $10
+          WHERE id = $1`,
+        [
+          auth.tenantId,
+          text(b.legalName, 300),
+          text(b.taxId, 32),
+          text(b.vatId, 32),
+          text(b.legalAddress, 300),
+          text(b.bankName, 160),
+          // Пробелы в IBAN пишут для читаемости, а платёжка их не
+          // принимает: убираем здесь, чтобы не спорить об этом в счёте.
+          text(b.iban, 64).replace(/\s+/g, '').toUpperCase(),
+          text(b.bankCode, 16),
+          Boolean(b.vatPayer),
+          text(b.signer, 160),
+        ],
+      );
+    });
+    return { ok: true };
+  });
+
+  /**
    * Пауза бота после ответа оператора.
    *
    * Живёт рядом со сценариями, потому что объясняет их поведение:
