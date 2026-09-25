@@ -106,6 +106,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #cardVeil,#cardX{display:none}
   @media(max-width:1180px){#app{grid-template-columns:66px 306px minmax(0,1fr)}
     #app #card{display:none}
+    /* Кнопка «Клієнт» прячет третью колонку, а третьей колонки здесь
+       уже нет: карточка выезжает поверх переписки по нажатию на имя.
+       Кнопка, которая ничего не делает, хуже отсутствующей — и место
+       в шапке списка тут дороже всего. */
+    #cardBtn{display:none}
     #app.card-open #card{display:block;position:fixed;top:0;right:0;bottom:0;
       width:min(390px,100%);z-index:88;background:var(--solid);
       border-left:1px solid var(--line);box-shadow:var(--lift2);
