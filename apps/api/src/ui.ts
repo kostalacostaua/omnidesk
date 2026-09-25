@@ -98,8 +98,29 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #app[data-view="bots"] #card{display:none}
   #app[data-view="chats"] #bots{display:none}
   #app.no-card #card{display:none}
+  /* Карточка клиента на узком экране.
+     Места для третьей колонки нет, но карточка нужна не меньше: в ней
+     телефон, метки, заметки, CRM и заказ. Поэтому она не пропадает, а
+     выезжает поверх переписки по нажатию на имя клиента — там же, где
+     на широком экране она и стоит, справа. */
+  #cardVeil,#cardX{display:none}
   @media(max-width:1180px){#app{grid-template-columns:66px 306px minmax(0,1fr)}
-    #app #card{display:none}}
+    #app #card{display:none}
+    #app.card-open #card{display:block;position:fixed;top:0;right:0;bottom:0;
+      width:min(390px,100%);z-index:88;background:var(--solid);
+      border-left:1px solid var(--line);box-shadow:var(--lift2);
+      animation:cardIn var(--calm) var(--ease)}
+    #app.card-open #cardVeil{display:block;position:fixed;inset:0;z-index:87;
+      background:rgba(11,16,34,.4);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+    #app.card-open #cardX{display:flex;position:fixed;top:10px;right:10px;z-index:89;
+      width:32px;height:32px;align-items:center;justify-content:center;font-size:20px;
+      line-height:1;padding:0;border-radius:var(--rf);background:var(--panel2);
+      border:1px solid var(--line);color:var(--t2)}
+    /* Имя в шапке — это и есть кнопка. Отдельная иконка рядом заняла бы
+       место, которого на телефоне нет, а по имени попадают пальцем. */
+    .thead .who{cursor:pointer}}
+  @keyframes cardIn{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
+  @media(prefers-reduced-motion:reduce){#app.card-open #card{animation:none}}
   @media(max-width:820px){
     /* 62, а не 56: «Сповіщення» иначе переносится одной буквой. */
     #app{grid-template-columns:62px minmax(0,1fr)}
@@ -1078,6 +1099,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   </div>
 
   <aside id="card"><div class="empty" data-t>Картка клієнта зʼявиться, коли відкриєте діалог</div></aside>
+  <!-- Подложка и крестик живут рядом с карточкой, а не внутри: карточка
+       перерисовывается целиком при каждом обновлении, и всё, что лежит
+       в ней, исчезло бы вместе с обработчиками. -->
+  <div id="cardVeil"></div>
+  <button id="cardX" title="Закрити">×</button>
 
   <main id="page"></main>
 </div>
@@ -1338,6 +1364,27 @@ function openConv(id, fromHistory){
     .then(refresh).catch(function(){});
 }
 
+/**
+ * Карточка клиента на узком экране.
+ *
+ * Выдвигается поверх переписки и закрывается тремя способами: крестиком,
+ * нажатием мимо и клавишей Escape. Три, потому что это окно поверх
+ * содержимого: человек закрывает его тем движением, которое привык
+ * делать, а не тем, которое мы придумали.
+ *
+ * Обработчик Escape вешается и снимается вместе с самой панелью:
+ * висящий всё время слушатель перехватывал бы Escape у остальных окон.
+ */
+function cardDrawer(on){
+  var app = el('app');
+  if (!app) return;
+  app.classList.toggle('card-open', !!on);
+  if (on) document.addEventListener('keydown', cardEsc);
+  else document.removeEventListener('keydown', cardEsc);
+}
+
+function cardEsc(ev){ if (ev.key === 'Escape') cardDrawer(false) }
+
 function renderHead(){
   var c = currentConv();
   if (!c){ el('thead').innerHTML = L('<div class="dim">Виберіть діалог ліворуч</div>'); return }
@@ -1348,7 +1395,7 @@ function renderHead(){
 
   el('thead').innerHTML =
     L('<button class="ghost mini back" id="aBack" title="До списку чатів">← Чати</button>') +
-    '<div class="who">' +
+    '<div class="who" id="aCard">' +
       '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
         avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
       '<div style="min-width:0"><div class="nm">' + esc(c.display_name || L('Без імені')) + '</div>' +
@@ -1428,6 +1475,7 @@ function renderHead(){
     });
   };
   el('aBack').onclick = backToList;
+  if (el('aCard')) el('aCard').onclick = function(){ cardDrawer(true) };
 }
 
 /** Возврат к списку. На узком экране список и переписка не помещаются вместе. */
@@ -1441,6 +1489,9 @@ function backToList(){
 
 function closeThread(){
   el('app').classList.remove('thread-open');
+  // Ушли из переписки — панель клиента закрывается вместе с ней:
+  // висеть поверх списка чатов ей незачем.
+  cardDrawer(false);
 }
 
 /**
@@ -8640,6 +8691,8 @@ function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
 function start(){
   applyLang();
   wireTips();
+  el('cardVeil').onclick = function(){ cardDrawer(false) };
+  el('cardX').onclick = function(){ cardDrawer(false) };
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
   fitHeight();

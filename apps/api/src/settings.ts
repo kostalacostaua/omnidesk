@@ -939,7 +939,17 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       try {
         await verifyMailbox(creds);
       } catch (err) {
-        app.log.warn({ address: creds.address }, 'Ящик не пустил');
+        const e = (err ?? {}) as { message?: unknown; responseText?: unknown; code?: unknown };
+        app.log.warn(
+          {
+            address: creds.address,
+            imap: `${creds.imap.host}:${creds.imap.port}`,
+            said: typeof e.responseText === 'string' ? e.responseText : undefined,
+            err: typeof e.message === 'string' ? e.message : String(err),
+            code: e.code,
+          },
+          'Ящик не пустил',
+        );
         return reply.code(400).send({ error: 'mailbox_refused', detail: mailboxWhy(err) });
       }
 

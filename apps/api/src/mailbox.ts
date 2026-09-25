@@ -55,8 +55,25 @@ export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
  * сервера или сеть.
  */
 export function mailboxWhy(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err);
-  if (/auth|credential|password|535|534|login failed|invalid user/i.test(text)) {
+  /*
+   * «Command failed» — это фраза библиотеки, а не сервера. Настоящий
+   * ответ лежит рядом, в responseText: «Invalid credentials»,
+   * «Application-specific password required», «LOGIN failed». Без него
+   * человек видит два слова по-английски и не знает, что делать.
+   */
+  const e = (err ?? {}) as { message?: unknown; responseText?: unknown; code?: unknown };
+  const said = typeof e.responseText === 'string' ? e.responseText : '';
+  const text = [said, typeof e.message === 'string' ? e.message : String(err), String(e.code ?? '')]
+    .filter(Boolean)
+    .join(' ');
+
+  if (/application-specific|app password|web login required|please log in via your web browser/i.test(text)) {
+    return 'Пошта вимагає окремий пароль застосунку: звичайний пароль скриньки сюди не підходить.';
+  }
+  if (/imap.{0,20}disabled|imap access|not enabled/i.test(text)) {
+    return 'У цій скриньці вимкнено IMAP — увімкніть його в налаштуваннях пошти.';
+  }
+  if (/auth|credential|password|535|534|login failed|invalid user|no \[/i.test(text)) {
     return 'Пошта не прийняла адресу або пароль. У Gmail, ukr.net та iCloud потрібен окремий пароль застосунку.';
   }
   if (/enotfound|getaddrinfo|dns/i.test(text)) return 'Сервер з такою назвою не знайдено — перевірте адреси IMAP і SMTP.';
@@ -64,5 +81,7 @@ export function mailboxWhy(err: unknown): string {
     return 'Сервер не відповідає на цьому порту — перевірте порт або зачекайте хвилину.';
   }
   if (/certificate|self signed|altname/i.test(text)) return 'Сертифікат сервера не підходить — перевірте назву сервера.';
-  return text.slice(0, 200);
+  // Незнакомый отказ отдаём словами сервера, а не библиотеки: чужое
+  // объяснение всё равно полезнее нашего «не вийшло».
+  return (said || text).slice(0, 200);
 }
