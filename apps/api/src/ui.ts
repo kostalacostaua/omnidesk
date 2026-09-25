@@ -4299,7 +4299,10 @@ function billPaint(){
     var per = BILL_PERIOD === 'year'
       ? billMonthOfYear(side.price)
       : billMoney(p.month && p.month.price);
-    var now = p.plan === BILL.plan;
+    /* Тариф уже стоит, но подписки нет — значит его поставили руками,
+       и заплатить за него человек всё равно должен. Прятать кнопку по
+       одному совпадению названия значит запереть его без оплаты. */
+    var paid = p.plan === BILL.plan && BILL.subscribed;
     return '<div class="prow"><div class="pk">' + esc(p.plan) + '</div>' +
       '<div class="pv">' + (per ? esc(per) : L('ціну ще не задано')) +
       (BILL_PERIOD === 'year'
@@ -4307,7 +4310,7 @@ function billPaint(){
         : '') +
       (side.priceId ? '' : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
       '</div>' +
-      (side.priceId && !now
+      (side.priceId && !paid
         ? '<button class="mini" data-pay="' + esc(p.plan) + '">' +
           (BILL.subscribed ? L('Перейти') : L('Оплатити')) + '</button>'
         : '<span></span>') +
@@ -8457,8 +8460,12 @@ function paintOwner(){
           }).join('') + '</div>';
       }).join('') + '</div>' +
       L('<div class="hint">Порожньо — ціни в цій валюті немає, і підставлятися вона не буде.</div>') +
-      L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="pSave">Зберегти ціни</button></div>') +
+      L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="pSave">Зберегти ціни</button>') +
+      L('<button class="ghost mini" id="pPaddle">Завести тарифи в Paddle</button></div>') +
       '<span class="ok" id="pOk"></span>' +
+      L('<div class="hint">Створює товар і дві ціни — місячну і річну — з тих цін, що вище. ') +
+      L('Уже заведене не чіпає, тому натискати можна скільки завгодно.</div>') +
+      '<div class="err" id="pPadErr"></div>' +
     '</div></div>' +
 
     /* Реквизиты. Лежат здесь, а не в карточке клиента: они одни на все
@@ -8502,6 +8509,35 @@ function paintOwner(){
         OWNSET = Object.assign({}, OWNSET, { plan_prices: prices });
       })
       .catch(showErr).then(function(){ busy(el('pSave'), false) });
+  };
+
+  /* Товары в Paddle. Кнопка, а не действие при сохранении цен: завести
+     товар — шаг необратимый, и делать его молча за человека нельзя. */
+  el('pPaddle').onclick = function(){
+    el('pPadErr').textContent = '';
+    el('pOk').textContent = '';
+    busy(el('pPaddle'), true);
+    api('/owner/paddle/sync', { method:'POST' })
+      .then(function(d){
+        var done = (d.done || []).length;
+        var bad = d.failed || [];
+        el('pOk').textContent = done
+          ? L('заведено цін: ') + done
+          : (bad.length ? '' : L('усе вже заведено'));
+        if (bad.length){
+          el('pPadErr').textContent = bad.map(function(f){
+            return f.plan + (f.period ? ' (' + f.period + ')' : '') + ': ' +
+              (f.why === 'no_price' ? L('ціну не задано') : f.why);
+          }).join('; ');
+        }
+      })
+      .catch(function(e){
+        el('pPadErr').textContent = ((e.payload || {}).why) ||
+          (((e.payload || {}).error) === 'paddle_not_configured'
+            ? L('Paddle не налаштований: немає ключа PADDLE_API_KEY')
+            : sErr(e));
+      })
+      .then(function(){ busy(el('pPaddle'), false) });
   };
 
   el('sSave').onclick = function(){
