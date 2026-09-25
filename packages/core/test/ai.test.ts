@@ -235,6 +235,22 @@ describe('Google Gemini', () => {
     expect(geminiThinking('своя-модель')).toBeNull();
   });
 
+  it('слова провайдера доезжают до человека вместе с номером ошибки', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { code: 500, message: 'Internal error encountered.' } }),
+    }));
+    await expect(askModel(G, [{ fromClient: true, text: 'Є?' }], { fetchImpl }))
+      .rejects.toThrow('Internal error encountered.');
+  });
+
+  it('отказ без объяснения остаётся коротким, а не «: undefined»', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    await expect(askModel(G, [{ fromClient: true, text: 'Є?' }], { fetchImpl }))
+      .rejects.toThrow(/\(503\)$/);
+  });
+
   it('пусто с упёршимся лимитом — это раздумья, а не молчание модели', () => {
     try {
       readGemini({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [] } }] });

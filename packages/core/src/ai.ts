@@ -110,19 +110,47 @@ export function readCompletion(payload: unknown): string {
   return text;
 }
 
+/**
+ * Слова самого провайдера из его ответа.
+ *
+ * У OpenAI это error.message, у Google — error.message внутри того же
+ * error. Своими словами мы объясняем, что делать, а его словами — что
+ * именно ему не понравилось: без второго «провайдер відповідає
+ * помилкою» отправляет искать причину наугад.
+ */
+export function providerSaid(payload: unknown): string {
+  const body = (payload ?? {}) as { error?: unknown; message?: unknown };
+  const err = (body.error ?? {}) as { message?: unknown };
+  const text =
+    typeof err.message === 'string'
+      ? err.message
+      : typeof body.error === 'string'
+        ? body.error
+        : typeof body.message === 'string'
+          ? body.message
+          : '';
+  return text.trim().slice(0, 300);
+}
+
 /** Причина отказа словами, которые можно показать в настройках. */
-export function explainStatus(status: number): AiError {
+export function explainStatus(status: number, said = ''): AiError {
+  const tail = said ? `: ${said}` : '';
   if (status === 401 || status === 403) {
-    return new AiError('Ключ не підійшов — перевірте його в кабінеті провайдера', 'bad_key');
+    return new AiError(`Ключ не підійшов — перевірте його в кабінеті провайдера${tail}`, 'bad_key');
   }
   if (status === 404) {
-    return new AiError('Провайдер не знає такої моделі або адреси', 'bad_model');
+    return new AiError(`Провайдер не знає такої моделі або адреси${tail}`, 'bad_model');
   }
   if (status === 429) {
-    return new AiError('Провайдер відповідає «занадто часто» — скінчився ліміт або гроші', 'rate_limit');
+    return new AiError(
+      `Провайдер відповідає «занадто часто» — скінчився ліміт або гроші${tail}`,
+      'rate_limit',
+    );
   }
-  if (status >= 500) return new AiError('Провайдер відповідає помилкою', 'provider_down');
-  return new AiError(`Провайдер відмовив (${status})`, 'refused');
+  if (status >= 500) {
+    return new AiError(`Провайдер відповідає помилкою (${status})${tail}`, 'provider_down');
+  }
+  return new AiError(`Провайдер відмовив (${status})${tail}`, 'refused');
 }
 
 /** Адрес запроса: клиент вводит корень, слеш на конце не важен. */
@@ -288,7 +316,12 @@ export async function askModel(
       signal: controller.signal,
     });
 
-    if (!res.ok) throw explainStatus(res.status);
+    if (!res.ok) {
+      // Тело читаем даже у отказа: там лежит объяснение провайдера, и
+      // без него остаётся один номер ошибки.
+      const said = providerSaid(await res.json().catch(() => ({})));
+      throw explainStatus(res.status, said);
+    }
     const payload = await res.json();
     return gemini ? readGemini(payload) : readCompletion(payload);
   } catch (err) {

@@ -2379,9 +2379,13 @@ function renderCard(){
             '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
             '<span class="ok" id="oDone"></span>' +
             '<div class="err" id="oErr"></div>'
-          : L('<div class="hint">Клієнт у Zoho — лід, а замовлення робиться на контакт. ') +
-            L('Сконвертуйте ліда в Zoho і натисніть «Оновити звʼязок».</div>') +
+          : L('<div class="hint">Клієнт у Zoho — лід, а замовлення робиться на контакт.</div>') +
+            '<div class="row2" style="margin-top:7px">' +
+            L('<button class="ghost mini" id="cConv">Зробити контактом</button>') +
             L('<button class="ghost mini" id="cReSync">Оновити звʼязок</button>') +
+            '</div>' +
+            L('<div class="hint" style="margin-top:6px">Перша кнопка конвертує ліда в Zoho ') +
+            L('звідси. Друга — якщо його вже сконвертували там.</div>') +
             '<div class="err" id="oErr"></div>')
       : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
@@ -2409,6 +2413,26 @@ function renderCard(){
         el('oErr').textContent = p.error === 'still_lead'
           ? L('У Zoho це досі лід — сконвертуйте його там')
           : ordWhy(e);
+        busy(b, false);
+      });
+  };
+
+  /*
+   * Конвертация лида. Одна кнопка вместо похода в Zoho: найти
+   * карточку, нажать Convert, вернуться и обновить связь — пять
+   * действий в разгар разговора с клиентом.
+   */
+  if (el('cConv')) el('cConv').onclick = function(){
+    var b = el('cConv');
+    busy(b, true);
+    el('oErr').textContent = '';
+    api('/contacts/' + ct.id + '/crm/convert', { method:'POST' })
+      .then(function(r){
+        toast(r && r.already ? L('Уже сконвертований — звʼязок оновлено') : L('Тепер це контакт'));
+        loadCard();
+      })
+      .catch(function(e){
+        el('oErr').textContent = ordWhy(e);
         busy(b, false);
       });
   };

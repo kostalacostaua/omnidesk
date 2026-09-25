@@ -519,6 +519,84 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   });
 
   /**
+   * Сконвертировать лида в контакт.
+   *
+   * Заказ делается на контакт — так устроена Zoho, и спорить с этим
+   * нечем. До сих пор оператору говорили «сконвертуйте його там»: уйти
+   * в другую вкладку, найти карточку, нажать Convert, вернуться и
+   * нажать «оновити звʼязок». Пять действий ради одного, и все пять —
+   * в разгар разговора с клиентом.
+   *
+   * Теперь это одна кнопка. Конвертацию делает Zoho своими правилами:
+   * компанию заводит, если у лида есть название, сделку не создаёт —
+   * её создаст заказ, и вторая сделка про то же самое никому не нужна.
+   */
+  app.post<{ Params: { id: string } }>('/contacts/:id/crm/convert', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ crm_module: string | null; crm_record_id: string | null }>(
+        `SELECT crm_module, crm_record_id FROM contacts WHERE id = $1 LIMIT 1`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!row.crm_record_id) return reply.code(409).send({ error: 'not_linked' });
+    if (row.crm_module === 'Contacts') return { module: 'Contacts', recordId: row.crm_record_id };
+
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    // Его могли сконвертировать минуту назад в самой Zoho. Тогда
+    // конвертировать нечего, и это не ошибка, а готовый ответ.
+    const already = await followConversion(a.tenantId, req.params.id, row.crm_record_id, z);
+    if (already) return { module: 'Contacts', recordId: already, already: true };
+
+    const res = await fetch(
+      `${z.inst.api_domain}/crm/v6/Leads/${row.crm_record_id}/actions/convert`,
+      {
+        method: 'POST',
+        headers: z.head,
+        // Сделку не создаём: заказ из разговора сам заведёт то, что
+        // нужно, а пустая сделка «Костя Сластин» в воронке — мусор,
+        // который потом закрывают руками.
+        body: JSON.stringify({ data: [{ overwrite: false, notify_lead_owner: false }] }),
+        signal: AbortSignal.timeout(25_000),
+      },
+    );
+
+    const body = (await res.json().catch(() => ({}))) as {
+      code?: string;
+      message?: string;
+      data?: Array<{ Contacts?: unknown; Accounts?: unknown; code?: string; message?: string }>;
+    };
+    const first = body.data?.[0];
+    const made = first?.Contacts;
+    const contactId = typeof made === 'string' || typeof made === 'number' ? String(made) : '';
+
+    if (!res.ok || !/^[0-9]+$/.test(contactId)) {
+      const why = body.data
+        ? { error: 'zoho_refused', detail: first?.message }
+        : whyBody(body);
+      return reply.code(502).send(why);
+    }
+
+    await withTenant(pool, a.tenantId, async (db) => {
+      await db.query(
+        `UPDATE contacts SET crm_module = 'Contacts', crm_record_id = $2 WHERE id = $1`,
+        [req.params.id, contactId],
+      );
+    });
+    app.log.info(
+      { tenantId: a.tenantId, leadId: row.crm_record_id, contactId },
+      'Лид сконвертирован по кнопке',
+    );
+    return { module: 'Contacts', recordId: contactId };
+  });
+
+  /**
    * Компания клиента в CRM.
    *
    * Просьба звучит как «создать компанию», но на деле их две: завести
