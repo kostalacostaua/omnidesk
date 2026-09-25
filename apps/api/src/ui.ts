@@ -210,10 +210,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .thead .acts{display:flex;gap:6px;flex:none}
   #msgs{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;
     gap:7px;min-height:0}
-  .mwrap{display:flex;flex-direction:column;max-width:min(540px,76%);
-    animation:rise .16s ease-out}
-  @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-  @media(prefers-reduced-motion:reduce){.mwrap{animation:none}}
+  .mwrap{display:flex;flex-direction:column;max-width:min(540px,76%)}
   .mwrap.out{align-self:flex-end;align-items:flex-end}
   .mwrap.in{align-self:flex-start;align-items:flex-start}
   .m{max-width:100%;padding:8px 12px;border-radius:9px;font-size:13px;line-height:1.5;
@@ -642,8 +639,41 @@ export const INBOX_HTML = `<!DOCTYPE html>
     border:0;border-bottom-right-radius:7px}
   .m.bot{background:linear-gradient(135deg,#5b4bd6,#7a3cf0);color:#fff}
   .m.failed{background:var(--crit);color:#fff}
-  .mwrap{animation:rise .24s cubic-bezier(.2,.8,.3,1)}
+  /* ─── Движение ─────────────────────────────────────────────────── */
+  /* Правило одно: движется то, что изменилось, и ровно настолько,
+     чтобы глаз успел проследить. Отсюда признак fresh: лента и список
+     перерисовываются целиком на каждом опросе, и анимация, висящая
+     прямо на классе элемента, означала бы, что раз в три секунды
+     вспыхивает всё подряд. Признак ставит разметке только те узлы,
+     которых в прошлый раз не было. */
+  .mwrap.fresh{animation:rise .26s cubic-bezier(.2,.8,.3,1)}
+  .mwrap.in.fresh{animation-name:riseIn}
+  .mwrap.out.fresh{animation-name:riseOut}
   @keyframes rise{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  /* Своё сообщение приезжает справа, чужое слева — с той стороны, где
+     оно и живёт. Это дешевле подписи: сторону видно раньше, чем текст. */
+  @keyframes riseIn{from{opacity:0;transform:translate(-10px,8px) scale(.985)}to{opacity:1;transform:none}}
+  @keyframes riseOut{from{opacity:0;transform:translate(10px,8px) scale(.985)}to{opacity:1;transform:none}}
+
+  /* Смена диалога — одно движение на всю ленту, а не сорок отдельных:
+     человек переключил разговор, а не получил сорок писем разом. */
+  #msgs.swap{animation:swapIn .22s cubic-bezier(.2,.8,.3,1)}
+  #page .pg{animation:swapIn .24s cubic-bezier(.2,.8,.3,1)}
+  @keyframes swapIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* Список чатов переставляется, а не возникает заново. Строка,
+     уехавшая наверх из-за нового сообщения, доезжает туда на глазах:
+     иначе непонятно, что именно изменилось и почему всё съехало. */
+  .conv.flip{transition:transform .34s cubic-bezier(.2,.8,.3,1)}
+  .conv.enter{animation:convIn .28s cubic-bezier(.2,.8,.3,1)}
+  @keyframes convIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+  .badge.pop{animation:pop .34s cubic-bezier(.2,.8,.3,1)}
+  @keyframes pop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18)}
+    100%{transform:none;opacity:1}}
+
+  /* Нажатие. Кнопка обязана ответить пальцу раньше, чем ответит сервер;
+     шестьдесят миллисекунд здесь делают интерфейс не быстрее, а живым. */
+  button:active:not(:disabled){transform:scale(.97)}
   .rx .r{border-radius:12px;background:var(--panel);border:1px solid var(--line)}
   .mtools button{border-radius:9px}
   .picker{border-radius:14px;box-shadow:var(--lift);background:var(--panel);
@@ -705,8 +735,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .qrwrap{border-radius:18px;background:var(--panel);border-color:var(--line)}
   .pill,.badge{border-radius:999px}
 
+  /* Человек, попросивший систему не двигаться, просил об этом всерьёз:
+     у части людей движение на экране вызывает тошноту и головокружение.
+     Поэтому не список исключений, а одно правило на всё — иначе каждая
+     новая анимация проезжает мимо него незамеченной. */
   @media(prefers-reduced-motion:reduce){
-    #gate .box,#gate .step,.mwrap{animation:none}
+    *,*::before,*::after{animation-duration:.01ms !important;
+      animation-iteration-count:1 !important;transition-duration:.01ms !important;
+      scroll-behavior:auto !important}
   }
 
   /* ─── Разделы ──────────────────────────────────────────────────── */
@@ -1324,11 +1360,51 @@ function renderList(){
   if (html === lastList) return;
   lastList = html;
 
-  el('convs').innerHTML = html;
+  var box = el('convs');
+
+  // Где каждая строка стоит сейчас — снимаем до перерисовки: после неё
+  // старых узлов уже нет, и сравнивать будет не с чем. Заодно
+  // запоминаем счётчик непрочитанных: он меняется чаще всего, и
+  // именно его изменение человек должен заметить.
+  var was = {};
+  var cnt = {};
+  Array.prototype.forEach.call(box.querySelectorAll('.conv'), function(n){
+    was[n.dataset.id] = n.getBoundingClientRect().top;
+    var b = n.querySelector('.badge');
+    cnt[n.dataset.id] = b ? b.textContent : '';
+  });
+  // Замена содержимого сбрасывает прокрутку, если список стал короче.
+  var keep = box.scrollTop;
+
+  box.innerHTML = html;
+  box.scrollTop = keep;
   paintAvatars();
-  Array.prototype.forEach.call(el('convs').children, function(node){
-    if (!node.dataset.id) return;
-    node.onclick = function(){ openConv(node.dataset.id) };
+
+  Array.prototype.forEach.call(box.children, function(node){
+    var id = node.dataset.id;
+    if (!id) return;
+    node.onclick = function(){ openConv(id) };
+
+    var b = node.querySelector('.badge');
+    if (b && b.textContent !== cnt[id]) b.classList.add('pop');
+
+    // Строки не было — значит диалог новый, и он приезжает сверху,
+    // а не возникает из ничего посреди списка.
+    if (was[id] === undefined){ node.classList.add('enter'); return }
+
+    var d = was[id] - node.getBoundingClientRect().top;
+    if (Math.abs(d) < 1) return;
+    // Ставим строку обратно на старое место без перехода и отпускаем
+    // только следующим кадром: переход должен начаться оттуда, где
+    // строка была, а не оттуда, где она уже оказалась.
+    node.style.transform = 'translateY(' + d + 'px)';
+    requestAnimationFrame(function(){
+      node.classList.add('flip');
+      node.style.transform = '';
+      // Класс снимается после приезда: постоянный переход на transform
+      // мешал бы следующей перестановке начаться с чистого места.
+      setTimeout(function(){ node.classList.remove('flip') }, 400);
+    });
   });
 }
 
@@ -1348,9 +1424,22 @@ function currentConv(){
 
 var lastThread = null;
 
+/*
+ * Что из ленты человек уже видел.
+ *
+ * Лента перерисовывается целиком, как только изменилось хоть одно
+ * сообщение, — так дешевле и надёжнее. Но «перерисовалось» и
+ * «появилось» для глаза не одно и то же: анимировать надо только
+ * второе. Здесь и лежит разница между ними.
+ */
+var msgSeen = {};
+var threadFirst = true;
+
 function openConv(id, fromHistory){
   current = id;
   lastThread = null;
+  msgSeen = {};
+  threadFirst = true;
   replyTo = null;
   pendingFile = null;
   el('app').classList.add('thread-open');
@@ -1705,6 +1794,26 @@ function loadThread(){
     if (html === lastThread){ renderComposer(); return }
     lastThread = html;
     el('msgs').innerHTML = html;
+
+    // Первая отрисовка диалога — это смена разговора, а не сорок новых
+    // сообщений: движется лента целиком. Дальше движется только то,
+    // что действительно пришло.
+    var first = threadFirst;
+    threadFirst = false;
+    Array.prototype.forEach.call(el('msgs').querySelectorAll('[data-mid]'), function(n){
+      var mid = n.dataset.mid;
+      if (!first && !msgSeen[mid]) n.classList.add('fresh');
+      msgSeen[mid] = 1;
+    });
+    if (first){
+      var box = el('msgs');
+      box.classList.remove('swap');
+      // Чтение размера заставляет браузер применить снятый класс до
+      // того, как мы вернём его обратно. Иначе анимация не начнётся
+      // заново — для браузера ничего не менялось.
+      void box.offsetWidth;
+      box.classList.add('swap');
+    }
 
     Array.prototype.forEach.call(el('msgs').querySelectorAll('.att img'), function(img){
       img.onclick = function(){
