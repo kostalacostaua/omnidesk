@@ -197,7 +197,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
       });
       return { ok: true, sample: text.slice(0, 200) };
     } catch (err) {
-      const message = err instanceof AiError ? err.message : 'Не удалось обратиться к провайдеру';
+      const message = err instanceof AiError ? err.message : 'Не вдалося звернутися до провайдера';
       await withTenant(pool, a.tenantId, async (db) => {
         await db.query(`UPDATE ai_settings SET last_error = $2 WHERE tenant_id = $1`,
           [a.tenantId, message]);
@@ -248,7 +248,7 @@ export function registerAi(app: FastifyInstance, deps: AiDeps): void {
       }, turns);
       return { text };
     } catch (err) {
-      const message = err instanceof AiError ? err.message : 'Не удалось обратиться к провайдеру';
+      const message = err instanceof AiError ? err.message : 'Не вдалося звернутися до провайдера';
       app.log.warn({ tenantId: a.tenantId, err: message }, 'Черновик ИИ не получился');
       await withTenant(pool, a.tenantId, async (db) => {
         await db.query(`UPDATE ai_settings SET last_error = $2 WHERE tenant_id = $1`,

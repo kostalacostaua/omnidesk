@@ -106,29 +106,29 @@ export function readCompletion(payload: unknown): string {
   const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices;
   const raw = Array.isArray(choices) ? choices[0]?.message?.content : undefined;
   const text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text) throw new AiError('Модель вернула пустой ответ', 'empty_answer');
+  if (!text) throw new AiError('Модель повернула порожню відповідь', 'empty_answer');
   return text;
 }
 
 /** Причина отказа словами, которые можно показать в настройках. */
 export function explainStatus(status: number): AiError {
   if (status === 401 || status === 403) {
-    return new AiError('Ключ не подошёл — проверьте его в кабинете провайдера', 'bad_key');
+    return new AiError('Ключ не підійшов — перевірте його в кабінеті провайдера', 'bad_key');
   }
   if (status === 404) {
-    return new AiError('Провайдер не знает такой модели или адреса', 'bad_model');
+    return new AiError('Провайдер не знає такої моделі або адреси', 'bad_model');
   }
   if (status === 429) {
-    return new AiError('Провайдер отвечает «слишком часто» — кончился лимит или деньги', 'rate_limit');
+    return new AiError('Провайдер відповідає «занадто часто» — скінчився ліміт або гроші', 'rate_limit');
   }
-  if (status >= 500) return new AiError('Провайдер отвечает ошибкой', 'provider_down');
-  return new AiError(`Провайдер отказал (${status})`, 'refused');
+  if (status >= 500) return new AiError('Провайдер відповідає помилкою', 'provider_down');
+  return new AiError(`Провайдер відмовив (${status})`, 'refused');
 }
 
 /** Адрес запроса: клиент вводит корень, слеш на конце не важен. */
 export function completionsUrl(baseUrl: string): string {
   const root = baseUrl.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(root)) throw new AiError('Адрес должен начинаться с https://', 'bad_url');
+  if (!/^https?:\/\//i.test(root)) throw new AiError('Адреса має починатися з https://', 'bad_url');
   return root.endsWith('/chat/completions') ? root : `${root}/chat/completions`;
 }
 
@@ -143,15 +143,49 @@ export function completionsUrl(baseUrl: string): string {
  */
 export function geminiUrl(baseUrl: string, model: string): string {
   const root = (baseUrl || PROVIDERS.gemini.baseUrl).trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(root)) throw new AiError('Адрес должен начинаться с https://', 'bad_url');
+  if (!/^https?:\/\//i.test(root)) throw new AiError('Адреса має починатися з https://', 'bad_url');
   const name = model.trim().replace(/^models\//, '');
-  if (!name) throw new AiError('Не указана модель', 'bad_model');
+  if (!name) throw new AiError('Не вказана модель', 'bad_model');
   return `${root}/models/${name}:generateContent`;
 }
 
+/**
+ * Размышления Gemini: сколько их разрешить.
+ *
+ * Начиная с третьего поколения модель по умолчанию «думает» много, и
+ * думает она теми же токенами, что и отвечает. Для короткого ответа в
+ * переписке это означает лимит, потраченный целиком на раздумья, и
+ * ответ без единого слова.
+ *
+ * Имя поля у поколений разное: у третьего и дальше — уровень словом, у
+ * двух с половиной — бюджет числом. Послать чужое имя нельзя: Gemini
+ * отвечает отказом на незнакомое поле, и подключение ломается у того,
+ * кто ничего не менял. Поэтому у моделей, которых мы не узнали,
+ * размышления не настраиваем вовсе.
+ */
+export function geminiThinking(model: string): Record<string, unknown> | null {
+  const name = (model || '').trim().toLowerCase();
+  const gen = /gemini-(\d+)(?:\.(\d+))?/.exec(name);
+  if (!gen) return null;
+  const major = Number(gen[1]);
+  const minor = Number(gen[2] ?? '0');
+  if (major >= 3) return { thinkingLevel: 'low' };
+  if (major === 2 && minor >= 5) return { thinkingBudget: 0 };
+  return null;
+}
+
+/**
+ * Запас токенов на размышления.
+ *
+ * Настройка «сколько токенов на ответ» означает для человека длину
+ * ответа, а Gemini считает этим же лимитом и раздумья. Добавляем запас
+ * сверх настройки, вместо того чтобы молча урезать ответ вдвое.
+ */
+export const GEMINI_THINKING_ROOM = 512;
+
 /** Тело запроса Gemini: свои имена ролей и отдельная системная часть. */
 export function buildGemini(
-  cfg: Pick<AiConfig, 'systemPrompt' | 'maxTokens'>,
+  cfg: Pick<AiConfig, 'systemPrompt' | 'maxTokens' | 'model'>,
   turns: AiTurn[],
 ): Record<string, unknown> {
   const contents = turns
@@ -161,10 +195,20 @@ export function buildGemini(
       parts: [{ text: t.text.trim() }],
     }));
 
+  const thinking = geminiThinking(cfg.model ?? '');
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: cfg.maxTokens + (thinking ? GEMINI_THINKING_ROOM : 0),
+  };
+  if (thinking) generationConfig.thinkingConfig = thinking;
+  // Температуру трогаем только у старых моделей. Google прямо просит
+  // оставить её по умолчанию у думающих: сбитая температура заставляет
+  // их ходить по кругу вместо ответа.
+  else generationConfig.temperature = 0.4;
+
   return {
     systemInstruction: { parts: [{ text: systemText(cfg.systemPrompt) }] },
     contents,
-    generationConfig: { maxOutputTokens: cfg.maxTokens, temperature: 0.4 },
+    generationConfig,
   };
 }
 
@@ -176,11 +220,11 @@ export function readGemini(payload: unknown): string {
   };
 
   const blocked = data?.promptFeedback?.blockReason;
-  if (blocked) throw new AiError('Gemini отказалась отвечать на этот текст', 'blocked');
+  if (blocked) throw new AiError('Gemini відмовилася відповідати на цей текст', 'blocked');
 
   const first = data?.candidates?.[0];
   if (first?.finishReason === 'SAFETY') {
-    throw new AiError('Gemini отказалась отвечать на этот текст', 'blocked');
+    throw new AiError('Gemini відмовилася відповідати на цей текст', 'blocked');
   }
 
   const text = (first?.content?.parts ?? [])
@@ -188,7 +232,18 @@ export function readGemini(payload: unknown): string {
     .join('')
     .trim();
 
-  if (!text) throw new AiError('Модель вернула пустой ответ', 'empty_answer');
+  /*
+   * Пустой ответ с упёршимся лимитом — это не «модель промолчала», а
+   * лимит, потраченный на размышления. Разные беды лечатся по-разному,
+   * и назвать их одним словом значит отправить человека искать не там.
+   */
+  if (!text && first?.finishReason === 'MAX_TOKENS') {
+    throw new AiError(
+      'Ліміт токенів пішов на роздуми моделі — збільште ліміт відповіді',
+      'max_tokens',
+    );
+  }
+  if (!text) throw new AiError('Модель повернула порожню відповідь', 'empty_answer');
   return text;
 }
 
@@ -239,8 +294,8 @@ export async function askModel(
   } catch (err) {
     if (err instanceof AiError) throw err;
     const name = (err as { name?: string })?.name;
-    if (name === 'AbortError') throw new AiError('Провайдер не ответил вовремя', 'timeout');
-    throw new AiError('Не удалось обратиться к провайдеру', 'network');
+    if (name === 'AbortError') throw new AiError('Провайдер не відповів вчасно', 'timeout');
+    throw new AiError('Не вдалося звернутися до провайдера', 'network');
   } finally {
     clearTimeout(timer);
   }

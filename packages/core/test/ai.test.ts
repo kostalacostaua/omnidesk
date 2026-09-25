@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AiError,
   askModel,
+  GEMINI_THINKING_ROOM,
   buildGemini,
+  geminiThinking,
   buildMessages,
   completionsUrl,
   explainStatus,
@@ -199,5 +201,46 @@ describe('Google Gemini', () => {
       .toThrow(AiError);
     expect(() => readGemini({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }))
       .toThrow(AiError);
+  });
+
+  /*
+   * Размышления. С третьего поколения Gemini думает теми же токенами,
+   * которыми отвечает, и по умолчанию думает много: короткий ответ в
+   * переписке получается пустым, а лимит — потраченным.
+   */
+  it('третьему поколению ставим уровень размышлений словом', () => {
+    const cfg = { ...G, model: 'gemini-3.8-flash', maxTokens: 400 };
+    const body = buildGemini(cfg, []) as { generationConfig: Record<string, unknown> };
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+    // Запас сверх настройки: лимит покрывает и раздумья, и ответ.
+    expect(body.generationConfig.maxOutputTokens).toBe(400 + GEMINI_THINKING_ROOM);
+    // Температуру думающим не трогаем: Google просит оставить свою.
+    expect(body.generationConfig.temperature).toBeUndefined();
+  });
+
+  it('поколению два с половиной — бюджет числом: имя поля там другое', () => {
+    const body = buildGemini({ ...G, model: 'gemini-2.5-flash' }, []) as {
+      generationConfig: Record<string, unknown>;
+    };
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('незнакомой модели размышления не настраиваем: чужое поле — это отказ', () => {
+    const body = buildGemini({ ...G, model: 'gemini-2.0-flash' }, []) as {
+      generationConfig: Record<string, unknown>;
+    };
+    expect(body.generationConfig.thinkingConfig).toBeUndefined();
+    expect(body.generationConfig.temperature).toBe(0.4);
+    expect(body.generationConfig.maxOutputTokens).toBe(G.maxTokens);
+    expect(geminiThinking('своя-модель')).toBeNull();
+  });
+
+  it('пусто с упёршимся лимитом — это раздумья, а не молчание модели', () => {
+    try {
+      readGemini({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [] } }] });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as AiError).code).toBe('max_tokens');
+    }
   });
 });
