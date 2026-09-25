@@ -32,6 +32,9 @@ export interface BillingTenant {
   seats_limit: number;
   paid_until: string | null;
   price_month: string | null;
+  /** Сколько мест входит в цену. Сверх них — доплата за каждое. */
+  seats_free: number;
+  seat_price: string | null;
   currency: string;
   created_at: string;
   paddle_status: string | null;
@@ -62,6 +65,13 @@ export interface BillingRow {
   /** paid — оплачено, due — вот-вот кончится, unpaid — просрочено. */
   state: 'paid' | 'due' | 'unpaid';
   priceMonth: number;
+  /** Мест сверх включённых и сколько они стоят в месяц. */
+  seatsFree: number;
+  seatsExtra: number;
+  seatPrice: number;
+  seatsMonth: number;
+  /** База плюс места: столько организация платит в месяц на самом деле. */
+  monthTotal: number;
   currency: string;
   /** Чем платит: карта через Paddle, счёт по безналу или ничем. */
   source: 'paddle' | 'invoice' | 'none';
@@ -80,6 +90,11 @@ export interface BillingTotals {
   partners: number;
   /** План выручки в месяц по тем, кто платит. В валюте каждого своей. */
   mrr: Record<string, number>;
+  /** Из чего он складывается: тарифы отдельно, места сверх отдельно. */
+  mrrBase: Record<string, number>;
+  mrrSeats: Record<string, number>;
+  /** Сколько всего мест продано сверх включённых. */
+  seatsExtra: number;
   paddleActive: number;
   debtUah: number;
   paidUah: number;
@@ -93,12 +108,38 @@ function money(v: unknown): number {
 /** Живая подписка в Paddle: за такую клиент платит картой. */
 const LIVE = ['active', 'trialing', 'past_due'];
 
+/**
+ * Сколько организация платит в месяц.
+ *
+ * База плюс места сверх включённых. Раньше в цене была одна цифра, и
+ * пятнадцать операторов на тарифе с десятью стоили столько же, сколько
+ * десять, — то есть пять человек работали бесплатно, и заметить это
+ * можно было только вручную, сверяя список команды с ценой.
+ *
+ * Корпоративный считается этой же формулой: включённых мест ноль, и вся
+ * цена оказывается ценой мест. Отдельного правила для него не нужно —
+ * отдельное правило означало бы второй способ посчитать деньги.
+ */
+export function seatMoney(
+  seatsLimit: number,
+  seatsFree: number,
+  seatPrice: number,
+): { extra: number; month: number } {
+  const extra = Math.max(0, Math.round(seatsLimit) - Math.round(seatsFree));
+  return { extra, month: Math.round(extra * seatPrice * 100) / 100 };
+}
+
 export function billingRow(
   t: BillingTenant,
   inv: BillingInvoices,
   now: Date = new Date(),
 ): BillingRow {
   const paddle = Boolean(t.paddle_subscription_id && LIVE.includes(String(t.paddle_status ?? '')));
+  const seats = Number(t.seats_limit ?? 0);
+  const free = Number(t.seats_free ?? 0);
+  const seatPrice = money(t.seat_price);
+  const extra = seatMoney(seats, free, seatPrice);
+  const base = money(t.price_month);
   return {
     id: t.id,
     name: t.name,
@@ -108,7 +149,12 @@ export function billingRow(
     seats: Number(t.seats_limit ?? 0),
     paidUntil: t.paid_until,
     state: payState(t.paid_until, now),
-    priceMonth: money(t.price_month),
+    priceMonth: base,
+    seatsFree: free,
+    seatsExtra: extra.extra,
+    seatPrice,
+    seatsMonth: extra.month,
+    monthTotal: Math.round((base + extra.month) * 100) / 100,
     currency: t.currency || 'UAH',
     // Карта важнее счёта: если подписка жива, деньги идут оттуда, даже
     // когда в прошлом были счета по безналу.
@@ -134,6 +180,12 @@ export function billingRow(
  */
 export function billingTotals(rows: BillingRow[]): BillingTotals {
   const mrr: Record<string, number> = {};
+  const mrrBase: Record<string, number> = {};
+  const mrrSeats: Record<string, number> = {};
+  const add = (map: Record<string, number>, cur: string, v: number) => {
+    if (v > 0) map[cur] = Math.round(((map[cur] ?? 0) + v) * 100) / 100;
+  };
+  let seatsExtra = 0;
   let paying = 0;
   let overdue = 0;
   let partners = 0;
@@ -155,9 +207,10 @@ export function billingTotals(rows: BillingRow[]): BillingTotals {
       continue;
     }
     paying += 1;
-    if (r.priceMonth > 0) {
-      mrr[r.currency] = Math.round(((mrr[r.currency] ?? 0) + r.priceMonth) * 100) / 100;
-    }
+    seatsExtra += r.seatsExtra;
+    add(mrr, r.currency, r.monthTotal);
+    add(mrrBase, r.currency, r.priceMonth);
+    add(mrrSeats, r.currency, r.seatsMonth);
   }
 
   return {
@@ -166,6 +219,9 @@ export function billingTotals(rows: BillingRow[]): BillingTotals {
     overdue,
     partners,
     mrr,
+    mrrBase,
+    mrrSeats,
+    seatsExtra,
     paddleActive,
     debtUah: Math.round(debtUah * 100) / 100,
     paidUah: Math.round(paidUah * 100) / 100,
@@ -215,8 +271,8 @@ export function billingByPlan(
     if (r.kind === 'partner') continue;
     const cur = map.get(r.plan) ?? { plan: r.plan, tenants: 0, mrr: {} };
     cur.tenants += 1;
-    if (r.state !== 'unpaid' && r.priceMonth > 0) {
-      cur.mrr[r.currency] = Math.round(((cur.mrr[r.currency] ?? 0) + r.priceMonth) * 100) / 100;
+    if (r.state !== 'unpaid' && r.monthTotal > 0) {
+      cur.mrr[r.currency] = Math.round(((cur.mrr[r.currency] ?? 0) + r.monthTotal) * 100) / 100;
     }
     map.set(r.plan, cur);
   }

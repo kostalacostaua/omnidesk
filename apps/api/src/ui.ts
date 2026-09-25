@@ -8561,6 +8561,12 @@ function tabBilling(){
         L('<div class="hint" style="margin-top:2px">Сума місячних цін тих, у кого оплата не прострочена. ') +
         L('Валюти не зводимо: курс на сьогодні зробив би вчорашній звіт іншим.</div></div>') +
         '<span></span></div>' +
+        '<div class="prow"><div class="pk">' + L('З них тарифи') + '</div>' +
+        '<div class="pv">' + esc(billMoneyMap(t.mrrBase)) + '</div><span></span></div>' +
+        '<div class="prow"><div class="pk">' + L('З них місця') + '</div>' +
+        '<div class="pv">' + esc(billMoneyMap(t.mrrSeats)) +
+        L('<div class="hint" style="margin-top:2px">Продано місць понад тариф: ') +
+        esc(t.seatsExtra == null ? 0 : t.seatsExtra) + '</div></div><span></span></div>' +
         '<div class="prow"><div class="pk">' + L('Борг') + '</div>' +
         '<div class="pv"><b>' + esc(t.debtUah == null ? '—' : t.debtUah) + L(' грн</b>') +
         L('<div class="hint" style="margin-top:2px">Виставлено рахунками і не оплачено.</div></div>') +
@@ -8588,7 +8594,12 @@ function tabBilling(){
         '<div class="mlrec">' + (d.rows || []).map(function(r){
           return '<div class="prow"><div class="pk">' + esc(r.name || r.slug) + '</div>' +
             '<div class="pv">' + esc(r.plan) + ' · ' + esc(billSource(r)) +
-            (r.priceMonth ? ' · ' + esc(r.priceMonth) + ' ' + esc(r.currency) : '') +
+            (r.monthTotal ? ' · ' + esc(r.monthTotal) + ' ' + esc(r.currency) : '') +
+            (r.seatsExtra
+              ? L('<div class="hint" style="margin-top:2px">Місць: ') + esc(r.seats) +
+                L(', понад тариф ') + esc(r.seatsExtra) + ' × ' + esc(r.seatPrice) +
+                ' = ' + esc(r.seatsMonth) + ' ' + esc(r.currency) + '</div>'
+              : '') +
             L('<div class="hint" style="margin-top:2px">') + esc(billState(r)) +
             (r.paidUntil ? L(' до ') + esc(fmtDate(r.paidUntil)) : '') +
             (r.debtUah ? L(' · борг ') + esc(r.debtUah) + L(' грн') : '') +
@@ -8615,11 +8626,15 @@ function billExport(){
   if (!BILLREP) return;
   csvDump('rozmovio-groshi',
     [L('Організація'), L('Ідентифікатор'), L('Тариф'), L('Вид'), L('Місць'),
-     L('Чим платить'), L('Ціна на місяць'), L('Валюта'), L('Стан'), L('Оплачено до'),
+     L('Місць у тарифі'), L('Понад тариф'), L('Ціна місця'), L('Місця на місяць'),
+     L('Чим платить'), L('Ціна тарифу'), L('Разом на місяць'), L('Валюта'),
+     L('Стан'), L('Оплачено до'),
      L('Рахунків'), L('Отримано, грн'), L('Борг, грн'), L('Остання оплата'),
      L('Підписка Paddle'), L('Створено')],
     (BILLREP.rows || []).map(function(r){
-      return [r.name, r.slug, r.plan, r.kind, r.seats, billSource(r), r.priceMonth, r.currency,
+      return [r.name, r.slug, r.plan, r.kind, r.seats,
+        r.seatsFree, r.seatsExtra, r.seatPrice, r.seatsMonth,
+        billSource(r), r.priceMonth, r.monthTotal, r.currency,
         billState(r), r.paidUntil || '', r.invoices, r.paidUah, r.debtUah,
         r.lastPaidAt ? String(r.lastPaidAt).slice(0, 10) : '',
         r.paddleStatus || '', String(r.createdAt).slice(0, 10)];
@@ -8849,6 +8864,17 @@ function paintOrg(){
         '<input id="opaid" type="date" value="' + esc(t.paidUntil || '') + '"' +
           (t.kind === 'partner' ? ' disabled' : '') + '>' +
       '</div>' +
+      /* Места сверх тарифа. Отдельной строкой, потому что это отдельные
+         деньги: пятнадцать операторов на тарифе с десятью — не тот же
+         счёт, что десять. Корпоративный считается этой же парой полей:
+         включённых мест ноль, и вся цена оказывается ценой мест. */
+      '<div class="row2" style="margin-top:8px">' +
+        L('<input id="ofree" type="number" min="0" placeholder="місць у тарифі" value="') +
+          esc(t.seatsFree == null ? '' : t.seatsFree) + '">' +
+        L('<input id="oseatp" placeholder="ціна місця понад тариф" value="') +
+          esc(t.seatPrice ? t.seatPrice : '') + '">' +
+        '<div class="hint" id="oseatSum" style="align-self:center"></div>' +
+      '</div>' +
       (t.kind === 'partner'
         ? L('<div class="hint">Партнерський кабінет: оплата не потрібна, у списку він завжди «партнер».</div>')
         : '') +
@@ -8951,6 +8977,24 @@ function paintOrg(){
 
   el('oback').onclick = tabOwner;
   el('osave').onclick = ownSave;
+
+  /* Итог считаем прямо под полями. Человек, который ставит цену места,
+     должен видеть, во что она превращается, не открывая калькулятор. */
+  function seatSum(){
+    var all = Number(el('oseats').value) || 0;
+    var free = Number(el('ofree').value) || 0;
+    var price = Number(String(el('oseatp').value).replace(',', '.')) || 0;
+    var extra = Math.max(0, all - free);
+    el('oseatSum').textContent = extra
+      ? L('понад тариф: ') + extra + ' × ' + price + ' = ' +
+        (Math.round(extra * price * 100) / 100) + ' ' + el('ocur').value
+      : L('усі місця входять у тариф');
+  }
+  ['oseats', 'ofree', 'oseatp', 'ocur'].forEach(function(id){
+    if (el(id)) el(id).oninput = seatSum;
+    if (el(id)) el(id).onchange = seatSum;
+  });
+  seatSum();
   el('oplan').onchange = ownPrice;
   el('ocur').onchange = ownPrice;
   el('okind').onchange = function(){
@@ -9178,6 +9222,8 @@ function ownSave(){
     kind: el('okind').value,
     status: el('ostatus').value,
     seatsLimit: Number(el('oseats').value) || 1,
+    seatsFree: Number(el('ofree').value) || 0,
+    seatPrice: el('oseatp').value,
     priceMonth: el('oprice').value,
     currency: el('ocur').value,
     paidUntil: el('opaid').value || null,

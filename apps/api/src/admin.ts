@@ -64,6 +64,8 @@ interface TenantRow {
   status: string;
   source: string;
   seats_limit: number;
+  seats_free: number;
+  seat_price: string | null;
   paid_until: string | null;
   price_month: string | null;
   currency: string;
@@ -203,8 +205,9 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
 
     const tenants = await withSystem(pool, 'организации для свода', async (db) => {
       const { rows } = await db.query<BillingTenant>(
-        `SELECT id, name, slug, plan, kind, status, seats_limit, paid_until,
-                price_month, currency, created_at, paddle_status, paddle_subscription_id
+        `SELECT id, name, slug, plan, kind, status, seats_limit, seats_free, seat_price,
+                paid_until, price_month, currency, created_at,
+                paddle_status, paddle_subscription_id
            FROM tenants WHERE status <> 'deleted' ORDER BY created_at`,
       );
       return rows;
@@ -311,7 +314,7 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
     const t = await withSystem(pool, 'организация', async (db) => {
       const { rows } = await db.query<TenantRow>(
         `SELECT id, name, slug, plan, kind, status, source, seats_limit,
-                paid_until, price_month, currency, note, created_at
+                seats_free, seat_price, paid_until, price_month, currency, note, created_at
            FROM tenants WHERE id = $1 LIMIT 1`,
         [req.params.id],
       );
@@ -365,6 +368,8 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
         status: t.status,
         source: t.source,
         seatsLimit: t.seats_limit,
+        seatsFree: t.seats_free,
+        seatPrice: t.seat_price === null ? 0 : Number(t.seat_price),
         paidUntil: t.paid_until,
         priceMonth: t.price_month === null ? null : Number(t.price_month),
         currency: t.currency,
@@ -393,6 +398,8 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       kind?: string;
       status?: string;
       seatsLimit?: number;
+      seatsFree?: number;
+      seatPrice?: number | string;
       paidUntil?: string | null;
       priceMonth?: number | string;
       currency?: string;
@@ -424,6 +431,13 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
       const n = Math.max(1, Math.min(1000, Math.round(Number(b.seatsLimit) || 1)));
       put('seats_limit', n);
     }
+    if (b.seatsFree !== undefined) {
+      // Включённых мест не может быть больше, чем всего: иначе доплата
+      // считалась бы от отрицательного числа.
+      const n = Math.max(0, Math.min(1000, Math.round(Number(b.seatsFree) || 0)));
+      put('seats_free', n);
+    }
+    if (b.seatPrice !== undefined) put('seat_price', money(b.seatPrice));
     if (b.paidUntil !== undefined) put('paid_until', day(b.paidUntil));
     if (b.priceMonth !== undefined) put('price_month', money(b.priceMonth));
     if (b.currency !== undefined) put('currency', String(b.currency).slice(0, 8).toUpperCase());

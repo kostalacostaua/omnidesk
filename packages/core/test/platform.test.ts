@@ -189,3 +189,62 @@ describe('свод по деньгам', () => {
     expect(t.paidUah).toBe(2000.25);
   });
 });
+
+/*
+ * Места сверх тарифа. Пока цена была одной цифрой, пятнадцать
+ * операторов на тарифе с десятью стоили столько же, сколько десять, —
+ * то есть пять человек работали бесплатно, и увидеть это можно было
+ * только вручную, сверяя список команды с ценой.
+ */
+describe('места сверх тарифа', () => {
+  const T = (over: Record<string, unknown> = {}) => ({
+    id: '1', name: 'Ромашка', slug: 'romashka', plan: 'pro', kind: 'client',
+    status: 'active', seats_limit: 15, seats_free: 10, seat_price: '5',
+    paid_until: '2027-01-01', price_month: '60', currency: 'USD',
+    created_at: '2026-01-01T00:00:00Z',
+    paddle_status: null, paddle_subscription_id: null, ...over,
+  }) as never;
+  const NO_INV = { issued: 0, paid: 0, debtUah: 0, paidUah: 0, lastPaidAt: null, byMonth: {} };
+  const NOW = new Date('2026-09-25T00:00:00Z');
+
+  it('доплата считается только за места сверх включённых', async () => {
+    const { seatMoney } = await import('../src/billing-report.js');
+    expect(seatMoney(15, 10, 5)).toEqual({ extra: 5, month: 25 });
+    expect(seatMoney(10, 10, 5)).toEqual({ extra: 0, month: 0 });
+    // Мест меньше, чем включено, — доплаты нет, а не отрицательная.
+    expect(seatMoney(3, 10, 5)).toEqual({ extra: 0, month: 0 });
+  });
+
+  it('в цене организации база и места складываются', async () => {
+    const { billingRow } = await import('../src/billing-report.js');
+    const r = billingRow(T(), NO_INV, NOW);
+    expect(r.priceMonth).toBe(60);
+    expect(r.seatsMonth).toBe(25);
+    expect(r.monthTotal).toBe(85);
+  });
+
+  // Корпоративный считается той же формулой: включённых мест ноль, и
+  // вся цена оказывается ценой мест. Второго способа считать деньги
+  // быть не должно.
+  it('корпоративный считается по головам той же формулой', async () => {
+    const { billingRow } = await import('../src/billing-report.js');
+    const r = billingRow(
+      T({ plan: 'custom', seats_limit: 40, seats_free: 0, seat_price: '12', price_month: '0' }),
+      NO_INV, NOW,
+    );
+    expect(r.seatsExtra).toBe(40);
+    expect(r.monthTotal).toBe(480);
+  });
+
+  it('в итогах видно, сколько денег от тарифов и сколько от мест', async () => {
+    const { billingRow, billingTotals } = await import('../src/billing-report.js');
+    const t = billingTotals([
+      billingRow(T(), NO_INV, NOW),
+      billingRow(T({ id: '2', seats_limit: 12, seats_free: 10 }), NO_INV, NOW),
+    ]);
+    expect(t.mrrBase).toEqual({ USD: 120 });
+    expect(t.mrrSeats).toEqual({ USD: 35 });
+    expect(t.mrr).toEqual({ USD: 155 });
+    expect(t.seatsExtra).toBe(7);
+  });
+});
