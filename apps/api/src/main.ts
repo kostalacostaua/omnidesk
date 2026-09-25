@@ -8,7 +8,6 @@ import {
   QUEUE_MEDIA,
   QUEUE_CRM_SYNC,
   QUEUE_MTPROTO_LOGIN,
-  accessOk,
   assertRlsIntegrity,
   canSendFreeform,
   isCommentChannel,
@@ -23,6 +22,7 @@ import {
   messageEventKey,
   parseWorkHours,
   recordEvent,
+  tenantBlock,
   workedSeconds,
   encryptJson,
   maskSecret,
@@ -400,24 +400,36 @@ function payFree(path: string): boolean {
  * опрашивает нас каждые три секунды. Минута устаревания здесь ничего не
  * решает: оплата продлевается на месяцы, а не на секунды.
  */
-const payState60 = new Map<string, { until: string | null; kind: string; at: number }>();
+const payState60 = new Map<
+  string,
+  { until: string | null; kind: string; status: string; at: number }
+>();
 
-async function payOk(tenantId: string): Promise<{ ok: boolean; paidUntil: string | null }> {
+async function payOk(
+  tenantId: string,
+): Promise<{ ok: boolean; paidUntil: string | null; why: string | null }> {
   const now = Date.now();
   let row = payState60.get(tenantId);
   if (!row || now - row.at > 60_000) {
     const got = await withSystem(pool, 'состояние оплаты', async (db) => {
-      const { rows } = await db.query<{ until: string | null; kind: string }>(
-        `SELECT to_char(paid_until, 'YYYY-MM-DD') AS until, kind FROM tenants WHERE id = $1`,
+      const { rows } = await db.query<{ until: string | null; kind: string; status: string }>(
+        `SELECT to_char(paid_until, 'YYYY-MM-DD') AS until, kind, status
+           FROM tenants WHERE id = $1`,
         [tenantId],
       );
       return rows[0] ?? null;
     });
-    row = { until: got?.until ?? null, kind: got?.kind ?? 'client', at: now };
+    row = {
+      until: got?.until ?? null,
+      kind: got?.kind ?? 'client',
+      status: got?.status ?? 'active',
+      at: now,
+    };
     payState60.set(tenantId, row);
   }
   const today = new Date().toISOString().slice(0, 10);
-  return { ok: accessOk(row.kind, row.until, today), paidUntil: row.until };
+  const why = tenantBlock({ kind: row.kind, status: row.status, paidUntil: row.until }, today);
+  return { ok: why === null, paidUntil: row.until, why };
 }
 
 app.addHook('preHandler', async (req, reply) => {
@@ -458,7 +470,9 @@ app.addHook('preHandler', async (req, reply) => {
   if (auth && !payFree(path)) {
     const pay = await payOk(auth.tenantId);
     if (!pay.ok) {
-      return reply.code(402).send({ error: 'payment_required', paidUntil: pay.paidUntil });
+      return reply
+        .code(402)
+        .send({ error: 'payment_required', why: pay.why, paidUntil: pay.paidUntil });
     }
   }
 

@@ -140,6 +140,25 @@ describe('доступ по дате оплаты', () => {
     expect(accessOk('partner', '2020-01-01', '2026-09-26')).toBe(true);
   });
 
+  /*
+   * Приостановка — прямое решение владельца, и она сильнее расчёта по
+   * датам. Оплаченный срок её не отменяет: если бы отменял, снять
+   * кабинет с работы было бы нечем, пока не кончится оплата.
+   */
+  it('приостановленный кабинет закрыт при любом сроке', async () => {
+    const { tenantBlock } = await import('../src/platform.js');
+    expect(tenantBlock({ status: 'suspended', paidUntil: '2030-01-01' }, '2026-09-26')).toBe('suspended');
+    expect(tenantBlock({ status: 'suspended', kind: 'partner' }, '2026-09-26')).toBe('suspended');
+    expect(tenantBlock({ status: 'active', paidUntil: '2030-01-01' }, '2026-09-26')).toBeNull();
+  });
+
+  it('причина закрытия называется словом: оплата лечит не всё', async () => {
+    const { tenantBlock } = await import('../src/platform.js');
+    expect(tenantBlock({ status: 'active', paidUntil: '2026-09-25' }, '2026-09-26')).toBe('expired');
+    expect(tenantBlock({ status: 'active', paidUntil: null }, '2026-09-26')).toBeNull();
+    expect(tenantBlock({ status: 'active', kind: 'partner', paidUntil: '2020-01-01' }, '2026-09-26')).toBeNull();
+  });
+
   // Дата приходит из базы вместе со временем, если её достали как
   // timestamp: сравнение строк должно это переживать.
   it('время рядом с датой ничего не ломает', async () => {

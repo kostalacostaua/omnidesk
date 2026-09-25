@@ -116,9 +116,34 @@ export function accessOk(
   paidUntil: string | null | undefined,
   today: string,
 ): boolean {
-  if (kind === 'partner') return true;
-  if (!paidUntil) return true;
-  return String(paidUntil).slice(0, 10) >= today;
+  return tenantBlock({ kind, paidUntil }, today) === null;
+}
+
+/**
+ * Почему кабинет закрыт.
+ *
+ * Причин две, и человеку они означают разное. «Срок вышел» лечится
+ * оплатой, и на экране должна стоять страница тарифа. «Приостановлено»
+ * поставил владелец руками — руками же и снимается, и обещать здесь
+ * оплату как выход было бы неправдой.
+ *
+ * Приостановка сильнее всего остального, включая партнёрский кабинет:
+ * это прямое решение человека, а не расчёт по датам.
+ */
+export type BlockReason = 'suspended' | 'expired';
+
+export function tenantBlock(
+  t: {
+    kind?: string | null;
+    status?: string | null;
+    paidUntil?: string | null;
+  },
+  today: string,
+): BlockReason | null {
+  if (t.status === 'suspended') return 'suspended';
+  if (t.kind === 'partner') return null;
+  if (!t.paidUntil) return null;
+  return String(t.paidUntil).slice(0, 10) >= today ? null : 'expired';
 }
 
 export function payState(paidUntil: string | Date | null | undefined, now: Date = new Date()): PayState {

@@ -1292,13 +1292,22 @@ function api(path, opts){
  */
 function payWall(info){
   if (el('wall')) return;
+  /* Причина закрытия у стены одна на вид, но разная по смыслу. Срок
+     вышел — лечится оплатой, и на экране тарифы. Приостановлено —
+     решение человека, и оплата тут ничего не решает: обещать её как
+     выход было бы неправдой. */
+  var off = info && info.why === 'suspended';
   var w = document.createElement('div');
   w.id = 'wall';
   w.innerHTML = '<div class="wallbox">' +
-    L('<h2>Термін доступу вичерпано</h2>') +
-    L('<p class="dim">Пробний період завершився') +
-    ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') +
-    L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>') +
+    (off
+      ? L('<h2>Доступ призупинено</h2>') +
+        L('<p class="dim">Кабінет вимкнено адміністратором сервісу. Дані на місці — ') +
+        L('напишіть нам, і ми розберемося.</p>')
+      : L('<h2>Термін доступу вичерпано</h2>') +
+        L('<p class="dim">Пробний період завершився') +
+        ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') +
+        L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>')) +
     '<div id="bill" class="card">' + L('<div class="hint">Завантажую...</div>') + '</div>' +
     L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallOut">Вийти</button></div>') +
     '</div>';
