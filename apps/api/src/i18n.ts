@@ -71,11 +71,30 @@ function L(text){
  * всегда считается от неё — иначе после двух переключений языка
  * переводился бы уже перевод.
  */
+/*
+ * Подпись элемента — это его текстовый узел, а не всё содержимое.
+ *
+ * Внутри кнопки, кроме надписи, лежат иконка и счётчик непрочитанных.
+ * Присваивание textContent стирало их вместе с надписью: после смены
+ * языка или повторного входа боковая панель оставалась без иконок до
+ * обновления страницы, а счётчик чатов исчезал насовсем.
+ */
+function textNode(n){
+  for (var i = 0; i < n.childNodes.length; i++){
+    var c = n.childNodes[i];
+    if (c.nodeType === 3 && c.nodeValue.trim()) return c;
+  }
+  return null;
+}
+
 function applyLang(){
   document.documentElement.setAttribute('lang', LANG);
   Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function(n){
-    if (!n.dataset.uk) n.dataset.uk = n.textContent.trim();
-    n.textContent = L(n.dataset.uk);
+    var node = textNode(n);
+    if (!n.dataset.uk) n.dataset.uk = node ? node.nodeValue.trim() : n.textContent.trim();
+    var text = L(n.dataset.uk);
+    if (node) node.nodeValue = text;
+    else n.appendChild(document.createTextNode(text));
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-tp]'), function(n){
     if (!n.dataset.ukp) n.dataset.ukp = n.getAttribute('placeholder') || '';

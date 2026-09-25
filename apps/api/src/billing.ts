@@ -447,8 +447,25 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
 
     for (const plan of SYNC_PLANS) {
       const ids = { ...(have[plan] ?? {}) };
+
+      // Запомненное проверяем, а не принимаем на веру. Переезд из
+      // песочницы в боевой Paddle — это другой кабинет с другими
+      // товарами, а идентификаторы у нас остались прежние: без
+      // проверки кнопка отвечала бы «всё уже заведено», и клиент
+      // упирался бы в цену, которой в этом Paddle нет.
+      for (const key of ['product', 'month', 'year'] as const) {
+        const id = ids[key];
+        if (!id) continue;
+        const path = key === 'product' ? `/products/${id}` : `/prices/${id}`;
+        const found = await paddleFetch(deps, req.log, path, { method: 'GET' });
+        if (!found.ok && found.status === 404) delete ids[key];
+      }
+
       // Обе цены уже на месте — тариф пропускаем целиком.
-      if (ids.month && ids.year) continue;
+      if (ids.month && ids.year) {
+        have[plan] = ids;
+        continue;
+      }
 
       const byCur = planPrices[plan] ?? {};
       const currency = paddleCurrency(byCur);
@@ -518,7 +535,10 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       have[plan] = ids;
     }
 
-    if (done.length) {
+    // Записываем и тогда, когда только вычеркнули чужое: иначе
+    // идентификаторы из песочницы остались бы в настройках и следующая
+    // проверка снова ходила бы за ними в Paddle.
+    if (done.length || JSON.stringify(have) !== JSON.stringify(p.paddle_prices ?? {})) {
       await withSystem(pool, 'товары Paddle', async (db) => {
         await db.query(
           `UPDATE platform_settings SET paddle_prices = $1::jsonb, updated_at = now() WHERE id = 1`,

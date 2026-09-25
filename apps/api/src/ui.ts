@@ -7886,11 +7886,17 @@ function icon(name){
   return '<svg viewBox="0 0 24 24">' + (ICONS[name] || '') + '</svg>';
 }
 
-/** Проставляет иконки кнопкам, у которых указан data-icon. */
+/**
+ * Проставляет иконки кнопкам, у которых указан data-icon.
+ *
+ * Признаком «уже нарисовано» служит сама иконка, а не отметка в
+ * данных кнопки. Отметка держалась даже тогда, когда иконку успевали
+ * стереть перерисовкой подписей, — и вернуть её было нечем до
+ * обновления страницы.
+ */
 function paintIcons(root){
   Array.prototype.forEach.call((root || document).querySelectorAll('[data-icon]'), function(b){
-    if (b.dataset.painted) return;
-    b.dataset.painted = '1';
+    if (b.querySelector('svg')) return;
     b.insertAdjacentHTML('afterbegin', icon(b.dataset.icon));
   });
 }
@@ -8014,7 +8020,6 @@ function paintBell(){
   var b = el('bell');
   if (!b) return;
   var on = PREFS.sound || PREFS.push;
-  b.dataset.painted = '';
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(on ? 'bell' : 'bellOff'));
   b.insertAdjacentText('beforeend', on ? L('Звук') : L('Тихо'));
@@ -8033,7 +8038,6 @@ function paintThemeBtn(){
   var b = el('themeTitle');
   if (!b) return;
   var v = themeGet();
-  b.dataset.painted = '';
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(v === 'light' ? 'sun' : v === 'dark' ? 'moon' : 'auto'));
   b.insertAdjacentText('beforeend', v === 'light' ? L('Світла') : v === 'dark' ? L('Темна') : L('Тема'));
