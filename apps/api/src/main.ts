@@ -43,6 +43,7 @@ import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
 import { registerBilling } from './billing.js';
+import { registerPay } from './pay.js';
 import { registerLanding, landingPage } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
@@ -684,6 +685,27 @@ registerZoho(app, {
   stateSecret: JWT_SECRET,
 });
 
+const SITE_HOSTS = (process.env['SITE_HOSTS'] ?? 'rozmovio.com,www.rozmovio.com')
+  .split(',')
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+
+/**
+ * Домен, с которого продаём.
+ *
+ * Paddle разрешает открывать окно оплаты только с одобренных им
+ * доменов, и субдомен одобряется отдельно от основного. Витрина
+ * одобряется первой и всегда, поэтому оплату по умолчанию ведём
+ * оттуда. Переменной можно указать другой адрес — или пустую строку,
+ * и тогда окно откроется прямо в кабинете, как раньше.
+ */
+const PAY_URL =
+  process.env['PAY_URL'] !== undefined
+    ? process.env['PAY_URL'].replace(/[/]+$/, '')
+    : SITE_HOSTS.length
+      ? `https://${SITE_HOSTS[0]}/pay`
+      : '';
+
 registerBilling(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
@@ -694,6 +716,14 @@ registerBilling(app, {
   apiKey: process.env['PADDLE_API_KEY'] ?? '',
   webhookSecret: process.env['PADDLE_WEBHOOK_SECRET'] ?? '',
   clientToken: process.env['PADDLE_CLIENT_TOKEN'] ?? '',
+  payUrl: PAY_URL,
+});
+
+registerPay(app, {
+  env: process.env['PADDLE_ENV'] === 'production' ? 'production' : 'sandbox',
+  clientToken: process.env['PADDLE_CLIENT_TOKEN'] ?? '',
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+  contactEmail: process.env['CONTACT_EMAIL'] ?? 'support@rozmovio.com',
 });
 
 registerLegal(app, {
@@ -781,10 +811,6 @@ registerLanding(app, {
 /** Та же страница, что по /promo: собирается один раз вместе с виджетом. */
 const SITE_PAGE = landingPage(process.env['WEBCHAT_SITE_KEY'] ?? '');
 
-const SITE_HOSTS = (process.env['SITE_HOSTS'] ?? 'rozmovio.com,www.rozmovio.com')
-  .split(',')
-  .map((h) => h.trim().toLowerCase())
-  .filter(Boolean);
 
 function isSiteHost(req: { headers: Record<string, unknown> }): boolean {
   const host = String(req.headers['host'] ?? '').toLowerCase().split(':')[0] ?? '';

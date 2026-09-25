@@ -49,6 +49,14 @@ export interface BillingDeps {
   webhookSecret: string;
   /** Открытый токен для окна оплаты в браузере. */
   clientToken: string;
+  /**
+   * Страница оплаты на одобренном Paddle домене.
+   *
+   * Пустая строка означает «открывать окно прямо в кабинете» — так
+   * было до того, как выяснилось, что субдомен кабинета Paddle
+   * одобряет отдельно от витрины и может не одобрить вовсе.
+   */
+  payUrl: string;
 }
 
 const auth401 = { error: 'unauthorized' };
@@ -357,7 +365,14 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       await db.query(`UPDATE tenants SET paddle_txn = $2 WHERE id = $1`, [a.tenantId, id]);
     });
 
-    return { transactionId: id, env: deps.env, clientToken: deps.clientToken };
+    return {
+      transactionId: id,
+      env: deps.env,
+      clientToken: deps.clientToken,
+      // Кабинет решает не сам: домен, с которого можно продавать,
+      // знает только сервер.
+      payUrl: deps.payUrl ? `${deps.payUrl}?_ptxn=${encodeURIComponent(id)}` : '',
+    };
   });
 
   /**

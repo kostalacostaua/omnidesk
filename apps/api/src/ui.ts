@@ -4511,6 +4511,11 @@ function billPay(plan, btn){
   busy(btn, true);
   api('/billing/checkout', { method:'POST', body:{ plan: plan, period: BILL_PERIOD } })
     .then(function(d){
+      /* Окно оплаты открывается там, где Paddle разрешил продавать.
+         Домен кабинета он одобряет отдельно от витрины и может не
+         одобрить вовсе, поэтому адрес называет сервер, а не мы здесь.
+         Пусто — открываем на месте, как раньше. */
+      if (d.payUrl) { window.location.href = d.payUrl; return null }
       return paddleReady(d).then(function(){
         busy(btn, false);
         window.Paddle.Checkout.open({ transactionId: d.transactionId });
