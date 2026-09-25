@@ -662,6 +662,15 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .ochk input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;padding:0}
   .req{color:var(--crit)}
 
+  /* Настройка заказа: отметки полей идут в две колонки — их бывает
+     тридцать, и один столбец превращает карточку в простыню. */
+  .osf{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0 14px;
+    margin-top:6px;max-height:280px;overflow-y:auto}
+  .osp{padding:8px 0;border-bottom:1px solid var(--line)}
+  .osp:last-child{border-bottom:0}
+  .osc{display:flex;gap:12px;flex-wrap:wrap}
+  .osc .fld{flex:1 1 180px;min-width:0}
+
   .stab{border-radius:10px 10px 0 0;padding:10px 12px}
   .stab.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
   .item{border-radius:12px}
@@ -2502,11 +2511,25 @@ function renderCard(){
  * второму оператору.
  */
 var ORD = { conv:null, lines:[], subject:'', vals:{},
-  cat:[], truncated:false, fields:[], ready:false, q:'', all:false, err:'' };
+  cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
 
 function ordFresh(){
   ORD = { conv:current, lines:[], subject:'', vals:{},
-    cat:[], truncated:false, fields:[], ready:false, q:'', all:false, err:'' };
+    cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
+}
+
+/**
+ * Поля выбранной воронки.
+ *
+ * Одно место на весь код окна: заголовок, форма и отправка обязаны
+ * понимать «какие сейчас поля» одинаково.
+ */
+function ordFields(){
+  var f = ORD.form;
+  if (!f) return [];
+  if (f.module !== 'Deals') return f.fields || [];
+  var p = (f.pipelines || []).filter(function(x){ return x.id === ORD.pipe })[0];
+  return p ? p.fields : (f.fields || []);
 }
 
 /** Сумма — только для глаз оператора. Настоящую считает Zoho. */
@@ -2560,9 +2583,13 @@ function ordLoad(){
     ORD.cat = r.products || [];
     ORD.truncated = !!r.truncated;
     for (var i = 0; i < ORD.cat.length; i++) ORD.cat[i].i = i;
-    return api('/crm/order-fields')
-      .then(function(f){ ORD.fields = f.fields || [] })
-      .catch(function(){ ORD.fields = [] });
+    return api('/crm/order-form')
+      .then(function(f){
+        ORD.form = f;
+        var ps = f.pipelines || [];
+        ORD.pipe = ps.length ? ps[0].id : '';
+      })
+      .catch(function(){ ORD.form = null });
   }).then(function(){
     ORD.ready = true;
     ordPaint();
@@ -2708,33 +2735,64 @@ function ordCart(){
     x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); ordCart() };
   });
   el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
+
+  /*
+   * Сумма сделки. У заказа её считает Zoho по строкам товаров, а у
+   * сделки такого правила нет: поле Amount обычное, и сделка без него
+   * не попадает ни в воронку по деньгам, ни в отчёт. Подставляем итог
+   * корзины, пока человек не вписал своё — после этого не трогаем.
+   */
+  var amount = ordFields().filter(function(f){ return f.api === 'Amount' })[0];
+  if (amount && ORD.autoAmount !== false){
+    var was = ORD.vals.Amount;
+    ORD.vals.Amount = ordMoney(ordTotal());
+    if (was !== ORD.vals.Amount) ordFlds();
+  }
 }
 
 /**
- * Поля заказа. Обязательные видны всегда, остальные — по нажатию.
+ * Поля заказа и воронка.
  *
- * Показать разом все тридцать полей Sales_Orders значило бы спрятать
- * те три, без которых Zoho заказ не примет.
+ * Какие поля показывать, решено в настройках: там отмечены нужные под
+ * каждую воронку. Обязательные Zoho добавляются к ним сама — их не
+ * отметить забыли бы ровно один раз, и заказ перестал бы создаваться.
+ *
+ * Воронка спрашивается, только если их открыто больше одной: выбор из
+ * одного варианта — не выбор, а лишнее поле на экране.
  */
 function ordFlds(){
   var box = el('oFlds');
   if (!box) return;
 
-  var need = ORD.fields.filter(function(f){ return f.required });
-  var rest = ORD.fields.filter(function(f){ return !f.required });
-  var show = need.concat(ORD.all ? rest : []);
+  var f = ORD.form;
+  var flds = ordFields();
+  var ps = (f && f.pipelines) || [];
 
   box.innerHTML =
-    show.map(ordFld).join('') +
-    (rest.length
-      ? '<button class="ghost mini" id="oMoreF" style="margin-top:6px">' +
-        (ORD.all ? L('Сховати решту полів') : L('Решта полів Zoho') + ' (' + rest.length + ')') +
-        '</button>'
+    (f && !f.ready
+      ? L('<div class="hint">Замовлення ще не налаштоване: у «Інтеграціях» вкажіть, ') +
+        L('куди його створювати.</div>')
       : '') +
+    (ps.length > 1
+      ? L('<div class="fld"><label>Воронка</label><select id="oPipe">') +
+        ps.map(function(p){
+          return '<option value="' + esc(p.id) + '"' + (p.id === ORD.pipe ? ' selected' : '') +
+            '>' + esc(p.name) + '</option>';
+        }).join('') + '</select></div>'
+      : '') +
+    flds.map(ordFld).join('') +
     L('<div style="margin-top:10px"><button class="primary" id="oMake">Створити замовлення</button></div>');
 
+  if (el('oPipe')) el('oPipe').onchange = function(){
+    ORD.pipe = el('oPipe').value;
+    ordFlds();
+  };
+
   Array.prototype.forEach.call(box.querySelectorAll('[data-off]'), function(x){
-    x.onchange = function(){ ORD.vals[x.dataset.off] = x.value };
+    x.onchange = function(){
+      ORD.vals[x.dataset.off] = x.value;
+      if (x.dataset.off === 'Amount') ORD.autoAmount = false;
+    };
   });
   Array.prototype.forEach.call(box.querySelectorAll('[data-ofb]'), function(x){
     x.onchange = function(){ ORD.vals[x.dataset.ofb] = x.checked };
@@ -2746,7 +2804,6 @@ function ordFlds(){
         .map(function(o){ return o.value });
     };
   });
-  if (el('oMoreF')) el('oMoreF').onclick = function(){ ORD.all = !ORD.all; ordFlds() };
   el('oMake').onclick = ordCreate;
 }
 
@@ -2800,6 +2857,9 @@ function ordWhy(e){
     : p.error === 'zoho_scope' ? L('Zoho видала менше прав, ніж потрібно для товарів і замовлень — перепідключіть Zoho на сторінці інтеграцій')
     : p.error === 'zoho_no_permission' ? L('У вашого користувача Zoho немає доступу до товарів або замовлень — увімкніть модуль у правах профілю Zoho')
     : p.error === 'fields_required' ? L('Заповніть обовʼязкові поля: ') + (p.detail || '')
+    : p.error === 'order_not_set_up' ? L('Замовлення не налаштоване: у «Інтеграціях» вкажіть модуль, воронку і таблицю товарів')
+    : p.error === 'pipeline_not_allowed' ? L('Ця воронка закрита для замовлень')
+    : p.error === 'product_unknown' ? L('Не вдалося дізнатися назву товару в Zoho')
     : p.error === 'token_rejected' ? L('Zoho відкликала доступ — перепідключіть на сторінці інтеграцій')
     : p.detail ? L('Zoho відмовила: ') + p.detail
     : L('Zoho не прийняла запит');
@@ -2813,6 +2873,7 @@ function ordCreate(){
 
   api('/conversations/' + current + '/order', { method:'POST', body:{
     subject: ORD.subject || '',
+    pipeline: ORD.pipe || '',
     fields: ORD.vals,
     items: ORD.lines.map(function(l){
       return { productId: l.id, quantity: l.qty, price: l.price };
@@ -2824,6 +2885,7 @@ function ordCreate(){
     ORD.subject = '';
     ORD.vals = {};
     ORD.q = '';
+    ORD.autoAmount = true;
     ordClose();
     if (el('oDone')) el('oDone').innerHTML = r.url
       ? '<a href="' + esc(r.url) + L('" target="_blank" rel="noopener">замовлення створено</a>')
@@ -2838,6 +2900,209 @@ function wireOrder(){
   if (ORD.conv !== current) ordFresh();
   el('oOpen').onclick = ordOpen;
   ordCount();
+}
+
+/* ══════════════ Настройка заказа ══════════════ */
+
+/**
+ * Куда уезжает заказ.
+ *
+ * Эта страница описывает чужую разметку, а не нашу: модуль, воронки,
+ * поля и таблицу товаров придумали в CRM клиента. Поэтому всё, что
+ * здесь выбирается, приходит из самой Zoho — списки, а не поля ввода.
+ * Вписанное руками имя поля ошибается молча и обнаруживается на
+ * первом заказе.
+ */
+var OS = { set:null, meta:null, busy:false, err:'', open:'' };
+
+function osLoad(){
+  return api('/settings/orders').then(function(r){
+    OS.set = r.settings;
+    return osMeta(OS.set.module);
+  });
+}
+
+function osMeta(module){
+  OS.meta = null;
+  OS.err = '';
+  osPaint();
+  return api('/crm/order-meta?module=' + encodeURIComponent(module))
+    .then(function(m){ OS.meta = m })
+    .catch(function(e){ OS.err = ordWhy(e) })
+    .then(osPaint);
+}
+
+/** Колонки выбранной таблицы товаров. */
+function osSub(){
+  var m = OS.meta, s = OS.set;
+  if (!m || !s) return null;
+  return (m.subforms || []).filter(function(x){ return x.api === s.subform.api })[0] || null;
+}
+
+function osPaint(){
+  var box = el('osBox');
+  if (!box || !OS.set) return;
+  var s = OS.set, m = OS.meta;
+
+  box.innerHTML =
+    L('<div class="fld"><label>Куди створювати замовлення</label><select id="osMod">') +
+    '<option value="Sales_Orders"' + (s.module === 'Sales_Orders' ? ' selected' : '') + '>' +
+      L('Замовлення (Sales Orders)') + '</option>' +
+    '<option value="Deals"' + (s.module === 'Deals' ? ' selected' : '') + '>' +
+      L('Угоди (Deals)') + '</option></select></div>' +
+
+    (OS.err
+      ? '<div class="err">' + esc(OS.err) + '</div>'
+      : !m
+        ? L('<div class="hint">Питаємо Zoho, як влаштований цей модуль...</div>')
+        : osFieldsBox(s, m) + (s.module === 'Deals' ? osPipes(s, m) : '') + osSubBox(s, m)) +
+
+    L('<div class="acts"><button id="osSave">Зберегти</button></div>') +
+    '<span class="ok" id="osOk"></span><div class="err" id="osErr"></div>';
+
+  el('osMod').onchange = function(){
+    s.module = el('osMod').value;
+    // Воронки и поля принадлежат модулю: переносить отмеченное в
+    // сделках на заказы значит сохранить имена полей, которых там нет.
+    s.pipelines = [];
+    s.fields = [];
+    s.subform = s.module === 'Sales_Orders'
+      ? { api:'Product_Details', product:'product', quantity:'quantity', price:'list_price' }
+      : { api:'', product:'', quantity:'', price:'' };
+    osMeta(s.module);
+  };
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-ospipe]'), function(x){
+    x.onchange = function(){
+      var id = x.dataset.ospipe;
+      var live = (m.pipelines || []).filter(function(p){ return p.id === id })[0];
+      if (x.checked && live)
+        s.pipelines.push({ id:id, name:live.name, layout:live.layout,
+          stage:live.stages[0].value, fields:[] });
+      else s.pipelines = s.pipelines.filter(function(p){ return p.id !== id });
+      osPaint();
+    };
+  });
+  Array.prototype.forEach.call(box.querySelectorAll('[data-osstage]'), function(x){
+    x.onchange = function(){
+      var p = s.pipelines.filter(function(o){ return o.id === x.dataset.osstage })[0];
+      if (p) p.stage = x.value;
+    };
+  });
+  Array.prototype.forEach.call(box.querySelectorAll('[data-osfld]'), function(x){
+    x.onchange = function(){
+      var api = x.dataset.osfld, into = x.dataset.osfor;
+      var list = into ? (s.pipelines.filter(function(p){ return p.id === into })[0] || {}).fields : s.fields;
+      if (!list) return;
+      var at = list.indexOf(api);
+      if (x.checked && at < 0) list.push(api);
+      if (!x.checked && at >= 0) list.splice(at, 1);
+    };
+  });
+  if (el('osSame')) el('osSame').onchange = function(){
+    s.sameFields = el('osSame').checked;
+    osPaint();
+  };
+  if (el('osTab')) el('osTab').onchange = function(){
+    s.subform.api = el('osTab').value;
+    var sub = osSub();
+    // Догадку Zoho подставляем сразу: три пустых списка там, где два
+    // очевидны, — это работа, которую человек делает за нас.
+    s.subform.product = sub ? sub.guess.product : '';
+    s.subform.quantity = sub ? sub.guess.quantity : '';
+    s.subform.price = sub ? sub.guess.price : '';
+    osPaint();
+  };
+  Array.prototype.forEach.call(box.querySelectorAll('[data-oscol]'), function(x){
+    x.onchange = function(){ s.subform[x.dataset.oscol] = x.value };
+  });
+
+  el('osSave').onclick = function(){
+    el('osErr').textContent = '';
+    busy(el('osSave'), true);
+    api('/settings/orders', { method:'PATCH', body:s })
+      .then(function(r){ OS.set = r.settings; toast(L('Збережено')); osPaint() })
+      .catch(function(e){ el('osErr').textContent = ordWhy(e) })
+      .then(function(){ if (el('osSave')) busy(el('osSave'), false) });
+  };
+}
+
+function osPipes(s, m){
+  var live = m.pipelines || [];
+  if (!live.length) return L('<div class="hint">У цієї Zoho немає воронок — угода створиться у стандартній.</div>');
+
+  return L('<h4>Воронки, куди можна створювати</h4>') +
+    live.map(function(p){
+      var on = s.pipelines.filter(function(x){ return x.id === p.id })[0];
+      return '<div class="osp">' +
+        '<label class="ochk"><input type="checkbox" data-ospipe="' + esc(p.id) + '"' +
+          (on ? ' checked' : '') + '> ' + esc(p.name) +
+          (p.layoutName ? ' <span class="dim">' + esc(p.layoutName) + '</span>' : '') +
+        '</label>' +
+        (on
+          ? L('<div class="fld" style="margin:6px 0 0 23px"><label>Стадія нового замовлення</label>') +
+            '<select data-osstage="' + esc(p.id) + '">' +
+            p.stages.map(function(st){
+              return '<option value="' + esc(st.value) + '"' +
+                (st.value === on.stage ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+            }).join('') + '</select></div>' +
+            (s.sameFields
+              ? ''
+              : L('<div class="k" style="margin:8px 0 0 23px">Поля цієї воронки</div>') +
+                osFieldList(s, m, p.id, on.fields))
+          : '') +
+      '</div>';
+    }).join('');
+}
+
+function osFieldsBox(s, m){
+  return L('<h4>Поля, які питати в оператора</h4>') +
+    (s.module === 'Deals'
+      ? '<label class="ochk"><input type="checkbox" id="osSame"' +
+        (s.sameFields ? ' checked' : '') + '> ' + L('Поля однакові для всіх воронок') + '</label>'
+      : '') +
+    (s.module !== 'Deals' || s.sameFields ? osFieldList(s, m, '', s.fields) : '') +
+    L('<div class="hint">Обовʼязкові поля Zoho додаються самі — відмічати їх не треба.</div>');
+}
+
+function osFieldList(s, m, into, chosen){
+  var list = m.fields || [];
+  if (!list.length) return L('<div class="hint">У цьому модулі немає полів, які можна заповнити.</div>');
+  return '<div class="osf">' + list.map(function(f){
+    return '<label class="ochk" style="margin-top:4px">' +
+      '<input type="checkbox" data-osfld="' + esc(f.api) + '" data-osfor="' + esc(into) + '"' +
+      (f.required ? ' checked disabled' : (chosen.indexOf(f.api) >= 0 ? ' checked' : '')) + '> ' +
+      esc(f.label) + (f.required ? L(' <span class="dim">обовʼязкове</span>') : '') + '</label>';
+  }).join('') + '</div>';
+}
+
+function osSubBox(s, m){
+  var subs = m.subforms || [];
+  var sub = osSub();
+  return L('<h4>Де лежать товари</h4>') +
+    (!subs.length
+      ? L('<div class="hint">У цьому модулі немає таблиці товарів. Створіть у Zoho підформу з ') +
+        L('товаром, кількістю і ціною — вона зʼявиться тут.</div>')
+      : L('<div class="fld"><label>Таблиця товарів</label><select id="osTab"><option value=""></option>') +
+        subs.map(function(x){
+          return '<option value="' + esc(x.api) + '"' + (x.api === s.subform.api ? ' selected' : '') +
+            '>' + esc(x.label) + '</option>';
+        }).join('') + '</select></div>' +
+        (sub
+          ? '<div class="osc">' +
+            L('<div class="fld"><label>Товар</label>') + osCol(sub, 'product', s.subform.product) + '</div>' +
+            L('<div class="fld"><label>Кількість</label>') + osCol(sub, 'quantity', s.subform.quantity) + '</div>' +
+            L('<div class="fld"><label>Ціна</label>') + osCol(sub, 'price', s.subform.price) + '</div>' +
+            '</div>'
+          : ''));
+}
+
+function osCol(sub, role, value){
+  return '<select data-oscol="' + role + '"><option value=""></option>' +
+    sub.columns.map(function(c){
+      return '<option value="' + esc(c.api) + '"' + (c.api === value ? ' selected' : '') + '>' +
+        esc(c.label) + '</option>';
+    }).join('') + '</select>';
 }
 
 /* ══════════════ Сценарии ══════════════ */
@@ -4783,6 +5048,14 @@ function pageIntegrations(){
       L('Немає співробітника з такою поштою — нічого не змінюємо і нікого не заводимо.</div>') +
       '<div class="err" id="crmSetErr"></div></div></div>' +
 
+      /* Куда уезжает заказ. Стоит рядом с «что делать с новым
+         клиентом»: это второе решение про ту же связку, и принимают
+         их в один заход. */
+      (list.length
+        ? L('<div class="pg-sec"><h3>Замовлення з розмови</h3><div class="card">') +
+          '<div id="osBox"></div></div></div>'
+        : '') +
+
       (list.length
         ? L('<div class="pg-sec"><h3>Віджет у картці клієнта</h3><div class="card">') +
           L('<div class="int-s" style="white-space:normal;line-height:1.7">Zoho створює віджети ') +
@@ -4816,6 +5089,10 @@ function pageIntegrations(){
     };
 
     wireAi(ai);
+
+    if (list.length) osLoad().catch(function(e){
+      if (el('osBox')) el('osBox').innerHTML = '<div class="err">' + esc(ordWhy(e)) + '</div>';
+    });
 
     if (S.zohoNote){ el('zOk').textContent = S.zohoNote; S.zohoNote = null }
     if (S.zohoError){ el('zErr').textContent = S.zohoError; S.zohoError = null }

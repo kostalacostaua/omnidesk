@@ -14,6 +14,21 @@ import {
   orderSubject,
   orderFields,
   orderValues,
+  orderReady,
+  parseOrderSettings,
+  pipelineFields,
+  pipelines,
+  subforms,
+  subformColumns,
+  guessColumns,
+  isOrderModule,
+  STOCK_SUBFORM,
+  type OrderModule,
+  type OrderPipeline,
+  type OrderSettings,
+  type SubformRef,
+  type SubformColumn,
+  type PipelineRef,
   catalogPage,
   sortCatalog,
   CATALOG_PAGE,
@@ -286,32 +301,113 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   const CATALOG_TTL = 5 * 60_000;
   const FIELDS_TTL = 10 * 60_000;
   const catalogs = new Map<string, { at: number; items: CatalogItem[]; truncated: boolean }>();
-  const orderMeta = new Map<string, { at: number; fields: OrderField[] }>();
+  const metas = new Map<string, { at: number; meta: OrderMeta }>();
+  const forms = new Map<string, { at: number; form: unknown }>();
+
+  interface OrderMeta {
+    fields: OrderField[];
+    subforms: Array<SubformRef & { columns: SubformColumn[]; guess: ReturnType<typeof guessColumns> }>;
+    pipelines: PipelineRef[];
+  }
+
+  /** Настройки заказа этой организации. */
+  async function orderSettings(tenantId: string): Promise<OrderSettings> {
+    return withSystem(pool, 'настройки заказа', async (db) => {
+      const { rows } = await db.query<{ crm: { order?: unknown } | null }>(
+        `SELECT crm FROM tenants WHERE id = $1 LIMIT 1`,
+        [tenantId],
+      );
+      return parseOrderSettings(rows[0]?.crm?.order);
+    });
+  }
 
   /**
-   * Описание полей заказа. Спрашивается и при показе окна, и при
-   * создании заказа.
+   * Разметка модуля: поля, подформы с их колонками и воронки.
    *
-   * Второе место важнее первого: процессов у api несколько, окно могло
-   * спросить поля у одного, а заказ уехать к другому. Если бы создание
-   * полагалось на память своего процесса, у второго её бы не было — и
-   * заполненные человеком поля тихо пропали бы по дороге.
+   * Спрашивается и при настройке, и при создании заказа. Второе важнее
+   * первого: процессов у api несколько, окно могло спросить поля у
+   * одного, а заказ уехать к другому. Если бы создание полагалось на
+   * память своего процесса, у второго её бы не было — и заполненные
+   * человеком поля тихо пропали бы по дороге.
    */
-  async function fieldsFor(
+  async function metaFor(
     tenantId: string,
     z: { inst: { api_domain: string }; head: Record<string, string> },
-  ): Promise<{ fields: OrderField[] } | { error: string; detail?: string }> {
-    const fresh = orderMeta.get(tenantId);
-    if (fresh && Date.now() - fresh.at < FIELDS_TTL) return { fields: fresh.fields };
+    module: OrderModule,
+  ): Promise<OrderMeta | { error: string; detail?: string }> {
+    const key = tenantId + ':' + module;
+    const fresh = metas.get(key);
+    if (fresh && Date.now() - fresh.at < FIELDS_TTL) return fresh.meta;
 
-    const url = new URL(`${z.inst.api_domain}/crm/v6/settings/fields`);
-    url.searchParams.set('module', 'Sales_Orders');
-    const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) return zohoWhy(res);
+    const ask = async (path: string, params: Record<string, string>) => {
+      const url = new URL(`${z.inst.api_domain}/crm/v6/settings/${path}`);
+      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+      const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+      if (!res.ok) return { error: await zohoWhy(res) };
+      return { body: await res.json() };
+    };
 
-    const fields = orderFields(await res.json());
-    orderMeta.set(tenantId, { at: Date.now(), fields });
-    return { fields };
+    const own = await ask('fields', { module });
+    if ('error' in own) return own.error as { error: string; detail?: string };
+
+    const meta: OrderMeta = {
+      fields: orderFields(own.body),
+      subforms: [],
+      pipelines: [],
+    };
+
+    /*
+     * Стандартная таблица товаров подформой не считается и в списке
+     * полей её нет. Но складывать товары надо именно в неё, поэтому в
+     * «Замовленнях» она стоит первой и с известными колонками.
+     */
+    if (module === 'Sales_Orders') {
+      meta.subforms.push({
+        api: STOCK_SUBFORM.api,
+        label: 'Товари замовлення',
+        module: '',
+        columns: [
+          { api: STOCK_SUBFORM.product, label: 'Товар', lookup: 'Products' },
+          { api: STOCK_SUBFORM.quantity, label: 'Кількість', lookup: '' },
+          { api: STOCK_SUBFORM.price, label: 'Ціна', lookup: '' },
+        ],
+        guess: { ...STOCK_SUBFORM },
+      });
+    }
+
+    for (const sub of subforms(own.body)) {
+      let columns: SubformColumn[] = [];
+      if (sub.module) {
+        const got = await ask('fields', { module: sub.module });
+        if (!('error' in got)) columns = subformColumns(got.body);
+      }
+      meta.subforms.push({ ...sub, columns, guess: guessColumns(columns) });
+    }
+
+    /*
+     * Воронки живут внутри макетов: у Zoho список воронок сам по себе
+     * не существует, его спрашивают у макета. Поэтому сначала макеты,
+     * потом воронки каждого — иначе у компании с двумя макетами
+     * половина воронок просто не появилась бы в настройках.
+     */
+    if (module === 'Deals') {
+      const lays = await ask('layouts', { module });
+      if ('error' in lays) return lays.error as { error: string; detail?: string };
+      const list = ((lays.body ?? {}) as { layouts?: unknown }).layouts;
+      const layouts = Array.isArray(list) ? list.slice(0, 10) : [];
+
+      for (const one of layouts) {
+        const l = (one ?? {}) as { id?: unknown; name?: unknown; status?: unknown };
+        const id = String(l.id ?? '');
+        if (!/^[0-9]+$/.test(id) || l.status === 'inactive') continue;
+        const got = await ask('pipeline', { layout_id: id });
+        if ('error' in got) continue;
+        for (const p of pipelines(got.body, id, String(l.name ?? ''))) meta.pipelines.push(p);
+      }
+    }
+
+    metas.set(key, { at: Date.now(), meta });
+    return meta;
   }
 
   /**
@@ -568,24 +664,111 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
   });
 
   /**
-   * Поля заказа — те, что есть в этой организации.
+   * Разметка модуля, в который уедет заказ.
    *
-   * Разметку Sales_Orders правят: где-то обязателен срок поставки,
-   * где-то свой «Менеджер», где-то ничего сверх названия. Спрашиваем
-   * Zoho, какие поля у заказа есть и какие она считает обязательными,
-   * и показываем их в окне. Свой список обязательных полей устарел бы
-   * в тот же день, когда клиент добавил своё.
+   * Отвечает на три вопроса настройки разом: какие поля есть, где
+   * лежат строки товаров и какие воронки заведены. Три отдельные
+   * ручки означали бы три состояния загрузки на одной странице и три
+   * повода ей рассыпаться.
    */
-  app.get('/crm/order-fields', async (req, reply) => {
+  app.get<{ Querystring: { module?: string } }>('/crm/order-meta', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
+
+    const module = isOrderModule(req.query?.module) ? req.query.module : 'Sales_Orders';
+    const z = await zohoFor(a.tenantId);
+    if ('error' in z) return reply.code(409).send(z);
+
+    const got = await metaFor(a.tenantId, z, module);
+    if ('error' in got) return reply.code(502).send(got);
+    return got;
+  });
+
+  /**
+   * Настройки заказа: что показывать оператору и куда складывать.
+   *
+   * Лежат в тех же настройках CRM, что и «кого заводить»: это одно
+   * решение одного человека про одну связку, и разводить его по двум
+   * страницам незачем.
+   */
+  app.get('/settings/orders', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+    return { settings: await orderSettings(a.tenantId) };
+  });
+
+  app.patch<{ Body: Record<string, unknown> }>('/settings/orders', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const next = parseOrderSettings(req.body);
+
+    /*
+     * Пишем слиянием, а не заменой всего поля: рядом живёт «кого
+     * заводить», и перезапись целиком стёрла бы его — молча и
+     * необратимо.
+     */
+    await withSystem(pool, 'настройки заказа', async (db) => {
+      await db.query(
+        `UPDATE tenants SET crm = COALESCE(crm, '{}'::jsonb) || jsonb_build_object('order', $2::jsonb)
+          WHERE id = $1`,
+        [a.tenantId, JSON.stringify(next)],
+      );
+    });
+
+    // Разметка могла не меняться, а настройка — да: окно заказа
+    // собирается из обеих, и старый ответ показал бы старые поля.
+    forms.delete(a.tenantId);
+    return { settings: next };
+  });
+
+  /**
+   * Окно заказа, собранное для оператора.
+   *
+   * Здесь сходятся настройка и разметка: какие воронки ему открыты,
+   * какие поля спрашивать в каждой и готова ли связка вообще. Считать
+   * это в браузере значило бы отдать туда весь список полей модуля и
+   * правило «одинаковые поля» — а оно обязано совпадать с тем, по
+   * которому потом проверяется сам заказ.
+   */
+  app.get('/crm/order-form', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+
+    const fresh = forms.get(a.tenantId);
+    if (fresh && Date.now() - fresh.at < FIELDS_TTL) return fresh.form;
 
     const z = await zohoFor(a.tenantId);
     if ('error' in z) return reply.code(409).send(z);
 
-    const got = await fieldsFor(a.tenantId, z);
-    if ('error' in got) return reply.code(502).send(got);
-    return got;
+    const s = await orderSettings(a.tenantId);
+    const meta = await metaFor(a.tenantId, z, s.module);
+    if ('error' in meta) return reply.code(502).send(meta);
+
+    const pick = (names: string[]) => {
+      const chosen = meta.fields.filter((f) => names.includes(f.api) || f.required);
+      return chosen;
+    };
+
+    const form = {
+      module: s.module,
+      ready: orderReady(s),
+      // Названия воронок берём из разметки, а не из сохранённой
+      // настройки: воронку переименовали — оператор должен увидеть
+      // новое имя, а не то, что записали полгода назад.
+      pipelines: s.pipelines.map((p) => {
+        const live = meta.pipelines.filter((x) => x.id === p.id)[0];
+        return {
+          id: p.id,
+          name: live?.name || p.name || p.id,
+          fields: pick(pipelineFields(s, p.id)),
+        };
+      }),
+      fields: pick(s.fields),
+    };
+
+    forms.set(a.tenantId, { at: Date.now(), form });
+    return form;
   });
 
   /**
@@ -611,6 +794,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       subject?: string;
       items?: Array<{ productId?: string; quantity?: number; price?: number }>;
       fields?: Record<string, unknown>;
+      pipeline?: string;
     };
   }>('/conversations/:id/order', async (req, reply) => {
     const a = requireAuth(req);
@@ -671,47 +855,106 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
     const subject = orderSubject(req.body?.subject, conv.display_name);
 
+    const s = await orderSettings(a.tenantId);
+    if (!orderReady(s)) return reply.code(409).send({ error: 'order_not_set_up' });
+
     /*
-     * Поля заказа. Принимаем только те, что Zoho назвала сама, и
-     * заранее проверяем обязательные: отказ «поле такое-то обязательно»
-     * приходит от Zoho её словами и её именами полей, а человек видел
-     * в окне подписи. Свои подписи мы знаем — ими и отвечаем.
+     * Воронка. Оператор выбирает из тех, что ему открыли в настройках,
+     * и проверяем это здесь, а не полагаемся на выпадающий список:
+     * список живёт в браузере, а браузер присылает что угодно.
      */
-    const meta = await fieldsFor(a.tenantId, z);
-    let extra: Record<string, unknown> = {};
-    if ('error' in meta) {
-      // Описание полей не пришло. Заказ без своих полей уедет и так —
-      // он и раньше уезжал. А вот молча выбросить то, что человек
-      // заполнил в окне, нельзя: он увидит «создано» и недостающее
-      // поле в Zoho.
-      const sent = req.body?.fields && Object.keys(req.body.fields).length > 0;
-      if (sent) return reply.code(502).send(meta);
-    } else {
-      const picked = orderValues(meta.fields, req.body?.fields);
-      if (picked.missing.length) {
-        return reply.code(400).send({ error: 'fields_required', detail: picked.missing.join(', ') });
-      }
-      extra = picked.values;
+    let pipe: OrderPipeline | null = null;
+    if (s.module === 'Deals') {
+      const asked = String(req.body?.pipeline ?? '');
+      pipe = s.pipelines.filter((p) => p.id === asked)[0] ?? (asked ? null : s.pipelines[0] ?? null);
+      if (!pipe) return reply.code(400).send({ error: 'pipeline_not_allowed' });
     }
 
-    const res = await fetch(`${z.inst.api_domain}/crm/v6/Sales_Orders`, {
+    /*
+     * Поля заказа. Принимаем только те, что Zoho назвала сама и что
+     * открыты в этой воронке. Обязательные проверяем заранее: отказ
+     * «поле такое-то обязательно» приходит от Zoho её словами и её
+     * именами полей, а человек видел в окне подписи. Свои подписи мы
+     * знаем — ими и отвечаем.
+     */
+    const meta = await metaFor(a.tenantId, z, s.module);
+    if ('error' in meta) return reply.code(502).send(meta);
+
+    const open = pipelineFields(s, pipe?.id);
+    const shown = meta.fields.filter((f) => open.includes(f.api) || f.required);
+    const picked = orderValues(shown, req.body?.fields);
+    if (picked.missing.length) {
+      return reply.code(400).send({ error: 'fields_required', detail: picked.missing.join(', ') });
+    }
+
+    /*
+     * Строки товаров. Имена колонок берём из настроек: у стандартной
+     * таблицы «Замовлень» они известны Zoho, у подформы сделки их
+     * придумали на месте, и угадать «Кількість» против «Qty» нельзя.
+     *
+     * Товар кладём ссылкой, если колонка — ссылка на товары, и
+     * названием, если это обычный текст: в половине подформ товар
+     * записан строкой, и ссылка туда не влезет.
+     */
+    const sub = s.subform;
+    const cols = meta.subforms.filter((x) => x.api === sub.api)[0];
+    const col = cols?.columns.filter((c) => c.api === sub.product)[0];
+    // Колонку не нашли — считаем ссылкой: так устроены и стандартная
+    // таблица, и девять подформ из десяти.
+    const link = !col || col.lookup !== '';
+
+    let names = new Map<string, string>();
+    if (!link) {
+      // Товар записывается строкой. Название берём из каталога, а если
+      // этот процесс его ещё не тянул — спрашиваем Zoho: записать в
+      // заказ идентификатор вместо названия значит испортить заказ
+      // молча.
+      const have = catalogs.get(a.tenantId);
+      if (have) names = new Map(have.items.map((i) => [i.id, i.name || i.code]));
+      const lack = items.filter((i) => !names.has(i.productId)).map((i) => i.productId);
+      if (lack.length) {
+        const url = new URL(`${z.inst.api_domain}/crm/v6/Products`);
+        url.searchParams.set('ids', lack.slice(0, 100).join(','));
+        url.searchParams.set('fields', 'Product_Name,Product_Code');
+        const got = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
+        if (got.ok) {
+          for (const row of catalogPage(await got.json()).items) {
+            names.set(row.id, row.name || row.code);
+          }
+        }
+      }
+      const unknown = items.filter((i) => !names.get(i.productId));
+      if (unknown.length) return reply.code(502).send({ error: 'product_unknown' });
+    }
+
+    const rows = items.map((i) => {
+      const row: Record<string, unknown> = {};
+      row[sub.product] = link ? { id: i.productId } : names.get(i.productId);
+      if (sub.quantity) row[sub.quantity] = i.quantity;
+      if (sub.price) row[sub.price] = i.price;
+      return row;
+    });
+
+    const record: Record<string, unknown> = {
+      ...picked.values,
+      ...(accountId ? { Account_Name: { id: accountId } } : {}),
+      Contact_Name: { id: recordId },
+      [sub.api]: rows,
+    };
+
+    if (s.module === 'Deals' && pipe) {
+      record.Deal_Name = subject;
+      record.Stage = pipe.stage;
+      record.Pipeline = { id: pipe.id };
+      if (pipe.layout) record.Layout = { id: pipe.layout };
+    } else {
+      record.Subject = subject;
+    }
+
+    const res = await fetch(`${z.inst.api_domain}/crm/v6/${s.module}`, {
       method: 'POST',
       headers: z.head,
-      body: JSON.stringify({
-        data: [
-          {
-            ...extra,
-            Subject: subject,
-            ...(accountId ? { Account_Name: { id: accountId } } : {}),
-            Contact_Name: { id: recordId },
-            Product_Details: items.map((i) => ({
-              product: { id: i.productId },
-              quantity: i.quantity,
-              list_price: i.price,
-            })),
-          },
-        ],
-      }),
+      body: JSON.stringify({ data: [record] }),
       signal: AbortSignal.timeout(25_000),
     });
 
@@ -731,8 +974,12 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     return {
       orderId: first.details.id,
       subject,
-      // В интерфейсе закладка называется иначе, чем модуль в API.
-      url: zohoRecordUrl(z.inst.api_domain, 'SalesOrders', first.details.id),
+      // В интерфейсе закладки называются иначе, чем модули в API.
+      url: zohoRecordUrl(
+        z.inst.api_domain,
+        s.module === 'Deals' ? 'Potentials' : 'SalesOrders',
+        first.details.id,
+      ),
     };
   });
 
@@ -784,10 +1031,15 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       });
 
       await withSystem(pool, 'настройки CRM', async (db) => {
-        await db.query(`UPDATE tenants SET crm = $2::jsonb WHERE id = $1`, [
-          a.tenantId,
-          JSON.stringify(next),
-        ]);
+        // Слиянием, а не заменой: рядом в этом же поле лежат настройки
+        // заказа, и замена целиком стёрла бы их молча.
+        await db.query(
+          `UPDATE tenants SET crm = COALESCE(crm, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+          [
+            a.tenantId,
+            JSON.stringify(next),
+          ],
+        );
       });
 
       return { settings: next };

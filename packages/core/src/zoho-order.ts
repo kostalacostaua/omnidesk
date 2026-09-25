@@ -110,6 +110,12 @@ const OURS = new Set([
   'Deal_Name',
   'Product_Details',
   'Quote_Name',
+  // Сделка: воронку, стадию и макет выбирают в настройках, а не в окне.
+  // Спрашивать их у оператора значит дать ему отправить сделку в
+  // стадию из чужой воронки.
+  'Stage',
+  'Pipeline',
+  'Layout',
 ]);
 
 /** Как типы Zoho ложатся на то, что умеет форма. */
@@ -187,6 +193,153 @@ export function orderFields(raw: unknown): OrderField[] {
 
   // Обязательные наверх: их заполняют всегда, остальные — когда нужно.
   return out.sort((a, b) => Number(b.required) - Number(a.required));
+}
+
+/** Подформа модуля: имя поля и модуль, в котором лежат её колонки. */
+export interface SubformRef {
+  api: string;
+  label: string;
+  module: string;
+}
+
+/**
+ * Подформы модуля.
+ *
+ * У «Замовлень» товары лежат в стандартной таблице, у сделок — в
+ * подформе, которую завели руками. Показать их список надо в обоих
+ * случаях: угадывать за клиента, какая из трёх подформ про товары,
+ * мы не беремся.
+ */
+export function subforms(raw: unknown): SubformRef[] {
+  const body = (raw ?? {}) as { fields?: unknown };
+  const list = Array.isArray(body.fields) ? body.fields : [];
+  const out: SubformRef[] = [];
+
+  for (const one of list) {
+    if (!one || typeof one !== 'object') continue;
+    const f = one as Record<string, unknown>;
+    if (f.data_type !== 'subform') continue;
+    const api = typeof f.api_name === 'string' ? f.api_name : '';
+    if (!api) continue;
+    const sub = (f.subform ?? {}) as { module?: unknown };
+    out.push({
+      api,
+      label: typeof f.field_label === 'string' && f.field_label ? f.field_label : api,
+      module: typeof sub.module === 'string' ? sub.module : '',
+    });
+  }
+  return out;
+}
+
+export interface SubformColumn {
+  api: string;
+  label: string;
+  /** Модуль, на который ссылается колонка: у товара это Products. */
+  lookup: string;
+}
+
+/** Колонки подформы: по ним человек указывает, где товар, где цена. */
+export function subformColumns(raw: unknown): SubformColumn[] {
+  const body = (raw ?? {}) as { fields?: unknown };
+  const list = Array.isArray(body.fields) ? body.fields : [];
+  const out: SubformColumn[] = [];
+
+  for (const one of list) {
+    if (!one || typeof one !== 'object') continue;
+    const f = one as Record<string, unknown>;
+    const api = typeof f.api_name === 'string' ? f.api_name : '';
+    if (!api || f.read_only === true) continue;
+    const look = (f.lookup ?? {}) as { module?: { api_name?: unknown } };
+    out.push({
+      api,
+      label: typeof f.field_label === 'string' && f.field_label ? f.field_label : api,
+      lookup: typeof look.module?.api_name === 'string' ? look.module.api_name : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * Догадка о колонках подформы.
+ *
+ * Догадка, а не правило: подставляем то, что почти всегда верно, и
+ * человек видит выбранное в списках и может поменять. Пустые списки
+ * в настройках заставляли бы заполнять три поля там, где два из них
+ * очевидны.
+ */
+export function guessColumns(cols: SubformColumn[]): {
+  product: string;
+  quantity: string;
+  price: string;
+} {
+  const by = (re: RegExp, skip: string[]) =>
+    cols.filter((c) => !skip.includes(c.api) && (re.test(c.api) || re.test(c.label)))[0]?.api ?? '';
+
+  const product =
+    cols.filter((c) => c.lookup === 'Products')[0]?.api ?? by(/product|товар|позиц|item/i, []);
+  const quantity = by(/quantity|qty|кільк|колич/i, [product]);
+  const price = by(/price|ціна|цена|варт|стоим|rate/i, [product, quantity]);
+  return { product, quantity, price };
+}
+
+export interface PipelineStage {
+  value: string;
+  label: string;
+}
+
+export interface PipelineRef {
+  id: string;
+  name: string;
+  layout: string;
+  layoutName: string;
+  stages: PipelineStage[];
+}
+
+/**
+ * Воронки одного макета.
+ *
+ * Стадии приходят вместе с воронкой и только так: список стадий сам
+ * по себе в Zoho не существует, а стадия из чужой воронки — отказ при
+ * создании.
+ */
+export function pipelines(raw: unknown, layout: string, layoutName: string): PipelineRef[] {
+  const body = (raw ?? {}) as { pipeline?: unknown };
+  const list = Array.isArray(body.pipeline) ? body.pipeline : [];
+  const out: PipelineRef[] = [];
+
+  for (const one of list) {
+    if (!one || typeof one !== 'object') continue;
+    const p = one as Record<string, unknown>;
+    const id = typeof p.id === 'string' || typeof p.id === 'number' ? String(p.id) : '';
+    if (!/^[0-9]+$/.test(id)) continue;
+
+    const maps = Array.isArray(p.maps) ? p.maps : [];
+    const stages: PipelineStage[] = [];
+    for (const m of maps) {
+      const s = (m ?? {}) as Record<string, unknown>;
+      const value = typeof s.actual_value === 'string' ? s.actual_value : '';
+      if (!value) continue;
+      stages.push({
+        value,
+        label: typeof s.display_value === 'string' && s.display_value ? s.display_value : value,
+      });
+    }
+    if (!stages.length) continue;
+
+    out.push({
+      id,
+      name:
+        typeof p.display_value === 'string' && p.display_value
+          ? p.display_value
+          : typeof p.actual_value === 'string'
+            ? p.actual_value
+            : id,
+      layout,
+      layoutName,
+      stages,
+    });
+  }
+  return out;
 }
 
 export const ORDER_FIELD_TEXT_MAX = 2000;

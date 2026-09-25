@@ -27,15 +27,19 @@ import { decryptJson, encryptJson, withTenant, type Pool } from '@omnidesk/core'
  *   modules.contacts / leads — искать клиента и создавать нового,
  *   modules.accounts         — привязать контакт к компании,
  *   modules.products         — каталог товаров для заказа, только чтение,
- *   modules.salesorders      — сам заказ,
- *   settings.fields          — поля заказа: какие есть и какие обязательны,
+ *   modules.salesorders      — заказ в модуле «Замовлення»,
+ *   modules.deals            — заказ в сделке: у половины компаний он там,
+ *   settings.READ            — разметка: поля, макеты и воронки, только чтение,
  *   users.READ               — сопоставить оператора с пользователем Zoho,
  *   org.READ                 — узнать название организации и её id.
  *
  * Права просим по модулям, а не одним ZohoCRM.modules.ALL. «Доступ ко
  * всем модулям» на экране согласия — это и переписка, и счета, и всё,
- * что клиент когда-нибудь заведёт; список из шести строк честнее и
- * читается за те же пять секунд.
+ * что клиент когда-нибудь заведёт; перечисленные модули честнее и
+ * читаются за те же пять секунд. Настройки — исключение: их просим
+ * целиком на чтение, потому что разметка нужна вся — поля, макеты и
+ * воронки, — а три отдельных разрешения на одно и то же только
+ * удлиняют экран согласия.
  *
  * Имена модулей в правах пишутся слитно — salesorders, а не
  * Sales_Orders: в адресах API одно написание, в правах другое, и
@@ -52,7 +56,8 @@ const SCOPES = [
   'ZohoCRM.modules.accounts.ALL',
   'ZohoCRM.modules.products.READ',
   'ZohoCRM.modules.salesorders.ALL',
-  'ZohoCRM.settings.fields.READ',
+  'ZohoCRM.modules.deals.ALL',
+  'ZohoCRM.settings.READ',
   'ZohoCRM.users.READ',
   'ZohoCRM.org.READ',
 ];
