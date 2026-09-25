@@ -240,3 +240,81 @@ export function paddleAmount(price: unknown): string | null {
   if (!Number.isFinite(n) || n <= 0) return null;
   return String(Math.round(n * 100));
 }
+
+/**
+ * Подписка в том виде, в каком её отдаёт Paddle на прямой запрос.
+ *
+ * Тот же разбор, что и у события, но источник другой: событие приходит
+ * само, а это мы спрашиваем. Поля лежат в одних и тех же местах,
+ * поэтому и вынуто в одну функцию — иначе однажды одно из двух мест
+ * научится читать новое поле, а второе нет.
+ */
+export interface PaddleSubscriptionState {
+  customerId: string | null;
+  priceId: string | null;
+  status: string | null;
+  paidUntil: string | null;
+  live: boolean;
+}
+
+export function paddleSubscription(data: unknown): PaddleSubscriptionState | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  const status = str(d['status']);
+  if (!status) return null;
+  const period = (d['current_billing_period'] ?? {}) as Record<string, unknown>;
+  const items = Array.isArray(d['items']) ? (d['items'] as Record<string, unknown>[]) : [];
+  const price = (items[0]?.['price'] ?? {}) as Record<string, unknown>;
+  return {
+    customerId: str(d['customer_id']),
+    priceId: str(price['id']),
+    status,
+    paidUntil: day(period['ends_at']),
+    live: PADDLE_LIVE.includes(status),
+  };
+}
+
+/**
+ * Оплата в том виде, в каком её показывают человеку.
+ *
+ * Paddle отдаёт сделку целиком — с позициями, налогами, скидками и
+ * историей платежей. Человеку в списке нужно четыре вещи: когда,
+ * сколько, чем и есть ли чек. Остальное он посмотрит в самом чеке.
+ *
+ * Сумма приходит строкой в наименьших единицах, потому что дробное
+ * число денег хранить нельзя. Делим на сотню здесь, а не в разметке:
+ * в разметке это повторилось бы трижды и один раз с ошибкой.
+ */
+export interface PaddlePayment {
+  id: string;
+  at: string | null;
+  amount: string;
+  currency: string;
+  /** Номер счёта у Paddle: по нему человек ищет платёж в своей бухгалтерии. */
+  invoice: string | null;
+  status: string;
+  /** Чем заплатили: «visa 4242». Пусто, если Paddle не назвал. */
+  card: string;
+}
+
+export function paddlePayment(row: unknown): PaddlePayment {
+  const r = (row ?? {}) as Record<string, unknown>;
+  const details = (r['details'] ?? {}) as Record<string, unknown>;
+  const totals = (details['totals'] ?? {}) as Record<string, unknown>;
+  const payments = Array.isArray(r['payments']) ? (r['payments'] as Record<string, unknown>[]) : [];
+  const method = (payments[0]?.['method_details'] ?? {}) as Record<string, unknown>;
+  const card = (method['card'] ?? {}) as Record<string, unknown>;
+
+  const raw = Number(String(totals['grand_total'] ?? '0'));
+  const amount = Number.isFinite(raw) ? (raw / 100).toFixed(2) : '0.00';
+
+  return {
+    id: str(r['id']) ?? '',
+    at: str(r['billed_at']) ?? str(r['created_at']),
+    amount,
+    currency: str(r['currency_code']) ?? '',
+    invoice: str(r['invoice_number']),
+    status: str(r['status']) ?? '',
+    card: [str(card['type']), str(card['last4'])].filter(Boolean).join(' '),
+  };
+}

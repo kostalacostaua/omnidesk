@@ -4286,6 +4286,48 @@ function billMonthOfYear(prices){
   return Math.round((prices[one] / 12) * 100) / 100 + ' ' + one + L(' / місяць');
 }
 
+/* Оплаты берём у Paddle: своя копия однажды разойдётся с настоящей —
+   после возврата или спора с банком, — и человек увидит у нас одно, а
+   в выписке другое. */
+var PAYS = null;
+
+function billPays(){
+  api('/billing/payments')
+    .then(function(d){ PAYS = d.payments || []; billPaysPaint() })
+    .catch(function(){ PAYS = []; billPaysPaint() });
+}
+
+function billPaysPaint(){
+  var box = el('pays');
+  if (!box) return;
+  if (!PAYS || !PAYS.length){
+    box.innerHTML = L('<div class="hint">Оплат ще не було.</div>');
+    return;
+  }
+  box.innerHTML = PAYS.map(function(p){
+    return '<div class="prow"><div class="pk">' + esc(fmtDate(p.at)) + '</div>' +
+      '<div class="pv"><b>' + esc(p.amount) + ' ' + esc(p.currency) + '</b>' +
+      (p.card ? ' · ' + esc(p.card) : '') +
+      (p.invoice ? L('<div class="hint" style="margin-top:2px">Рахунок ') + esc(p.invoice) + '</div>' : '') +
+      '</div>' +
+      '<button class="ghost mini" data-inv="' + esc(p.id) + L('">Чек</button>') +
+      '</div>';
+  }).join('');
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-inv]'), function(btn){
+    btn.onclick = function(){
+      busy(btn, true);
+      api('/billing/payments/' + btn.dataset.inv + '/invoice')
+        .then(function(d){
+          busy(btn, false);
+          // Ссылка подписана и живёт недолго — открываем сразу.
+          if (d && d.url) window.open(d.url, '_blank', 'noopener');
+        })
+        .catch(function(e){ busy(btn, false); el('bErr').textContent = billWhy(e) });
+    };
+  });
+}
+
 function billPaint(){
   var box = el('bill');
   if (!box || !BILL) return;
@@ -4345,7 +4387,10 @@ function billPaint(){
     L('<div class="hint" style="margin-top:8px">Оплату проводить Paddle: він приймає картку, ') +
     L('нараховує податок вашої країни і надсилає чек. Скасувати можна будь-коли — ') +
     L('доступ триває до кінця оплаченого періоду.</div>') +
-    '<div class="err" id="bErr"></div>';
+    '<div class="err" id="bErr"></div>' +
+    L('<div class="lbl" style="margin-top:14px">Оплати</div>') +
+    '<div id="pays"></div>' +
+    L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="bSync">Оновити з Paddle</button></div>');
 
   if (el('bPortal')) el('bPortal').onclick = function(){
     var b = el('bPortal');
@@ -4355,6 +4400,21 @@ function billPaint(){
       // Ссылка одноразовая и живёт недолго, поэтому открываем сразу.
       if (d && d.url) window.open(d.url, '_blank', 'noopener');
     }).catch(function(e){ busy(b, false); el('bErr').textContent = billWhy(e) });
+  };
+
+  billPaysPaint();
+  if (PAYS === null) billPays();
+
+  /* Кнопка на случай, когда вебхук не дошёл. Она не должна была бы
+     понадобиться — но оплата это то место, где «не должно было» стоит
+     дорого, а лишняя кнопка не стоит ничего. */
+  el('bSync').onclick = function(){
+    var b = el('bSync');
+    el('bErr').textContent = '';
+    busy(b, true);
+    api('/billing/refresh', { method:'POST' })
+      .then(function(){ busy(b, false); billLoad(); billPays() })
+      .catch(function(e){ busy(b, false); el('bErr').textContent = billWhy(e) });
   };
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-per]'), function(btn){
@@ -4393,12 +4453,19 @@ function paddleReady(d){
 
 function billEvent(ev){
   if (!ev || ev.name !== 'checkout.completed') return;
-  // Тариф меняет вебхук, а он приходит своим ходом. Поэтому говорим
-  // спасибо сразу, а состояние перечитываем через несколько секунд —
-  // и ещё раз, если первый раз пришёл раньше вебхука.
-  toast(L('Оплата пройшла. Тариф оновиться за кілька секунд.'));
-  setTimeout(billLoad, 4000);
-  setTimeout(billLoad, 12000);
+  /* Состояние не ждём от вебхука, а спрашиваем сами. Вебхук быстрее,
+     но настраивается отдельно и теряется; человек, только что
+     заплативший, не должен смотреть на старый тариф и гадать. Пауза
+     перед первым запросом — Paddle заводит подписку не мгновенно. */
+  toast(L('Оплата пройшла. Оновлюю тариф.'));
+  setTimeout(billRefresh, 2500);
+  setTimeout(billRefresh, 9000);
+}
+
+function billRefresh(){
+  api('/billing/refresh', { method:'POST' })
+    .then(function(){ billLoad(); billPays() })
+    .catch(function(){ billLoad() });
 }
 
 function billPay(plan, btn){

@@ -19,6 +19,8 @@ import {
   paddlePlan,
   paddlePriceId,
   paddleSignatureOk,
+  paddlePayment,
+  paddleSubscription,
   paddleUpdate,
   isPaddlePeriod,
   yearPrice,
@@ -215,7 +217,89 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
 
     const id = (made.data as { id?: string } | null)?.id;
     if (!id) return reply.code(502).send({ error: 'paddle_failed', why: 'no_transaction_id' });
+
+    // Номер сделки запоминаем: по нему можно узнать подписку, даже если
+    // вебхук не дойдёт. Оплата — не то место, где допустимо зависеть от
+    // одного канала связи.
+    await withTenant(pool, a.tenantId, async (db) => {
+      await db.query(`UPDATE tenants SET paddle_txn = $2 WHERE id = $1`, [a.tenantId, id]);
+    });
+
     return { transactionId: id, env: deps.env, clientToken: deps.clientToken };
+  });
+
+  /**
+   * Оплаты клиента.
+   *
+   * Берём у Paddle, а не храним у себя. Своя копия списка оплат
+   * означала бы, что она однажды разойдётся с настоящей — после
+   * возврата, частичного возврата или спора с банком, — и человек
+   * увидит у нас одно, а в выписке другое. Источник правды здесь не
+   * наш, и делать вид, что наш, нечестно.
+   */
+  app.get('/billing/payments', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+    if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
+
+    const customer = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ paddle_customer_id: string | null }>(
+        `SELECT paddle_customer_id FROM tenants WHERE id = $1`,
+        [a.tenantId],
+      );
+      return rows[0]?.paddle_customer_id ?? null;
+    });
+    // Ни одной оплаты не было — это не ошибка, а пустой список.
+    if (!customer) return { payments: [] };
+
+    const got = await paddleFetch(
+      deps,
+      req.log,
+      `/transactions?customer_id=${encodeURIComponent(customer)}&status=completed,billed,past_due&per_page=50`,
+      { method: 'GET' },
+    );
+    if (!got.ok) return reply.code(502).send({ error: 'paddle_failed', why: got.message });
+
+    const rows = Array.isArray(got.data) ? (got.data as Record<string, unknown>[]) : [];
+    return { payments: rows.map(paddlePayment) };
+  });
+
+  /**
+   * Чек за оплату.
+   *
+   * Ссылку берём в момент нажатия и не храним: Paddle выдаёт её
+   * подписанной и ненадолго. Сохранённая ссылка — это ссылка, которая
+   * перестанет работать ровно тогда, когда чек понадобится.
+   */
+  app.get<{ Params: { id: string } }>('/billing/payments/:id/invoice', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+    if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
+
+    const id = String(req.params?.id ?? '');
+    if (!/^txn_[a-z0-9]+$/i.test(id)) return reply.code(400).send({ error: 'bad_id' });
+
+    // Чужую сделку по чужому номеру не отдаём: сверяем клиента.
+    const customer = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ paddle_customer_id: string | null }>(
+        `SELECT paddle_customer_id FROM tenants WHERE id = $1`,
+        [a.tenantId],
+      );
+      return rows[0]?.paddle_customer_id ?? null;
+    });
+    if (!customer) return reply.code(409).send({ error: 'no_customer' });
+
+    const txn = await paddleFetch(deps, req.log, `/transactions/${id}`, { method: 'GET' });
+    if (!txn.ok) return reply.code(502).send({ error: 'paddle_failed', why: txn.message });
+    if ((txn.data as { customer_id?: string } | null)?.customer_id !== customer) {
+      return reply.code(403).send({ error: 'not_yours' });
+    }
+
+    const inv = await paddleFetch(deps, req.log, `/transactions/${id}/invoice`, { method: 'GET' });
+    if (!inv.ok) return reply.code(502).send({ error: 'paddle_failed', why: inv.message });
+    const url = (inv.data as { url?: string } | null)?.url ?? null;
+    if (!url) return reply.code(502).send({ error: 'paddle_failed', why: 'no_invoice_url' });
+    return { url };
   });
 
   /**
@@ -348,6 +432,142 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
   });
 
   /**
+   * Применить состояние подписки к клиенту.
+   *
+   * Одна функция на два пути: вебхук и запрос состояния у Paddle. Два
+   * разных куска кода, делающих одно и то же, — это две разные правды
+   * о том, какой у клиента тариф, и расходиться они начинают в тот
+   * день, когда правят один из них.
+   *
+   * eventId пустой означает «мы сами спросили»: отметки о событии в
+   * этом случае нет, повторять нечего.
+   */
+  async function applyState(
+    tenantId: string,
+    st: {
+      eventId?: string;
+      eventType?: string;
+      subscriptionId: string | null;
+      customerId: string | null;
+      priceId: string | null;
+      status: string | null;
+      paidUntil: string | null;
+      live: boolean;
+    },
+  ): Promise<{ applied: string; plan: string | null }> {
+    if (!UUID_RE.test(tenantId)) return { applied: 'bad_tenant', plan: null };
+
+    const p = await platform(pool);
+    const found = paddlePlan(st.priceId, p.paddle_prices ?? {});
+    const plan = found?.plan ?? null;
+
+    const applied = await withTenant(pool, tenantId, async (db) => {
+      if (st.eventId) {
+        const seen = await db.query(
+          `INSERT INTO paddle_events (id, event_type, tenant_id) VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [st.eventId, st.eventType ?? '', tenantId],
+        );
+        if (!seen.rows.length) return 'repeat';
+      }
+
+      // Тариф меняем только по известной цене: цена, заведённая мимо
+      // нас, не должна понизить клиента до trial.
+      const sets = [
+        `paddle_subscription_id = COALESCE($2, paddle_subscription_id)`,
+        `paddle_customer_id = COALESCE($3, paddle_customer_id)`,
+        `paddle_status = COALESCE($4, paddle_status)`,
+      ];
+      const vals: unknown[] = [tenantId, st.subscriptionId, st.customerId, st.status];
+      if (st.paidUntil) {
+        vals.push(st.paidUntil);
+        sets.push(`paid_until = $${vals.length}::date`);
+      }
+      if (plan && st.live) {
+        vals.push(plan);
+        sets.push(`plan = $${vals.length}`);
+      }
+      const done = await db.query(
+        `UPDATE tenants SET ${sets.join(', ')} WHERE id = $1 RETURNING id`,
+        vals,
+      );
+      return done.rows.length ? 'applied' : 'no_tenant';
+    });
+
+    return { applied, plan };
+  }
+
+  /**
+   * Спросить Paddle, что там с подпиской.
+   *
+   * Вебхук быстрее, но зависеть только от него нельзя: он теряется,
+   * настраивается отдельно от всего остального и до первой настоящей
+   * оплаты его никто не проверял. Поэтому есть и второй путь — спросить
+   * прямо. Он медленнее на один запрос и всегда говорит правду.
+   *
+   * Подписку знаем не сразу: до первого вебхука её идентификатора у нас
+   * нет. Зато есть номер сделки, которую мы сами и завели, — по нему
+   * Paddle называет и клиента, и подписку.
+   */
+  app.post('/billing/refresh', async (req, reply) => {
+    const a = requireAuth(req);
+    if (!a) return reply.code(401).send(auth401);
+    if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
+
+    const me = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{
+        paddle_subscription_id: string | null;
+        paddle_txn: string | null;
+      }>(
+        `SELECT paddle_subscription_id, paddle_txn FROM tenants WHERE id = $1`,
+        [a.tenantId],
+      );
+      return rows[0] ?? null;
+    });
+
+    let subId = me?.paddle_subscription_id ?? null;
+    let customerId: string | null = null;
+
+    if (!subId && me?.paddle_txn) {
+      const txn = await paddleFetch(deps, req.log, `/transactions/${me.paddle_txn}`, { method: 'GET' });
+      if (!txn.ok) return reply.code(502).send({ error: 'paddle_failed', why: txn.message });
+      const d = txn.data as { subscription_id?: string; customer_id?: string } | null;
+      subId = d?.subscription_id ?? null;
+      customerId = d?.customer_id ?? null;
+      // Оплата прошла, а подписки нет — так бывает у разовой покупки.
+      // Клиента всё равно запоминаем: по нему открывается кабинет.
+      if (!subId) {
+        await applyState(a.tenantId, {
+          subscriptionId: null, customerId, priceId: null,
+          status: null, paidUntil: null, live: false,
+        });
+        return { ok: true, applied: 'no_subscription' };
+      }
+    }
+    if (!subId) return { ok: true, applied: 'nothing_to_ask' };
+
+    const sub = await paddleFetch(deps, req.log, `/subscriptions/${subId}`, { method: 'GET' });
+    if (!sub.ok) return reply.code(502).send({ error: 'paddle_failed', why: sub.message });
+
+    const got = paddleSubscription(sub.data);
+    if (!got) return reply.code(502).send({ error: 'paddle_failed', why: 'bad_subscription' });
+
+    const done = await applyState(a.tenantId, {
+      subscriptionId: subId,
+      customerId: got.customerId ?? customerId,
+      priceId: got.priceId,
+      status: got.status,
+      paidUntil: got.paidUntil,
+      live: got.live,
+    });
+    req.log.info(
+      { tenant: a.tenantId, sub: subId, status: got.status, plan: done.plan, applied: done.applied },
+      'Состояние подписки забрано у Paddle',
+    );
+    return { ok: true, applied: done.applied, status: got.status };
+  });
+
+  /**
    * Вебхук Paddle.
    *
    * Три правила, и каждое из них однажды кого-нибудь подводило.
@@ -379,59 +599,38 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     }
 
     const update = paddleUpdate(req.body);
-    if (!update) return { ok: true, skipped: 'not_subscription' };
-
-    const p = await platform(pool);
-    const found = paddlePlan(update.priceId, p.paddle_prices ?? {});
-    const plan = found?.plan ?? null;
-
-    // Идентификатор приходит из события, а не из нашей сессии. Кривое
-    // значение уронило бы обработчик, Paddle получил бы ошибку и ломился
-    // бы с этим событием сутки. Поэтому отвечаем «принято, не наше».
-    if (!UUID_RE.test(update.tenantId)) return { ok: true, skipped: 'bad_tenant' };
-
-    /*
-     * Отметка о событии и применение — в одной транзакции и от имени
-     * того клиента, чей это платёж. Системная роль тут не подходит: у
-     * таблицы событий включена изоляция по арендатору в режиме FORCE,
-     * и запись без контекста она не примет — что правильно, потому что
-     * событие оплаты называет клиента.
-     */
-    const applied = await withTenant(pool, update.tenantId, async (db) => {
-      const seen = await db.query(
-        `INSERT INTO paddle_events (id, event_type, tenant_id) VALUES ($1, $2, $3)
-         ON CONFLICT (id) DO NOTHING RETURNING id`,
-        [update.eventId, update.eventType, update.tenantId],
+    if (!update) {
+      /*
+       * Раньше здесь был молчаливый выход. Из-за него первая же
+       * настоящая оплата выглядела так: деньги списаны, тариф прежний,
+       * а в журнале ни строки — и непонятно, дошёл ли вебхук вообще.
+       * Теперь каждое событие оставляет след, даже то, которое мы не
+       * разбираем.
+       */
+      const body = (req.body ?? {}) as { event_type?: unknown; event_id?: unknown };
+      req.log.info(
+        { event: String(body.event_type ?? '?'), id: String(body.event_id ?? '?') },
+        'Событие Paddle пропущено: не подписка или нет клиента в custom_data',
       );
-      if (!seen.rows.length) return 'repeat';
+      return { ok: true, skipped: 'not_subscription' };
+    }
 
-      // Тариф меняем только по известной цене: цена, заведённая мимо
-      // нас, не должна понизить клиента до trial.
-      const sets = [
-        `paddle_subscription_id = $2`,
-        `paddle_customer_id = COALESCE($3, paddle_customer_id)`,
-        `paddle_status = $4`,
-      ];
-      const vals: unknown[] = [update.tenantId, update.subscriptionId, update.customerId, update.status];
-      if (update.paidUntil) {
-        vals.push(update.paidUntil);
-        sets.push(`paid_until = $${vals.length}::date`);
-      }
-      if (plan && update.live) {
-        vals.push(plan);
-        sets.push(`plan = $${vals.length}`);
-      }
-      const done = await db.query(
-        `UPDATE tenants SET ${sets.join(', ')} WHERE id = $1 RETURNING id`,
-        vals,
-      );
-      return done.rows.length ? 'applied' : 'no_tenant';
+    const done = await applyState(update.tenantId, {
+      eventId: update.eventId,
+      eventType: update.eventType,
+      subscriptionId: update.subscriptionId,
+      customerId: update.customerId,
+      priceId: update.priceId,
+      status: update.status,
+      paidUntil: update.paidUntil,
+      live: update.live,
     });
 
     req.log.info(
-      { event: update.eventType, tenant: update.tenantId, status: update.status, plan, applied },
+      { event: update.eventType, tenant: update.tenantId, status: update.status,
+        plan: done.plan, applied: done.applied },
       'Событие подписки Paddle',
     );
-    return { ok: true, applied };
+    return { ok: true, applied: done.applied };
   });
 }

@@ -162,3 +162,59 @@ describe('сумма и адрес', () => {
     expect(paddleApi('production')).toBe('https://api.paddle.com');
   });
 });
+
+/*
+ * Прямой запрос состояния. Нужен потому, что вебхук может не дойти —
+ * а оплата это не то место, где допустимо зависеть от одного канала.
+ */
+describe('подписка по прямому запросу', () => {
+  const SUB = {
+    id: 'sub_9',
+    status: 'active',
+    customer_id: 'ctm_9',
+    current_billing_period: { ends_at: '2027-09-25T10:00:00Z' },
+    items: [{ price: { id: 'pri_y' }, quantity: 1 }],
+  };
+
+  it('читается теми же полями, что и событие', async () => {
+    const { paddleSubscription } = await import('../src/paddle.js');
+    expect(paddleSubscription(SUB)).toEqual({
+      customerId: 'ctm_9', priceId: 'pri_y', status: 'active',
+      paidUntil: '2027-09-25', live: true,
+    });
+  });
+
+  it('без статуса это не подписка', async () => {
+    const { paddleSubscription } = await import('../src/paddle.js');
+    expect(paddleSubscription({ id: 'sub_9' })).toBeNull();
+    expect(paddleSubscription(null)).toBeNull();
+  });
+});
+
+describe('оплата в списке', () => {
+  const TXN = {
+    id: 'txn_1',
+    status: 'completed',
+    currency_code: 'USD',
+    invoice_number: '2026-0001',
+    billed_at: '2026-09-25T11:47:00Z',
+    details: { totals: { grand_total: '60000' } },
+    payments: [{ method_details: { card: { type: 'visa', last4: '4242' } } }],
+  };
+
+  it('сумма приходит в центах и делится здесь, а не в разметке', async () => {
+    const { paddlePayment } = await import('../src/paddle.js');
+    expect(paddlePayment(TXN)).toEqual({
+      id: 'txn_1', at: '2026-09-25T11:47:00Z', amount: '600.00', currency: 'USD',
+      invoice: '2026-0001', status: 'completed', card: 'visa 4242',
+    });
+  });
+
+  it('неполная сделка не роняет список', async () => {
+    const { paddlePayment } = await import('../src/paddle.js');
+    const bare = paddlePayment({ id: 'txn_2', status: 'billed' });
+    expect(bare.amount).toBe('0.00');
+    expect(bare.card).toBe('');
+    expect(bare.invoice).toBeNull();
+  });
+});
