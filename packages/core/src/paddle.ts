@@ -65,6 +65,27 @@ export function paddleSignatureOk(
   return { ok: true };
 }
 
+/**
+ * Форма ключа: чтобы сверять, не показывая.
+ *
+ * Когда подпись не сходится, вопрос всегда один — тот ли ключ вписан.
+ * Ответ на него виден по форме: начало говорит, какого он рода, длина —
+ * не обрезан ли он, а отдельная отметка о пробелах ловит самую частую
+ * беду копирования, когда вместе с ключом приезжает перевод строки и
+ * глазами его не видно.
+ *
+ * Сам ключ не показываем ни в каком виде: в журнал он не должен попасть
+ * даже наполовину.
+ */
+export function keyShape(value: string | undefined | null): string {
+  const raw = String(value ?? '');
+  if (!raw) return 'пусто';
+  const trimmed = raw.trim();
+  const head = trimmed.slice(0, 11);
+  const space = raw === trimmed ? '' : ', с пробелами по краям';
+  return `${head}… ${trimmed.length} символов${space}`;
+}
+
 /** Подписать так же, как это делает Paddle. Нужно тестам и только им. */
 export function paddleSign(rawBody: string, secret: string, ts: number): string {
   const h1 = createHmac('sha256', secret).update(`${ts}:${rawBody}`).digest('hex');

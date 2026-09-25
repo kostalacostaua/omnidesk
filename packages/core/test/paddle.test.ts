@@ -107,6 +107,33 @@ describe('событие подписки', () => {
   });
 });
 
+/*
+ * Когда подпись не сходится, вопрос всегда один: тот ли ключ вписан.
+ * Форма отвечает на него, не показывая сам ключ, — в журнал он не
+ * должен попасть даже наполовину.
+ */
+describe('форма ключа', () => {
+  it('говорит род, длину и ловит пробелы по краям', async () => {
+    const { keyShape } = await import('../src/paddle.js');
+    expect(keyShape('pdl_ntfset_01abcdef')).toBe('pdl_ntfset_… 19 символов');
+    expect(keyShape('pdl_ntfset_01abcdef\n')).toBe('pdl_ntfset_… 19 символов, с пробелами по краям');
+    expect(keyShape('')).toBe('пусто');
+    expect(keyShape(undefined)).toBe('пусто');
+  });
+
+  // Ключ другого рода виден сразу: у API ключа своё начало.
+  it('чужой ключ отличается началом', async () => {
+    const { keyShape } = await import('../src/paddle.js');
+    expect(keyShape('pdl_live_apikey_01abc')).toContain('pdl_live_ap');
+  });
+
+  it('целиком ключ в форму не попадает', async () => {
+    const { keyShape } = await import('../src/paddle.js');
+    const secret = 'pdl_ntfset_01abcdefghijklmnop';
+    expect(keyShape(secret)).not.toContain('ghijklmnop');
+  });
+});
+
 describe('тариф и период по цене', () => {
   const prices = {
     pro: { product: 'pro_1', month: 'pri_m', year: 'pri_y' },

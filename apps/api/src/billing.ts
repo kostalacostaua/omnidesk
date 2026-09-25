@@ -24,6 +24,7 @@ import {
   paddleUpdate,
   isPaddlePeriod,
   isPerSeatPlan,
+  keyShape,
   paddleCurrency,
   seatDeal,
   tenantMoney,
@@ -829,7 +830,13 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const header = (req.headers as Record<string, string | undefined>)['paddle-signature'];
     const sig = paddleSignatureOk(header, raw, deps.webhookSecret);
     if (!sig.ok) {
-      req.log.warn({ why: sig.reason }, 'Вебхук Paddle не прошёл проверку подписи');
+      // Форма ключа, а не сам ключ: по ней видно, тот ли секрет вписан
+      // — от этого ли destination, целиком ли скопирован, не приехал ли
+      // вместе с переводом строки.
+      req.log.warn(
+        { why: sig.reason, secret: keyShape(deps.webhookSecret) },
+        'Вебхук Paddle не прошёл проверку подписи',
+      );
       return reply.code(401).send({ error: 'bad_signature' });
     }
 
