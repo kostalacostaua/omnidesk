@@ -528,6 +528,61 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     let subId = me?.paddle_subscription_id ?? null;
     let customerId: string | null = null;
 
+    /*
+     * Ни подписки, ни сделки — значит человек заплатил раньше, чем мы
+     * научились запоминать номер. Спрашивать вроде бы не о чем, но
+     * подписка-то есть: она у Paddle, на почту того, кто платил.
+     *
+     * Поэтому ищем по почтам людей этой организации. Чужую подписку так
+     * не подхватить: берём только ту, в которой стоит наш же
+     * идентификатор организации, либо, если его нет, — ту, что куплена
+     * по нашей цене.
+     */
+    if (!subId && !me?.paddle_txn) {
+      const emails = await withTenant(pool, a.tenantId, async (db) => {
+        const { rows } = await db.query<{ email: string }>(
+          `SELECT email FROM users
+            WHERE tenant_id = $1 AND is_active AND role IN ('owner','admin')
+            ORDER BY role, created_at LIMIT 5`,
+          [a.tenantId],
+        );
+        return rows.map((r) => r.email);
+      });
+
+      for (const email of emails) {
+        const found = await paddleFetch(
+          deps, req.log, `/customers?email=${encodeURIComponent(email)}`, { method: 'GET' },
+        );
+        if (!found.ok) continue;
+        const list = Array.isArray(found.data) ? (found.data as Record<string, unknown>[]) : [];
+        const cid = typeof list[0]?.['id'] === 'string' ? (list[0]['id'] as string) : null;
+        if (!cid) continue;
+
+        const subs = await paddleFetch(
+          deps, req.log,
+          `/subscriptions?customer_id=${encodeURIComponent(cid)}&status=active,trialing,past_due`,
+          { method: 'GET' },
+        );
+        if (!subs.ok) continue;
+        const rows = Array.isArray(subs.data) ? (subs.data as Record<string, unknown>[]) : [];
+
+        const p = await platform(pool);
+        const prices = p.paddle_prices ?? {};
+        const mine = rows.find((r) => {
+          const custom = (r['custom_data'] ?? {}) as Record<string, unknown>;
+          if (custom['tenant_id'] === a.tenantId) return true;
+          const parsed = paddleSubscription(r);
+          return Boolean(parsed && paddlePlan(parsed.priceId, prices));
+        });
+        if (mine && typeof mine['id'] === 'string') {
+          subId = mine['id'] as string;
+          customerId = cid;
+          req.log.info({ tenant: a.tenantId, email, sub: subId }, 'Подписка Paddle найдена по почте');
+          break;
+        }
+      }
+    }
+
     if (!subId && me?.paddle_txn) {
       const txn = await paddleFetch(deps, req.log, `/transactions/${me.paddle_txn}`, { method: 'GET' });
       if (!txn.ok) return reply.code(502).send({ error: 'paddle_failed', why: txn.message });
