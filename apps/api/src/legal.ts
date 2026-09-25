@@ -123,7 +123,119 @@ or write to us at the same address.</p>
   const send = (html: string) => async (_req: unknown, reply: { type: (t: string) => { send: (b: string) => unknown } }) =>
     reply.type('text/html; charset=utf-8').send(html);
 
+  /*
+   * Условия и возвраты.
+   *
+   * Их спрашивает Paddle при подключении оплаты — без этих двух
+   * адресов анкета продавца не отправляется. Но пишутся они не ради
+   * анкеты: это то, на что человек сошлётся, когда что-то пойдёт не
+   * так, и написанное здесь должно совпадать с тем, как сервис ведёт
+   * себя на самом деле.
+   *
+   * Английский первым по той же причине, что и в политике: читают их
+   * сначала на ревью, и читают по-английски.
+   */
+  const terms = page(
+    'Terms of Service',
+    `<h1>Terms of Service</h1><div class="muted">Last updated: September 25, 2026</div>
+<p>These terms govern the use of Rozmovio (“the Service”), a customer messaging inbox operated by ${who}.
+By creating an account you agree to them.</p>
+<h2>What the Service does</h2>
+<p>Rozmovio collects messages from the channels a business connects — Telegram, WhatsApp, Facebook Messenger,
+Instagram, email and a website chat — into one inbox, and sends replies back through the same channels.
+It also connects to CRM systems so a conversation can be linked to a customer record.</p>
+<h2>Accounts</h2>
+<p>An account belongs to a business, not to a person. The business is responsible for who it invites and for
+what those people do. Sign-in credentials must not be shared. Tell us at once if you believe an account has
+been accessed by someone else.</p>
+<h2>Subscriptions and payment</h2>
+<ul>
+<li>The Service is sold as a subscription, billed monthly or yearly in advance. The price and the plan are
+shown before payment and in the account settings.</li>
+<li>Payments are processed by <b>Paddle</b>, which acts as the merchant of record. Paddle handles the payment,
+applies any sales tax or VAT required in your country, and issues the receipt.</li>
+<li>Subscriptions renew automatically at the end of each period until cancelled. You can cancel at any time;
+access continues until the end of the period already paid for.</li>
+<li>If a payment fails, we keep the account working while Paddle retries. If it still fails, the account is
+suspended, and its data is kept for 30 days so nothing is lost by a late card.</li>
+<li>Prices may change. A change never applies to a period already paid for, and we announce it at least
+30 days before it takes effect.</li>
+</ul>
+<h2>Acceptable use</h2>
+<p>The Service must not be used to send unsolicited bulk messages, to impersonate another business or person,
+or in any way that breaks the rules of the messaging platforms it connects to. Those platforms may block a
+channel for such use, and we cannot restore it. We may suspend an account that puts our other customers at risk.</p>
+<h2>Your data</h2>
+<p>Conversations and customer records belong to the business that created them. We process them only to provide
+the Service, as described in the <a href="/privacy">Privacy Policy</a>. You may export or request deletion of
+your data at any time.</p>
+<h2>Availability</h2>
+<p>We aim to keep the Service running at all times, but we do not promise uninterrupted operation. Messaging
+platforms and CRM systems we connect to are outside our control, and their outages or policy changes may
+interrupt part of the Service.</p>
+<h2>Liability</h2>
+<p>The Service is provided as is. To the extent permitted by law, our liability for any claim is limited to the
+amount paid for the Service in the three months before the claim arose. We are not liable for lost profit or
+for messages delayed or lost by a third-party platform.</p>
+<h2>Termination</h2>
+<p>You may close your account at any time. We may terminate an account that breaks these terms, with notice
+where circumstances allow. On termination, data is deleted within 30 days.</p>
+<h2>Governing law</h2>
+<p>These terms are governed by the laws of Ukraine. Nothing here limits consumer rights that cannot be limited
+by agreement in your country of residence.</p>
+<h2>Contact</h2>
+<p><a href="mailto:${email}">${email}</a></p>
+<hr>
+<h1>Умови користування</h1>
+<p>Rozmovio — сервіс для роботи з повідомленнями клієнтів, який надає ${who}. Сервіс продається підпискою
+з оплатою наперед; платежі проводить Paddle як продавець запису, він же нараховує податки вашої країни
+та видає чек. Підписка продовжується автоматично, скасувати її можна будь-коли — доступ триває до кінця
+вже оплаченого періоду. Листування й картки клієнтів належать компанії, яка їх створила. Сервісом не можна
+розсилати непрохані повідомлення й видавати себе за іншу компанію. Питання: <a href="mailto:${email}">${email}</a>.</p>`,
+  );
+
+  const refunds = page(
+    'Refund Policy',
+    `<h1>Refund Policy</h1><div class="muted">Last updated: September 25, 2026</div>
+<p>This policy applies to subscriptions to Rozmovio, operated by ${who}. Payments are processed by
+<b>Paddle</b> as the merchant of record, and refunds are issued by Paddle to the original payment method.</p>
+<h2>14-day refund on your first payment</h2>
+<p>If Rozmovio does not suit you, write to us within <b>14 days</b> of your first subscription payment and we
+will refund it in full. No explanation is required. This covers the first payment only.</p>
+<h2>Renewals</h2>
+<p>Renewal payments are not refunded for a period that has already started, because the subscription can be
+cancelled at any time before it renews and the renewal date is shown in your account. There are two exceptions,
+and in both we refund the unused part of the period:</p>
+<ul>
+<li>The Service was unavailable for more than 48 hours in a row through our fault.</li>
+<li>A renewal was charged after you cancelled, or after you asked us in writing to cancel.</li>
+</ul>
+<h2>What is not refunded</h2>
+<p>We do not refund a period during which the account was used normally, nor an account suspended for breaking
+the <a href="/terms">Terms of Service</a>. We also cannot refund what we did not charge: fees taken by a
+messaging platform or a CRM vendor are theirs, not ours.</p>
+<h2>How to ask</h2>
+<p>Write to <a href="mailto:${email}">${email}</a> from the email address on the account, or use the
+“Contact support” link on the Paddle receipt. We answer within 3 business days. An approved refund is sent by
+Paddle and usually reaches the card within 5–10 business days, depending on the bank.</p>
+<p>If you believe a charge is wrong, please write to us before disputing it with your bank — a dispute blocks
+the account automatically and takes far longer to resolve than a refund.</p>
+<hr>
+<h1>Повернення коштів</h1>
+<p>Протягом <b>14 днів</b> після першої оплати підписки повертаємо гроші повністю й без пояснень —
+напишіть на <a href="mailto:${email}">${email}</a>. Продовження підписки за вже початий період не
+повертаємо: скасувати можна будь-коли до дати списання, і ця дата видно в кабінеті. Виняток — збій сервісу
+довше 48 годин поспіль з нашої вини або списання після скасування: тоді повертаємо невикористану частину.
+Кошти повертає Paddle на ту саму картку, зазвичай за 5–10 робочих днів.</p>`,
+  );
+
   app.get('/privacy', send(privacy) as never);
+  app.get('/terms', send(terms) as never);
+  app.get('/refunds', send(refunds) as never);
+  // Адреса, под которыми эти страницы просят чаще всего. Дешевле отдать
+  // ту же страницу, чем объяснять, почему ссылка ведёт в никуда.
+  app.get('/terms-of-service', send(terms) as never);
+  app.get('/refund-policy', send(refunds) as never);
 
   // Meta шлёт запрос на удаление данных как обычную форму, а не JSON.
   // Fastify такой тип без плагина не разбирает, поэтому парсер здесь.

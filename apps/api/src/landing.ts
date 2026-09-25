@@ -533,6 +533,8 @@ export const LANDING_HTML = `<!DOCTYPE html>
     <a class="brand" href="/" style="font-size:15px">${MARK}Rozmovio</a>
     <div class="grow"></div>
     <a href="/privacy" data-t="f.privacy"></a>
+    <a href="/terms" data-t="f.terms"></a>
+    <a href="/refunds" data-t="f.refunds"></a>
     <a href="/data-deletion" data-t="f.deletion"></a>
     <a href="mailto:support@rozmovio.com">support@rozmovio.com</a>
     <span data-t="f.legal"></span>
@@ -600,7 +602,7 @@ var T = {
     'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
     'tr.go':'Надіслати заявку','tr.small':'Напишу протягом робочого дня. Пошту не передаю нікому.',
     'tr.okh':'Заявку отримано','tr.okp':'Дякую! Напишу вам на вказану пошту протягом робочого дня.',
-    'f.privacy':'Конфіденційність','f.deletion':'Видалення даних','f.legal':'KL Systems, ФОП Сластін Костянтин Віталійович · Україна',
+    'f.privacy':'Конфіденційність','f.terms':'Умови','f.refunds':'Повернення коштів','f.deletion':'Видалення даних','f.legal':'KL Systems, ФОП Сластін Костянтин Віталійович · Україна',
     'e.mail':'Вкажіть коректну пошту','e.net':'Не вдалося надіслати. Спробуйте ще раз або напишіть на support@rozmovio.com',
     'e.rate':'Заявку з цієї пошти вже отримано. Я відповім найближчим часом.',
     'th.auto':'Тема як у системі','th.light':'Світла тема','th.dark':'Темна тема'
@@ -656,7 +658,7 @@ var T = {
     'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',
     'tr.go':'Send request','tr.small':'I reply within a business day. Your email goes nowhere else.',
     'tr.okh':'Request received','tr.okp':'Thank you! I will write to the email you left within a business day.',
-    'f.privacy':'Privacy','f.deletion':'Data deletion','f.legal':'KL Systems, FOP Kostiantyn Slastin · Ukraine',
+    'f.privacy':'Privacy','f.terms':'Terms','f.refunds':'Refunds','f.deletion':'Data deletion','f.legal':'KL Systems, FOP Kostiantyn Slastin · Ukraine',
     'e.mail':'Enter a valid email','e.net':'Could not send. Try again or write to support@rozmovio.com',
     'e.rate':'A request from this email is already in. I will get back to you shortly.',
     'th.auto':'System theme','th.light':'Light theme','th.dark':'Dark theme'

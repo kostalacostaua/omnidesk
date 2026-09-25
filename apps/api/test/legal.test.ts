@@ -31,3 +31,51 @@ describe('signed_request от Meta', () => {
     expect(parseSignedRequest(sign({ algorithm: 'RSA', user_id: '1' }), SECRET)).toBeNull();
   });
 });
+
+/*
+ * Страницы условий и возвратов. Их спрашивает Paddle при подключении
+ * оплаты, и проверяем мы не текст, а то, что они вообще отдаются и
+ * что внутри есть то, за чем на них приходят: срок возврата, кто
+ * продавец записи и как продлевается подписка.
+ */
+describe('условия и возвраты', () => {
+  const build = async () => {
+    const Fastify = (await import('fastify')).default;
+    const { registerLegal } = await import('../src/legal.js');
+    const app = Fastify();
+    registerLegal(app, {
+      contactEmail: 'support@rozmovio.com',
+      operator: 'KL Systems',
+      pool: { query: async () => ({ rows: [] }) } as never,
+      appUrl: 'https://app.rozmovio.com',
+      metaAppSecret: 'x',
+    });
+    return app;
+  };
+
+  it('условия отдаются и называют Paddle продавцом записи', async () => {
+    const app = await build();
+    const r = await app.inject({ method: 'GET', url: '/terms' });
+    expect(r.statusCode).toBe(200);
+    expect(r.body).toContain('merchant of record');
+    expect(r.body).toContain('renew automatically');
+    await app.close();
+  });
+
+  it('возвраты называют срок и способ обращения', async () => {
+    const app = await build();
+    const r = await app.inject({ method: 'GET', url: '/refunds' });
+    expect(r.statusCode).toBe(200);
+    expect(r.body).toContain('14 days');
+    expect(r.body).toContain('support@rozmovio.com');
+    await app.close();
+  });
+
+  it('привычные адреса ведут туда же, а не в никуда', async () => {
+    const app = await build();
+    for (const url of ['/terms-of-service', '/refund-policy']) {
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(200);
+    }
+    await app.close();
+  });
+});
