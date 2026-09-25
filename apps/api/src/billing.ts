@@ -24,6 +24,8 @@ import {
   paddleUpdate,
   isPaddlePeriod,
   isPerSeatPlan,
+  paddleCurrency,
+  seatDeal,
   tenantMoney,
   yearPrice,
   PADDLE_PERIODS,
@@ -75,6 +77,19 @@ function sellPlan(plan: string): string {
 
 /** Тарифы, которые заводим в Paddle: оба продаются картой. */
 const SYNC_PLANS = [DEFAULT_PLAN, ...PER_SEAT_PLANS];
+
+/**
+ * Цена тарифа в той валюте, в которой он заведён в Paddle.
+ *
+ * Сверять цену клиента с прайсом надо по той же валюте, по которой
+ * заводился товар, иначе сверка ответит «не совпало» там, где всё
+ * совпало, — просто в разных деньгах.
+ */
+function seatListed(prices: Record<string, Record<string, number>>, plan: string): number {
+  const byCur = prices[plan] ?? {};
+  const cur = paddleCurrency(byCur);
+  return cur ? Number(byCur[cur]) || 0 : 0;
+}
 
 interface PlatformRow {
   plan_prices: Record<string, Record<string, number>> | null;
@@ -179,11 +194,13 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const plan = sellPlan(me.plan);
     const perSeat = isPerSeatPlan(plan);
     const seats = Math.max(1, Number(me.seats_limit ?? 1));
-    // Своя цена за человека означает индивидуальную договорённость, а
-    // в Paddle заведена цена из прайса. Продать по чужой цене нельзя,
-    // поэтому такой клиент платит счётом — и видит это словами.
+    // Цену за человека сверяем с прайсом, а не проверяем на пустоту.
+    // Вписанная руками, но совпадающая с прайсом — это та же цена, и
+    // в Paddle она заведена: платить картой можно. Другая — отдельная
+    // договорённость, продать по ней нечем, и клиент платит счётом.
     const own = Number(String(me.seat_price ?? '0').replace(',', '.')) || 0;
-    const individual = perSeat && own > 0;
+    const deal = seatDeal(own, seatListed(planPrices, plan));
+    const individual = perSeat && deal.individual;
 
     // Цена за месяц. Для тарифа по головам это цена человека, умноженная
     // на число людей: пятнадцать по шесть — девяносто, и складывать это
@@ -192,7 +209,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     for (const [cur, v] of Object.entries(planPrices[plan] ?? {})) {
       month[cur] = perSeat
         ? tenantMoney(
-            { plan, seatsLimit: seats, currency: cur, seatPrice: individual ? own : null },
+            { plan, seatsLimit: seats, currency: cur, seatPrice: own > 0 ? own : null },
             planPrices,
           ).monthTotal
         : Number(v);
@@ -261,14 +278,15 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     }
     const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
 
+    const p = await platform(pool);
+
     // Индивидуальная цена за человека в Paddle не заведена, и продать
     // по ней нечем: такой клиент платит счётом.
     const own = Number(String(me.seat_price ?? '0').replace(',', '.')) || 0;
-    if (isPerSeatPlan(plan) && own > 0) {
+    if (isPerSeatPlan(plan) && seatDeal(own, seatListed(p.plan_prices ?? {}, plan)).individual) {
       return reply.code(409).send({ error: 'individual_plan' });
     }
 
-    const p = await platform(pool);
     const priceId = paddlePriceId(p.paddle_prices ?? {}, plan, period);
     if (!priceId) return reply.code(409).send({ error: 'no_price' });
 
@@ -433,10 +451,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       if (ids.month && ids.year) continue;
 
       const byCur = planPrices[plan] ?? {};
-      // Валюту берём одну: Paddle сам показывает её в пересчёте тому,
-      // кто платит из другой страны, а вторая цена на тот же тариф
-      // означала бы два разных товара на одно и то же.
-      const currency = byCur['USD'] !== undefined ? 'USD' : Object.keys(byCur)[0];
+      const currency = paddleCurrency(byCur);
       const monthly = currency ? byCur[currency] : undefined;
       if (!currency || monthly === undefined || !paddleAmount(monthly)) {
         failed.push({ plan, why: 'no_price' });

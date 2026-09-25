@@ -189,6 +189,24 @@ export interface PaddlePlanIds {
 
 export type PaddlePrices = Record<string, PaddlePlanIds>;
 
+/**
+ * Валюта, в которой тариф заведён в Paddle.
+ *
+ * Одна на тариф: Paddle сам показывает цену в пересчёте тому, кто
+ * платит из другой страны, а вторая цена на тот же тариф означала бы
+ * два разных товара на одно и то же. Доллар предпочитаем, потому что
+ * им заведено всё, что продаётся картой.
+ *
+ * Выбор вынесен сюда, а не оставлен в двух местах: заводим товары по
+ * одной валюте, а сверяем цену клиента — по другой, и расхождение
+ * нашлось бы в день, когда клиент не смог заплатить.
+ */
+export function paddleCurrency(byCur: Record<string, unknown> | null | undefined): string | null {
+  if (!byCur) return null;
+  if (byCur['USD'] !== undefined) return 'USD';
+  return Object.keys(byCur)[0] ?? null;
+}
+
 export function paddlePriceId(
   prices: PaddlePrices,
   plan: string,

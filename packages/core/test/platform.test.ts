@@ -273,6 +273,29 @@ describe('места сверх тарифа', () => {
       expect(m.base).toBe(0);
     });
 
+    /*
+     * Вписанная руками цена и цена из прайса — не одно и то же только
+     * тогда, когда они разные. Пока правило звучало как «поле не
+     * пустое», организация с ценой шесть при прайсе шесть видела
+     * «оплата за рахунком» и не имела кнопки оплаты вовсе.
+     */
+    it('совпавшая с прайсом цена не делает тариф индивидуальным', async () => {
+      const { seatDeal } = await import('../src/billing-report.js');
+      expect(seatDeal(6, 6)).toEqual({ price: 6, individual: false });
+      expect(seatDeal(0, 6)).toEqual({ price: 6, individual: false });
+      expect(seatDeal(4.5, 6)).toEqual({ price: 4.5, individual: true });
+      // Прайса нет вовсе, а цена есть: платить нечем, это договорённость.
+      expect(seatDeal(4.5, 0)).toEqual({ price: 4.5, individual: true });
+    });
+
+    it('валюта сверки та же, в которой тариф заведён в Paddle', async () => {
+      const { paddleCurrency } = await import('../src/paddle.js');
+      expect(paddleCurrency({ UAH: 250, USD: 6 })).toBe('USD');
+      expect(paddleCurrency({ UAH: 250 })).toBe('UAH');
+      expect(paddleCurrency({})).toBeNull();
+      expect(paddleCurrency(null)).toBeNull();
+    });
+
     it('своя цена за человека важнее прайса: это отдельная договорённость', async () => {
       const { tenantMoney } = await import('../src/billing-report.js');
       expect(tenantMoney(

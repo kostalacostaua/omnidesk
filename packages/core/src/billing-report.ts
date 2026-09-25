@@ -148,6 +148,28 @@ export function isPerSeatPlan(plan: string | null | undefined): boolean {
   return PER_SEAT_PLANS.includes(String(plan ?? ''));
 }
 
+/**
+ * Своя цена за человека — та, которой нет в Paddle.
+ *
+ * Поле «ціна за користувача» в карточке заполняют двумя разными
+ * намерениями, и различать их по одному «поле не пустое» нельзя.
+ * Вписанная цена, совпадающая с прайсом, — это та же цена, просто
+ * записанная руками: в Paddle она заведена, и платить картой можно.
+ * Вписанная другая — отдельная договорённость, которой в Paddle нет;
+ * продать по ней нечем, и такой клиент платит счётом.
+ *
+ * Различие не косметическое: из-за него организация, у которой цена
+ * совпадала с прайсом, видела «оплата за рахунком» и не имела кнопки
+ * оплаты вовсе.
+ */
+export function seatDeal(
+  own: number,
+  listed: number,
+): { price: number; individual: boolean } {
+  const price = own > 0 ? own : listed;
+  return { price, individual: own > 0 && own !== listed };
+}
+
 /** Прайс владельца: тариф → валюта → цена. */
 export type PlanPrices = Record<string, Record<string, number | string>> | null | undefined;
 
