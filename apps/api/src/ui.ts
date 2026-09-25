@@ -4320,6 +4320,9 @@ function billWhy(e){
   var p = (e && e.payload) || {};
   if (p.error === 'paddle_not_configured') return L('Paddle не налаштований на сервері');
   if (p.error === 'no_price') return L('Тариф ще не заведений у Paddle');
+  if (p.error === 'no_plan_price') return L('Ціну тарифу ще не задано — напишіть нам, виставимо рахунок вручну');
+  if (p.error === 'no_rate') return L('Курс НБУ на сьогодні ще невідомий — спробуйте пізніше');
+  if (p.error === 'individual_plan') return L('У вас індивідуальна ціна: оплата за рахунком');
   if (p.error === 'no_customer') return L('У Paddle ще немає вашого клієнта — спочатку оплата');
   if (p.why) return L('Paddle: ') + p.why;
   return (e && e.message) || L('помилка');

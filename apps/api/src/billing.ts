@@ -928,7 +928,20 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const plan = sellPlan(me.plan);
     const p = await platform(pool);
     const planPrices = p.plan_prices ?? {};
-    const currency = String(me.currency || 'UAH').toUpperCase();
+
+    /*
+     * Валюта счёта.
+     *
+     * Своя у организации, если тариф в ней оценён. Если нет — та, в
+     * которой он оценён вообще: организация может числиться в гривне,
+     * а прайс быть только долларовым, и отвечать на это «цены нет»
+     * было бы неправдой. Платят всё равно в гривне: сумма в счёте
+     * пересчитывается по курсу НБУ, и курс там написан.
+     */
+    const own = String(me.currency || 'UAH').toUpperCase();
+    const currency = planPrices[plan]?.[own] !== undefined
+      ? own
+      : paddleCurrency(planPrices[plan] ?? {}) ?? own;
 
     // Сумма — цена тарифа за выбранный период, по тем же правилам, что
     // и на кнопке оплаты картой. Два способа посчитать одну цену — это
@@ -945,7 +958,10 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       planPrices,
     ).monthTotal;
     const amount = period === 'year' ? yearPrice(month) : month;
-    if (!(amount > 0)) return reply.code(409).send({ error: 'no_price' });
+    // Своя ошибка, а не общая с Paddle: счёт по безналу к нему
+    // отношения не имеет, и «тариф не заведений у Paddle» в ответ на
+    // кнопку «виставити рахунок» отправляет человека искать не там.
+    if (!(amount > 0)) return reply.code(409).send({ error: 'no_plan_price' });
 
     const today = isoDay(new Date());
     const got = await rateFor(currency, today);
