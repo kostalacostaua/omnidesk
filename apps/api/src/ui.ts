@@ -787,16 +787,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
     font-variant-numeric:tabular-nums;font-family:var(--font-display,var(--font))}
   .chico{width:38px;height:38px;border-radius:12px;flex:none;display:flex;align-items:center;
     justify-content:center;color:#fff;font-weight:700;font-size:12px}
-  .chico.telegram_bot,.chico.telegram_user{background:linear-gradient(140deg,#37aee2,#1e96c8)}
+  .chico.telegram_bot,.chico.telegram_user,
+  .chico.telegram_business{background:linear-gradient(140deg,#37aee2,#1e96c8)}
   .chico.instagram{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
   .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
-  .chico.whatsapp{background:linear-gradient(140deg,#5bd066,#1faa53)}
-  .chico.viber_business{background:linear-gradient(140deg,#8f5db7,#665cac)}
+  .chico.whatsapp,.chico.whatsapp_cloud,
+  .chico.whatsapp_user{background:linear-gradient(140deg,#5bd066,#1faa53)}
+  .chico.viber_business,.chico.viber_user{background:linear-gradient(140deg,#8f5db7,#665cac)}
   .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
   .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
   .chico.messenger_comments{background:linear-gradient(140deg,#00b2ff,#006aff)}
   .chico.instagram_comments{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
   .chico.email{background:linear-gradient(140deg,#64748b,#0f172a);font-size:15px}
+  .chico svg{width:21px;height:21px;display:block}
+
+  /* Тот же значок на аватарке в списке и в шапке диалога. Классы те же,
+     что у плитки канала: цвет сети задан один раз и не разъедется. */
+  /* Обёртке нужны собственные размеры и свой край: в строке списка она
+     флекс-ребёнок и без этого растянулась бы на всю высоту строки —
+     значок уехал бы вниз, к меткам, вместо угла аватарки. */
+  .avwrap{position:relative;flex:none;align-self:flex-start;
+    width:38px;height:38px;line-height:0}
+  .chico.sm{position:absolute;right:-3px;bottom:-3px;width:17px;height:17px;
+    border-radius:50%;border:2px solid var(--panel);box-sizing:content-box}
+  .chico.sm svg{width:11px;height:11px}
+  .thead .avwrap .chico.sm{border-color:var(--panel)}
   /* Записи DNS: четыре колонки, значение переносится. На узком экране
      строка становится в столбик — копировать всё равно придётся руками. */
   .mlrec{display:flex;flex-direction:column;gap:6px}
@@ -1338,8 +1353,11 @@ function renderList(){
     var who = c.assignee_name || c.assignee_email;
     return '<div class="conv' + (current === c.id ? ' on' : '') + (unread ? ' unread' : '') +
       '" data-id="' + c.id + '">' +
-      '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
-        avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+      '<div class="avwrap">' +
+        '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
+          avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+        chBadge(c.channel_type) +
+      '</div>' +
       '<div class="body">' +
         '<div class="r1"><span class="nm">' + esc(c.display_name || L('Без імені')) + '</span>' +
         '<span class="tm">' + esc(fmtTime(c.last_message_at)) + '</span></div>' +
@@ -1347,7 +1365,11 @@ function renderList(){
         '<div class="r3">' +
           '<span class="dot ' + (c.status === 'resolved' ? 'closed' : 'open') + '"></span>' +
           statusChip(c) +
-          '<span class="chip">' + esc(CH[c.channel_type] || c.channel_type) + '</span>' +
+          /* Название сети ушло в значок на аватарке. Остаётся то, чего
+             значком не сказать: комментарии под постом — это не личная
+             переписка, и оператор должен видеть это до того, как
+             ответит всем сразу. */
+          (isComments(c.channel_type) ? L('<span class="chip">коментарі</span>') : '') +
           (who ? '<span class="chip who">' + esc(who) + '</span>' : '') +
           (c.tags || []).map(function(t){ return '<span class="chip">' + esc(t) + '</span>' }).join('') +
           (unread ? '<span class="badge">' + c.unread_count + '</span>' : '') +
@@ -1490,8 +1512,11 @@ function renderHead(){
   el('thead').innerHTML =
     L('<button class="ghost mini back" id="aBack" title="До списку чатів">← Чати</button>') +
     '<div class="who" id="aCard">' +
-      '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
-        avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+      '<div class="avwrap">' +
+        '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
+          avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+        chBadge(c.channel_type) +
+      '</div>' +
       '<div style="min-width:0"><div class="nm">' + esc(c.display_name || L('Без імені')) + '</div>' +
       '<div class="sub">' + esc(CH[c.channel_type] || c.channel_type) +
         (w.open && w.left ? L(' · вікно відповіді ще ') + w.left : (w.open ? '' : L(' · вікно закрито'))) +
@@ -4240,6 +4265,55 @@ var CH_ICON = { telegram_bot:'TG', telegram_user:'TG', instagram:'IG', messenger
   whatsapp:'WA', whatsapp_cloud:'WA', whatsapp_user:'WA', viber_business:'VB', viber_user:'VB',
   webchat:'WEB', custom:'API', messenger_comments:'FB', instagram_comments:'IG', email:'@' };
 
+/*
+ * Значки сетей.
+ *
+ * Рисуем сами, а не подключаем шрифт значков: вся страница — один файл,
+ * и полтора десятка контуров дешевле любого стороннего набора, который
+ * к тому же пришлось бы тянуть с чужого домена.
+ *
+ * Фигуры одноцветные: цвет даёт подложка, а белый силуэт на ней
+ * узнаётся с десяти пикселей — именно столько занимает значок на
+ * аватарке в списке. Две буквы на том же месте не читаются вовсе.
+ */
+var ICON_SVG = {
+  telegram: '<path d="M22.1 3.6 2 11.4c-1.1.4-1.1 1.1 0 1.4l5.1 1.6 2 6.1c.2.7.5.9 1 .9.4 0 .6-.2.9-.5l2.5-2.4 5.1 3.8c.9.5 1.6.2 1.9-.9l3.4-16c.3-1.3-.5-1.9-1.6-1.4zM7.5 14.4 18.6 7.4c.5-.3.9-.1.5.2l-9.1 8.3-.4 4.1-2.1-5.6z"/>',
+  whatsapp: '<path d="M12 2a9.9 9.9 0 0 0-8.4 15.2L2 22.4l5.4-1.6A9.9 9.9 0 1 0 12 2zm5.8 14.1c-.2.7-1.4 1.3-1.9 1.3-.5.1-1.1.1-1.8-.1a16 16 0 0 1-1.6-.6c-2.9-1.2-4.8-4.1-4.9-4.3-.2-.2-1.2-1.6-1.2-3s.8-2.1 1-2.4c.3-.3.6-.4.8-.4h.6c.2 0 .4-.1.7.5.2.6.8 2 .9 2.1.1.2.1.3 0 .5l-.3.5-.4.5c-.2.1-.3.3-.2.6.2.3.8 1.2 1.6 2 1.1.9 2 1.2 2.3 1.4.3.1.5.1.6-.1l.9-1c.2-.3.4-.2.6-.1.3.1 1.6.8 1.9.9.3.1.5.2.5.3.1.2.1.7-.1 1.4z"/>',
+  instagram: '<rect x="3" y="3" width="18" height="18" rx="5.2" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<circle cx="12" cy="12" r="4.1" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<circle cx="17.3" cy="6.8" r="1.35"/>',
+  messenger: '<path d="M12 2C6.3 2 2 6.2 2 11.7c0 3.1 1.4 5.9 3.6 7.7v3.4l3.4-1.9c.9.3 1.9.4 3 .4 5.7 0 10-4.2 10-9.6S17.7 2 12 2zm1 12.4-2.6-2.7-4.9 2.7 5.4-5.7 2.6 2.7 4.9-2.7-5.4 5.7z"/>',
+  viber: '<path d="M12 2.6c-5 0-9 3.3-9 7.5 0 2.3 1.2 4.4 3.1 5.7v3.6l3.2-2.1c.9.2 1.8.3 2.7.3 5 0 9-3.3 9-7.5s-4-7.5-9-7.5z" fill="none" stroke="currentColor" stroke-width="1.9"/>' +
+    '<path d="M9.8 7.4c.3-.2.6-.1.8.1l.8 1.1c.2.3.1.6-.2.8l-.5.3c.3.8.9 1.4 1.7 1.7l.3-.5c.2-.3.5-.4.8-.2l1.1.8c.3.2.3.5.1.8-.4.5-1 .9-1.6.9-2.3 0-4.2-1.9-4.2-4.2 0-.6.3-1.2.9-1.6z"/>',
+  email: '<rect x="2.6" y="4.6" width="18.8" height="14.8" rx="3.2" fill="none" stroke="currentColor" stroke-width="1.9"/>' +
+    '<path d="M4.2 8 12 13.1 19.8 8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  webchat: '<path d="M4.6 3.4h14.8c1.4 0 2.6 1.2 2.6 2.6v8.4c0 1.4-1.2 2.6-2.6 2.6H10l-5 3.6V17h-.4C3.2 17 2 15.8 2 14.4V6c0-1.4 1.2-2.6 2.6-2.6z"/>',
+  custom: '<path d="M9.2 6.6 3.8 12l5.4 5.4M14.8 6.6 20.2 12l-5.4 5.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+};
+
+/* Комментарии рисуются значком той же сети: это та же страница, и
+   человек ищет глазами Facebook, а не отдельный знак для комментариев.
+   Чем они отличаются, сказано словами в строке — значком такое не
+   передать. */
+var ICON_OF = { telegram_bot:'telegram', telegram_user:'telegram', telegram_business:'telegram',
+  whatsapp:'whatsapp', whatsapp_cloud:'whatsapp', whatsapp_user:'whatsapp',
+  instagram:'instagram', instagram_comments:'instagram',
+  messenger:'messenger', messenger_comments:'messenger',
+  viber_business:'viber', viber_user:'viber',
+  email:'email', webchat:'webchat', custom:'custom' };
+
+function chIcon(type){
+  var g = ICON_SVG[ICON_OF[type] || ''] || ICON_SVG.custom;
+  return '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + g + '</svg>';
+}
+
+/* Значок сети поверх аватарки. Подложка красится теми же правилами,
+   что и плитка канала: одна сеть — один цвет во всём продукте. */
+function chBadge(type){
+  return '<span class="chico sm ' + esc(type || 'custom') + '" title="' +
+    esc(CH[type] || type || '') + '">' + chIcon(type) + '</span>';
+}
+
 /* Ключи своего канала. Показываются при подключении и потом на странице
    канала: это наши собственные секреты, а не чужой платформы, и прятать
    их от владельца значит заставлять пересоздавать канал при потере. */
@@ -4284,7 +4358,7 @@ function tabChannels(){
 
     var tiles = CHANNELS.map(function(c){
       return '<div class="tile click" data-open="' + c.id + '">' +
-        '<div class="t1"><div class="chico ' + esc(c.type) + '">' + (CH_ICON[c.type] || '••') + '</div>' +
+        '<div class="t1"><div class="chico ' + esc(c.type) + '">' + chIcon(c.type) + '</div>' +
         '<div style="min-width:0"><div class="ttl">' + esc(c.display_name) + '</div>' +
         '<div class="sub">' + esc(chSub(c)) + '</div></div></div>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + chPill(c) +
@@ -4298,7 +4372,7 @@ function tabChannels(){
     }).join('');
 
     var connect =
-      '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
+      '<div class="tile"><div class="t1"><div class="chico telegram_bot">' + chIcon('telegram_bot') + '</div>' +
       L('<div><div class="ttl">Telegram-бот</div><div class="sub">Окремий бот для підтримки</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Токен видає <b>@BotFather</b>: /newbot для нового бота ') +
       L('або /token для наявного.</div>') +
@@ -4312,7 +4386,7 @@ function tabChannels(){
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div>' +
       '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
 
-      L('<div class="tile"><div class="t1"><div class="chico email">@</div>') +
+      '<div class="tile"><div class="t1"><div class="chico email">' + chIcon('email') + '</div>' +
       L('<div><div class="ttl">Пошта</div><div class="sub">Наявна скринька або свій піддомен</div></div></div>') +
       '<div class="seg" style="margin-top:8px">' +
       L('<button data-mlmode="box" class="on">Наявна скринька</button>') +
@@ -4353,21 +4427,21 @@ function tabChannels(){
       '<div class="err" id="mlcErr"></div></div>' +
       '</div>' +
 
-      '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">IG</div>' +
+      '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">' + chIcon('instagram') + '</div>' +
       L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +
       L('<div id="metaBody"><div class="sub" style="white-space:normal">Увійдіть під акаунтом, який керує ') +
       L('сторінкою. Instagram має бути професійним акаунтом і привʼязаний до цієї сторінки.</div>') +
       L('<div class="acts"><button id="metaGo">Увійти через Facebook</button></div>') +
       '<div class="err" id="metaErr"></div></div></div>' +
 
-      '<div class="tile"><div class="t1"><div class="chico telegram_user">TG</div>' +
+      '<div class="tile"><div class="t1"><div class="chico telegram_user">' + chIcon('telegram_user') + '</div>' +
       L('<div><div class="ttl">Telegram за номером</div><div class="sub">Особистий або робочий акаунт</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Клієнти пишуть на ваш номер як завжди, листування зʼявляється тут, ') +
       L('відповіді йдуть від вашого імені.</div>') +
       L('<div class="row2"><input id="uname" placeholder="Назва, наприклад: Продажі" autocomplete="off">') +
       L('<button id="uqr">Показати QR-код</button></div><div id="uqrbox"></div></div>') +
 
-      '<div class="tile"><div class="t1"><div class="chico viber_business">VB</div>' +
+      '<div class="tile"><div class="t1"><div class="chico viber_business">' + chIcon('viber_business') + '</div>' +
       L('<div><div class="ttl">Viber для бізнесу</div><div class="sub">Імʼя відправника замість номера</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Клієнти пишуть у Viber на назву вашої компанії, ') +
       L('листування зʼявляється тут. Підключення — через офіційного партнера <b>TurboSMS</b>.</div>') +
@@ -4378,14 +4452,14 @@ function tabChannels(){
       L('<div class="acts"><button id="vbGo">Підключити</button></div>') +
       '<div class="err" id="vbErr"></div></div>' +
 
-      '<div class="tile"><div class="t1"><div class="chico webchat">WEB</div>' +
+      '<div class="tile"><div class="t1"><div class="chico webchat">' + chIcon('webchat') + '</div>' +
       L('<div><div class="ttl">Чат на сайті</div><div class="sub">Кнопка на ваших сторінках</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Створюється за секунду: ми даємо один рядок коду, ') +
       L('ви вставляєте його на сайт. Переписка живе на нашому домені, тож чужі скрипти її не бачать.</div>') +
       L('<div class="acts"><button id="wcGo">Створити віджет</button></div>') +
       '<div class="err" id="wcErr"></div></div>' +
 
-      '<div class="tile"><div class="t1"><div class="chico whatsapp">WA</div>' +
+      '<div class="tile"><div class="t1"><div class="chico whatsapp">' + chIcon('whatsapp') + '</div>' +
       L('<div><div class="ttl">WhatsApp Business</div><div class="sub">Номер компанії через Cloud API</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Потрібні токен і <b>Phone number ID</b> з кабінету ') +
       L('Meta for Developers: розділ WhatsApp → API Setup. Там же вкажіть адресу вебхука ') +
@@ -4399,7 +4473,7 @@ function tabChannels(){
       L('вони підтягнуться з вашого акаунта самі.</div>') +
       '<div class="err" id="waErr"></div></div>' +
 
-      '<div class="tile"><div class="t1"><div class="chico custom">API</div>' +
+      '<div class="tile"><div class="t1"><div class="chico custom">' + chIcon('custom') + '</div>' +
       L('<div><div class="ttl">Власний канал</div><div class="sub">Ваш бот або будь-який інший код</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Якщо у вас уже є свій бот Telegram чи Viber ') +
       L('зі сценаріями — не віддавайте нам його вебхук, він у бота один. Замість цього бот надсилає ') +
@@ -4411,7 +4485,7 @@ function tabChannels(){
       '<div class="err" id="cuErr"></div></div>' +
 
       ['whatsapp_user','viber_user'].map(function(t){
-        return '<div class="tile"><div class="t1"><div class="chico soon">' + (CH_ICON[t] || '••') + '</div>' +
+        return '<div class="tile"><div class="t1"><div class="chico soon">' + chIcon(t) + '</div>' +
           '<div><div class="ttl">' + esc(CH[t]) + '</div>' +
           L('<div class="sub">Готується</div></div></div>') +
           L('<div class="acts"><button class="ghost mini" disabled>Скоро</button></div></div>');
@@ -6016,7 +6090,7 @@ function ntAdd(){
      есть далеко не у всех: клиенты пишут в Instagram и на номер, а
      дежурной группе нужен свой бот, которого клиентам не показывают.
      Поэтому либо выбрать уже подключённого, либо вписать свой токен. */
-  var tg = '<div class="tile"><div class="t1"><div class="chico telegram_bot">TG</div>' +
+  var tg = '<div class="tile"><div class="t1"><div class="chico telegram_bot">' + chIcon('telegram_bot') + '</div>' +
     L('<div><div class="ttl">Група Telegram</div><div class="sub">Повідомлення читають усі, хто в групі</div></div></div>') +
     L('<div class="sub" style="white-space:normal">Створіть бота у <b>@BotFather</b>, додайте його у вашу групу ') +
     L('і зробіть адміністратором. Потім натисніть «Знайти групи» — ми запитаємо їх у Telegram самі.</div>') +
