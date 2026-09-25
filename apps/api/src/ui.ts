@@ -3918,6 +3918,13 @@ function tabProfile(){
 
       (admin ? whPanel(t) : '') +
 
+      /* Подписка. Только администратору: оператор не решает, чем платит
+         компания, и кнопка оплаты у него была бы тупиком. */
+      (admin
+        ? L('<div class="pg-sec"><h3>Підписка</h3><div class="card" id="bill">') +
+          L('<div class="hint">Завантажую...</div></div></div>')
+        : '') +
+
       L('<div class="pg-sec"><h3>Зараз в акаунті</h3>') +
       '<div class="nums">' +
       num(c.channels, L('каналів')) + num(c.users, L('співробітників')) +
@@ -3927,6 +3934,7 @@ function tabProfile(){
 
     wirePass();
     wireWh();
+    if (el('bill')) billLoad();
 
     if (el('pfFree')) el('pfFree').onclick = function(){
       var b = el('pfFree');
@@ -4215,6 +4223,140 @@ function wirePass(){
 }
 
 /** Строка данных: подпись, значение, при необходимости — «Изменить». */
+/* ── Подписка ───────────────────────────────────────────────────────
+   Оплата идёт через Paddle: он выступает продавцом перед покупателем,
+   сам считает налог его страны и сам выдаёт чек. Нам остаётся открыть
+   его окно и дождаться события.
+
+   Окно открывается по номеру сделки, заведённой на сервере. Соблазн
+   передать сюда цену и признак организации был — так короче, — но
+   тогда их задаёт тот, кто сидит в браузере. */
+
+var PADDLE_ON = false;
+var BILL = null;
+
+function billLoad(){
+  api('/billing').then(function(d){ BILL = d; billPaint() })
+    .catch(function(e){ var b = el('bill'); if (b) b.innerHTML = '<div class="err">' + esc(sErr(e)) + '</div>' });
+}
+
+function billMoney(prices){
+  var cur = Object.keys(prices || {});
+  if (!cur.length) return '';
+  var one = prices.USD !== undefined ? 'USD' : cur[0];
+  return prices[one] + ' ' + one + L(' / місяць');
+}
+
+function billPaint(){
+  var box = el('bill');
+  if (!box || !BILL) return;
+
+  // Состояние подписки словами, а не кодом Paddle: past_due человек не
+  // прочитает, а «оплата не пройшла» прочитает и поймёт, что делать.
+  var st = BILL.status === 'active' ? L('активна')
+    : BILL.status === 'trialing' ? L('пробний період')
+    : BILL.status === 'past_due' ? L('оплата не пройшла — Paddle спробує ще раз')
+    : BILL.status === 'paused' ? L('призупинена')
+    : BILL.status === 'canceled' ? L('скасована')
+    : '';
+
+  var head = '<div class="prow"><div class="pk">' + L('Зараз') + '</div>' +
+    '<div class="pv"><b>' + esc(BILL.plan || 'trial') + '</b>' +
+    (BILL.paidUntil ? L(' · оплачено до ') + esc(fmtDate(BILL.paidUntil)) : '') +
+    (st ? ' · ' + esc(st) : '') +
+    L('<div class="hint" style="margin-top:2px">Місць у тарифі: ') + esc(BILL.seatsLimit) + '</div></div>' +
+    (BILL.portal ? L('<button class="ghost mini" id="bPortal">Керувати підпискою</button>') : '<span></span>') +
+    '</div>';
+
+  var cards = (BILL.plans || []).map(function(p){
+    var price = billMoney(p.prices);
+    var now = p.plan === BILL.plan;
+    return '<div class="prow"><div class="pk">' + esc(p.plan) + '</div>' +
+      '<div class="pv">' + (price ? esc(price) : L('ціну ще не задано')) +
+      (p.priceId ? '' : L('<div class="hint" style="margin-top:2px">Тариф ще не заведений у Paddle.</div>')) +
+      '</div>' +
+      (p.priceId && !now
+        ? '<button class="mini" data-pay="' + esc(p.plan) + '">' +
+          (BILL.subscribed ? L('Перейти') : L('Оплатити')) + '</button>'
+        : '<span></span>') +
+      '</div>';
+  }).join('');
+
+  box.innerHTML = head + cards +
+    L('<div class="hint" style="margin-top:8px">Оплату проводить Paddle: він приймає картку, ') +
+    L('нараховує податок вашої країни і надсилає чек. Скасувати можна будь-коли — ') +
+    L('доступ триває до кінця оплаченого періоду.</div>') +
+    '<div class="err" id="bErr"></div>';
+
+  if (el('bPortal')) el('bPortal').onclick = function(){
+    var b = el('bPortal');
+    busy(b, true);
+    api('/billing/portal', { method:'POST' }).then(function(d){
+      busy(b, false);
+      // Ссылка одноразовая и живёт недолго, поэтому открываем сразу.
+      if (d && d.url) window.open(d.url, '_blank', 'noopener');
+    }).catch(function(e){ busy(b, false); el('bErr').textContent = sErr(e) });
+  };
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-pay]'), function(btn){
+    btn.onclick = function(){ billPay(btn.dataset.pay, btn) };
+  });
+}
+
+/**
+ * Скрипт Paddle подгружается в момент нажатия, а не на каждой странице.
+ *
+ * Оплата случается раз в месяц, а страница открыта весь день: тянуть
+ * чужой скрипт всем и всегда ради этого незачем. Второй раз не грузим —
+ * окно оплаты можно открыть и закрыть сколько угодно.
+ */
+function paddleReady(d){
+  if (PADDLE_ON && window.Paddle) return Promise.resolve();
+  return new Promise(function(done, fail){
+    var s = document.createElement('script');
+    s.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
+    s.onload = function(){
+      try {
+        if (d.env !== 'production') window.Paddle.Environment.set('sandbox');
+        window.Paddle.Initialize({ token: d.clientToken, eventCallback: billEvent });
+        PADDLE_ON = true;
+        done();
+      } catch (e){ fail(e) }
+    };
+    s.onerror = function(){ fail(new Error('paddle_script')) };
+    document.head.appendChild(s);
+  });
+}
+
+function billEvent(ev){
+  if (!ev || ev.name !== 'checkout.completed') return;
+  // Тариф меняет вебхук, а он приходит своим ходом. Поэтому говорим
+  // спасибо сразу, а состояние перечитываем через несколько секунд —
+  // и ещё раз, если первый раз пришёл раньше вебхука.
+  toast(L('Оплата пройшла. Тариф оновиться за кілька секунд.'));
+  setTimeout(billLoad, 4000);
+  setTimeout(billLoad, 12000);
+}
+
+function billPay(plan, btn){
+  var err = el('bErr');
+  if (err) err.textContent = '';
+  busy(btn, true);
+  api('/billing/checkout', { method:'POST', body:{ plan: plan } })
+    .then(function(d){
+      return paddleReady(d).then(function(){
+        busy(btn, false);
+        window.Paddle.Checkout.open({ transactionId: d.transactionId });
+      });
+    })
+    .catch(function(e){
+      busy(btn, false);
+      if (err) err.textContent = String(e && e.message) === 'paddle_script'
+        ? L('Не вдалося завантажити вікно оплати. Перевірте блокувальник реклами.')
+        : sErr(e);
+    });
+}
+
 function row(label, value, id, editable, hint){
   return '<div class="prow" id="row-' + id + '">' +
     '<div class="pk">' + esc(label) + '</div>' +

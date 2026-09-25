@@ -34,3 +34,4 @@ export * from './nbu.js';
 export * from './routing.js';
 export * from './notify.js';
 export * from './mail.js';
+export * from './paddle.js';

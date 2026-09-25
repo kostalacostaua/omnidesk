@@ -42,6 +42,7 @@ import { registerInbox } from './inbox.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
+import { registerBilling } from './billing.js';
 import { registerLanding, landingPage } from './landing.js';
 import { registerZoho } from './zoho.js';
 import { registerWidget } from './widget.js';
@@ -142,6 +143,33 @@ const app = Fastify({
   // Meta и Zoho иногда дописывают слеш сами, и без этого их проверка
   // получает 404 на существующей странице.
   ignoreTrailingSlash: true,
+});
+
+/*
+ * Сырое тело — только для вебхуков.
+ *
+ * Подпись вебхука считается от байтов, которые прислали, а не от того,
+ * что получится после JSON.parse и обратной сборки: порядок ключей и
+ * пробелы там уже другие, и подпись не сойдётся никогда.
+ *
+ * Держать копию тела для всех запросов было бы расточительно: через
+ * этот же разбор идут вложения в base64, и каждое лежало бы в памяти
+ * дважды. Поэтому оставляем копию только там, где она нужна.
+ *
+ * Разбитый JSON по-прежнему отвечает ошибкой, а не тихо превращается в
+ * пустой объект: молчаливое «ничего не пришло» отлаживать невозможно.
+ */
+app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+  const buf = body as Buffer;
+  if (String(req.url ?? '').startsWith('/webhooks/')) {
+    (req as { rawBody?: Buffer }).rawBody = buf;
+  }
+  if (!buf.length) return done(null, {});
+  try {
+    done(null, JSON.parse(buf.toString('utf8')));
+  } catch (err) {
+    done(err as Error);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -654,6 +682,18 @@ registerZoho(app, {
   clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
   appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
   stateSecret: JWT_SECRET,
+});
+
+registerBilling(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+  owner: (req) => platformOwnerOf(req as never),
+  // Песочница по умолчанию: боевой режим включается осознанно, одной
+  // переменной, а не тем, что кто-то забыл её задать.
+  env: process.env['PADDLE_ENV'] === 'production' ? 'production' : 'sandbox',
+  apiKey: process.env['PADDLE_API_KEY'] ?? '',
+  webhookSecret: process.env['PADDLE_WEBHOOK_SECRET'] ?? '',
+  clientToken: process.env['PADDLE_CLIENT_TOKEN'] ?? '',
 });
 
 registerLegal(app, {
