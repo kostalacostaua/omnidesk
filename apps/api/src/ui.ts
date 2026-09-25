@@ -845,6 +845,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .prow.tariff.on{background:var(--railOnBg)}
   .prow.tariff .pick{flex:none;width:22px;text-align:center;color:var(--accent);font-weight:700}
   .prow.tariff .pk .s{font-size:11px;color:var(--t3);font-weight:400;margin-top:2px}
+  /* Стена оплаты. Поверх всего и со своей прокруткой: под ней живой
+     кабинет, но работать в нём нельзя, и подглядывать в него незачем. */
+  #wall{position:fixed;inset:0;z-index:90;background:var(--bg);overflow:auto;padding:40px 16px}
+  .wallbox{max-width:640px;margin:0 auto}
+  .wallbox h2{font-size:22px;margin:0 0 6px}
+  .wallbox p{margin:0 0 16px;font-size:13.5px}
   .pricerow .t{font-weight:700;font-size:12.5px}
   .pricerow .t .s{font-weight:400;font-size:11px;color:var(--t3);margin-top:2px}
   .pricerow input{font-size:12.5px;padding:6px 8px}
@@ -1261,12 +1267,45 @@ function api(path, opts){
     body: opts.body ? JSON.stringify(opts.body) : undefined
   }).then(function(r){
     return r.json().catch(function(){ return {} }).then(function(j){
+      /* Срок оплаты вышел. Ответ один на все ручки, и разбирать его в
+         каждой было бы двадцатью способами показать одно и то же. */
+      if (r.status === 402) payWall(j);
       if (!r.ok) throw Object.assign(new Error(j.error || r.status), { payload: j, status: r.status });
       return j;
     });
   });
 }
 
+
+/**
+ * Страница оплаты вместо кабинета.
+ *
+ * Пробный период кончился — работать нельзя, но заплатить можно, и
+ * поэтому здесь не сообщение об ошибке, а тот же блок подписки, что в
+ * профиле: тарифы, число лицензий, карта и счёт. Человеку, у которого
+ * кончился срок, нужно одно действие, и оно должно быть на экране, а не
+ * за тремя переходами.
+ *
+ * Ставится один раз: ответ 402 приходит на каждый опрос списка, и
+ * перерисовывать стену каждые три секунды значило бы отбирать у
+ * человека и поле ввода, и выбор тарифа.
+ */
+function payWall(info){
+  if (el('wall')) return;
+  var w = document.createElement('div');
+  w.id = 'wall';
+  w.innerHTML = '<div class="wallbox">' +
+    L('<h2>Термін доступу вичерпано</h2>') +
+    L('<p class="dim">Пробний період завершився') +
+    ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') +
+    L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>') +
+    '<div id="bill" class="card">' + L('<div class="hint">Завантажую...</div>') + '</div>' +
+    L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallOut">Вийти</button></div>') +
+    '</div>';
+  document.body.appendChild(w);
+  el('wallOut').onclick = logout;
+  billLoad();
+}
 
 /**
  * Кнопка в состоянии ожидания.
@@ -9176,6 +9215,16 @@ function paintOrg(){
         '<input id="opaid" type="date" value="' + esc(t.paidUntil || '') + '"' +
           (t.kind === 'partner' ? ' disabled' : '') + '>' +
       '</div>' +
+      /* Пробный период продлевают чаще всего на неделю-две, и считать
+         дату в уме ради этого незачем. Кнопки двигают поле, а не
+         сохраняют: решение остаётся за человеком. */
+      (t.kind === 'partner'
+        ? ''
+        : L('<div class="row2" style="margin-top:6px"><button class="ghost mini" data-days="7">+7 днів</button>') +
+          L('<button class="ghost mini" data-days="14">+14 днів</button>') +
+          L('<button class="ghost mini" data-days="30">+30 днів</button>') +
+          L('<button class="ghost mini" data-days="0">Завершити сьогодні</button>') +
+          '<div class="hint" id="oleft" style="align-self:center"></div></div>') +
       /* Места сверх тарифа. Отдельной строкой, потому что это отдельные
          деньги: пятнадцать операторов на тарифе с десятью — не тот же
          счёт, что десять. На тарифе по головам эта пара полей не нужна
@@ -9360,6 +9409,32 @@ function paintOrg(){
     if (el(id)) el(id).onchange = seatSum;
   });
   seatMode();
+  /* Сколько осталось — словами, рядом с полем: дата сама по себе
+     требует счёта в уме, а «минув 3 дні тому» не требует. */
+  function daysLeft(){
+    var box = el('oleft');
+    if (!box) return;
+    var v = el('opaid').value;
+    if (!v){ box.textContent = L('строк не задано — доступ не обмежений'); return }
+    var days = Math.round((new Date(v + 'T00:00:00Z') - new Date(today() + 'T00:00:00Z')) / 86400000);
+    box.textContent = days > 0 ? L('залишилось днів: ') + days
+      : days === 0 ? L('останній день')
+      : L('минув днів тому: ') + (-days);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-days]'), function(btn){
+    btn.onclick = function(){
+      var add = Number(btn.dataset.days);
+      var base = add > 0 && el('opaid').value && el('opaid').value > today()
+        ? el('opaid').value
+        : today();
+      var d = new Date(base + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + add);
+      el('opaid').value = d.toISOString().slice(0, 10);
+      daysLeft();
+    };
+  });
+  if (el('opaid')) el('opaid').onchange = daysLeft;
+  daysLeft();
   el('oplan').onchange = function(){ ownPrice(); seatMode() };
   el('ocur').onchange = function(){ ownPrice(); seatMode() };
   el('okind').onchange = function(){

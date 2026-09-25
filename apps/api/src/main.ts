@@ -21,6 +21,7 @@ import {
   jobKey,
   messageEventKey,
   parseWorkHours,
+  payState as payStateOf,
   recordEvent,
   workedSeconds,
   encryptJson,
@@ -364,6 +365,62 @@ app.addHook('onResponse', async (req, reply) => {
   else app.log.warn(line, reply.statusCode >= 400 ? 'Запрос отклонён' : 'Запрос отвечен долго');
 });
 
+/**
+ * Пробный период: сколько дней он длится у новой организации.
+ *
+ * Переменной, потому что это не вопрос кода, а вопрос продаж: акция на
+ * месяц меняется в панели хостинга, а не выкладкой.
+ */
+const TRIAL_DAYS = Math.max(1, Math.min(365, Number(process.env['TRIAL_DAYS']) || 14));
+
+/**
+ * Что открыто и неоплаченному.
+ *
+ * Перекрыть всё — значит запереть человека без возможности заплатить:
+ * страница тарифа, реквизиты и выход должны работать всегда. Всё
+ * остальное — работа, и она оплачивается.
+ */
+function payFree(path: string): boolean {
+  return (
+    path === '/me' ||
+    path === '/tenant/requisites' ||
+    path.startsWith('/billing') ||
+    path.startsWith('/auth') ||
+    path.startsWith('/webhooks') ||
+    path.startsWith('/settings/notify')
+  );
+}
+
+/**
+ * Состояние оплаты организации, с коротким кэшем.
+ *
+ * Без кэша это лишний запрос к базе на каждый чих интерфейса, а он
+ * опрашивает нас каждые три секунды. Минута устаревания здесь ничего не
+ * решает: оплата продлевается на месяцы, а не на секунды.
+ */
+const payState60 = new Map<string, { until: string | null; kind: string; at: number }>();
+
+async function payOk(tenantId: string): Promise<{ ok: boolean; paidUntil: string | null }> {
+  const now = Date.now();
+  let row = payState60.get(tenantId);
+  if (!row || now - row.at > 60_000) {
+    const got = await withSystem(pool, 'состояние оплаты', async (db) => {
+      const { rows } = await db.query<{ until: string | null; kind: string }>(
+        `SELECT to_char(paid_until, 'YYYY-MM-DD') AS until, kind FROM tenants WHERE id = $1`,
+        [tenantId],
+      );
+      return rows[0] ?? null;
+    });
+    row = { until: got?.until ?? null, kind: got?.kind ?? 'client', at: now };
+    payState60.set(tenantId, row);
+  }
+  // Партнёр не платит по определению. Пустая дата — тоже доступ: она
+  // означает «срок не назначен», а не «срок вышел»; отключать по
+  // отсутствию записи нельзя.
+  if (row.kind === 'partner' || !row.until) return { ok: true, paidUntil: row.until };
+  return { ok: payStateOf(row.until) !== 'unpaid', paidUntil: row.until };
+}
+
 app.addHook('preHandler', async (req, reply) => {
   const path = (req.raw.url ?? '').split('?')[0] ?? '';
 
@@ -391,6 +448,21 @@ app.addHook('preHandler', async (req, reply) => {
   // Не вошёл — пусть обработчик сам ответит 401: он знает, чем именно
   // отвечать, а мы здесь занимаемся только правами.
   if (!auth) return;
+
+  /*
+   * Срок оплаты вышел.
+   *
+   * Ответ 402 и только он: интерфейс по этому коду показывает страницу
+   * оплаты, а не ошибку. Отдавать 403 нельзя — «нет прав» человек
+   * читает как поломку и идёт писать в поддержку вместо того, чтобы
+   * заплатить.
+   */
+  if (!payFree(path)) {
+    const pay = await payOk(auth.tenantId);
+    if (!pay.ok) {
+      return reply.code(402).send({ error: 'payment_required', paidUntil: pay.paidUntil });
+    }
+  }
 
   const role = await roleOf(auth.tenantId, auth.userId);
   if (roleAllows(role, level)) return;
@@ -540,6 +612,9 @@ registerEmailAuth(app, {
   // ради него письма владельцу — терять клиента на ровном месте.
   // Выключается переменной, если понадобится закрытый доступ.
   allowSignup: process.env['ALLOW_SIGNUP'] !== 'off',
+  // Две недели: меньше — не успевают подключить каналы и позвать
+  // команду, больше — забывают, зачем заводили.
+  trialDays: TRIAL_DAYS,
   onSignup: (info) => {
     app.log.info(info, 'Новая компания зарегистрировалась');
     const to = process.env['LEADS_TO'] ?? process.env['CONTACT_EMAIL'];

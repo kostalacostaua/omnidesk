@@ -34,6 +34,8 @@ export interface EmailAuthDeps {
   appName: string;
   /** Разрешена ли самостоятельная регистрация новых компаний. */
   allowSignup: boolean;
+  /** Сколько дней живёт пробный период у новой организации. */
+  trialDays: number;
   /** Сообщить владельцу сервиса о новой компании. Не должно ронять вход. */
   onSignup?: (info: { email: string; company: string; tenantId: string }) => void;
   /** Нужен для смены своего пароля: её делает только вошедший. */
@@ -287,10 +289,13 @@ export function registerEmailAuth(app: FastifyInstance, deps: EmailAuthDeps): vo
         // организаций, RLS к нему не применяется.
         const tenant = await withSystem(pool, 'создание организации', async (db) => {
           const { rows } = await db.query<{ id: string; name: string }>(
-            `INSERT INTO tenants (slug, name, plan, source)
-             VALUES ($1, $2, 'trial', 'signup')
+            // Срок пробного периода ставится сразу. Без него пробный
+            // период — обещание без даты: кончиться он не может, продать
+            // после него нечего, и напомнить некому.
+            `INSERT INTO tenants (slug, name, plan, source, paid_until)
+             VALUES ($1, $2, 'trial', 'signup', current_date + $3::int)
              RETURNING id, name`,
-            [slugFor(name), name],
+            [slugFor(name), name, deps.trialDays],
           );
           return rows[0]!;
         });
