@@ -518,9 +518,15 @@ export const INBOX_HTML = `<!DOCTYPE html>
     padding:14px 16px}
   .numbox .n{font-size:24px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
   .numbox .l{font-size:12px;color:var(--t3);margin-top:2px}
+  .prow .pacts{display:flex;gap:6px;flex:none;flex-wrap:wrap}
+  /* На телефоне строка раскладывается в три этажа: подпись, значение с
+     пояснением, кнопки. Значение занимает всю ширину нарочно — рядом с
+     кнопкой ему остаётся полсотни пикселей, и пояснение под ним
+     переносится по одному слову в строку. */
   @media(max-width:620px){
-    .prow{flex-wrap:wrap}
+    .prow{flex-wrap:wrap;gap:4px 10px}
     .prow .pk{width:100%}
+    .prow .pv{flex:1 1 100%}
   }
   .kv{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;font-size:12.5px}
   .kv .k{color:var(--t3)}
@@ -824,10 +830,16 @@ export const INBOX_HTML = `<!DOCTYPE html>
     align-items:start;font-size:12px;padding:7px 9px;border:1px solid var(--line);
     border-radius:10px;background:var(--panel2)}
   .mlrow .t{font-weight:700}
-  .prow{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:8px;align-items:center;
-    padding:6px 9px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
-  .prow .t{font-weight:700;font-size:12.5px}
-  .prow input{font-size:12.5px;padding:6px 8px}
+  /* Цены тарифа: название и три валюты. Класс у строки свой, а не общий
+     prow: тот же prow уже занят строками профиля, и одинаковое имя на
+     две разные сетки означало, что профиль на телефоне складывался в
+     колонку шириной в одно слово, а кнопки выезжали за экран. */
+  .pricerow{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:8px;
+    align-items:center;padding:6px 9px;border:1px solid var(--line);border-radius:10px;
+    background:var(--panel2)}
+  .pricerow .t{font-weight:700;font-size:12.5px}
+  .pricerow input{font-size:12.5px;padding:6px 8px}
+  @media(max-width:700px){ .pricerow{grid-template-columns:1fr 1fr} }
   .mlrow code{font-size:11.5px;word-break:break-all;white-space:normal}
   @media (max-width:700px){ .mlrow{grid-template-columns:1fr} }
   /* Комментарий в ленте: под каким постом он написан и ушёл ли ответ
@@ -4153,7 +4165,7 @@ function passRow(u){
     '<div class="pv" id="val-pw">' +
     (set ? L('Задано') : L('Не задано — вхід лише кодом з пошти')) +
     '</div>' +
-    '<div style="display:flex;gap:6px;flex:none">' +
+    '<div class="pacts">' +
     '<button class="ghost mini" id="pwEdit">' + (set ? L('Змінити') : L('Задати')) + '</button>' +
     (set ? '<button class="ghost mini" id="pwOff">' + L('Прибрати') + '</button>' : '') +
     '</div></div>';
@@ -8260,7 +8272,7 @@ function paintOwner(){
     L('<div class="pg-sec"><h3>Ціни за тарифами</h3><div class="card">') +
       '<div class="mlrec">' + PLANS.map(function(pl){
         var row = (st.plan_prices || {})[pl] || {};
-        return '<div class="prow"><div class="t">' + esc(pl) + '</div>' +
+        return '<div class="pricerow"><div class="t">' + esc(pl) + '</div>' +
           INV_CUR.map(function(c){
             return '<input data-price="' + pl + '" data-cur="' + c + '" placeholder="' + c +
               '" value="' + esc(row[c] == null ? '' : row[c]) + '">';
