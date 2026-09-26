@@ -5189,6 +5189,12 @@ function gwWatch(id){
         return;
       }
 
+      if (st.state === 'linking'){
+        box.innerHTML = L('<div class="qrwrap"><div class="empty">Код прийнято. Завершуємо вхід — тримайте WhatsApp відкритим.</div></div>');
+        GW_T = setTimeout(step, 2000);
+        return;
+      }
+
       box.innerHTML = st.qrSvg
         ? '<div class="qrwrap"><div class="qr">' + st.qrSvg + '</div><ol class="steps">' +
           L('<li>Відкрийте WhatsApp на телефоні</li>') +

@@ -94,15 +94,24 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
    *
    * Ключи пишутся пачками на каждом сообщении, поэтому запись отложена:
    * иначе оживлённый чат означал бы запрос к базе на каждую строчку.
+   *
+   * Во время входа канала ещё нет — и хранилище это допускает: пишем
+   * никуда, держим в памяти. Иначе первая же запись била бы в ссылку на
+   * несуществующий канал, а таких записей за вход десятки.
    */
-  async function authStore(channelId: string, tenantId: string) {
-    const row = await withTenant(pool, tenantId, async (db) => {
-      const { rows } = await db.query<{ creds_enc: Buffer; keys_enc: Buffer | null }>(
-        `SELECT creds_enc, keys_enc FROM wa_sessions WHERE channel_id = $1`,
-        [channelId],
-      );
-      return rows[0] ?? null;
-    });
+  async function authStore(channelId: string | null, tenantId: string) {
+    let target = channelId;
+
+    const load = async (id: string) =>
+      withTenant(pool, tenantId, async (db) => {
+        const { rows } = await db.query<{ creds_enc: Buffer; keys_enc: Buffer | null }>(
+          `SELECT creds_enc, keys_enc FROM wa_sessions WHERE channel_id = $1`,
+          [id],
+        );
+        return rows[0] ?? null;
+      });
+
+    const row = target === null ? null : await load(target);
 
     const creds = row
       ? (JSON.parse(
@@ -122,6 +131,9 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
     let saving: NodeJS.Timeout | null = null;
 
     const flush = async (): Promise<void> => {
+      // Канала ещё нет — сессия живёт в памяти до конца входа.
+      if (target === null) return;
+      const channelId = target;
       dirty = false;
       const credsBlob = JSON.parse(JSON.stringify(creds, BufferJSON.replacer)) as unknown;
       const keysBlob = JSON.parse(JSON.stringify(keys, BufferJSON.replacer)) as unknown;
@@ -177,6 +189,11 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
       },
       saveCreds: schedule,
       flush,
+      /** Вход закончился, канал известен — с этого места пишем в базу. */
+      bind: async (id: string): Promise<void> => {
+        target = id;
+        await flush();
+      },
     };
   }
 
@@ -450,63 +467,120 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
    * сканирования узнаём номер, заводим канал и сохраняем сессию под
    * его номером.
    *
+   * Сканирование — не конец входа, а его середина. Приняв код, WhatsApp
+   * выдаёт ключи и сразу рвёт соединение: дальше полагается прийти уже
+   * своим, с этими ключами. Телефон в это время показывает «Виконується
+   * вхід» и ждёт — поэтому обрыв здесь не ошибка, а шаг, и мы поднимаем
+   * сокет заново теми же учётными данными.
+   *
    * Канал заводится после входа, а не до: канал без сессии — это
    * строка в списке, которая ничего не умеет, и человек смотрит на неё,
    * не понимая, почему нет сообщений.
    */
   async function handleLogin(job: WaLoginJob): Promise<void> {
     const { loginId, tenantId } = job;
-    const channelId = randomUUID();
-    const store = await authStore(channelId, tenantId);
+    // Канала ещё нет: сессия собирается в памяти и ляжет в базу под
+    // номером канала, который появится в конце.
+    const store = await authStore(null, tenantId);
     const { version } = await fetchLatestBaileysVersion();
 
     let done = false;
-    const sock = makeWASocket({
-      version,
-      logger: quietLogger,
-      printQRInTerminal: false,
-      browser: ['Rozmovio', 'Chrome', '1.0.0'],
-      auth: {
-        creds: store.state.creds,
-        keys: makeCacheableSignalKeyStore(store.state.keys as never, quietLogger),
-      },
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-    } as never);
+    let sock: Sock | null = null;
 
-    sock.ev.on('creds.update', () => store.saveCreds());
+    const shut = (): void => {
+      try {
+        sock?.end(undefined);
+      } catch {
+        // Уже мёртв — это и требовалось.
+      }
+    };
 
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         if (done) return;
         done = true;
         void setState(loginId, { state: 'error', error: 'Час вийшов. Натисніть «Підключити» ще раз.' });
-        try { sock.end(undefined) } catch { /* уже мёртв */ }
+        shut();
         resolve();
       }, LOGIN_TIMEOUT_MS);
 
-      sock.ev.on('connection.update', (u: Record<string, unknown>) => {
-        void (async () => {
-          if (done) return;
+      const fail = async (why: string, extra?: Record<string, unknown>): Promise<void> => {
+        done = true;
+        clearTimeout(timer);
+        await setState(loginId, { state: 'error', error: why });
+        log('warn', 'Вход в WhatsApp не удался', { ...extra });
+        shut();
+        resolve();
+      };
 
-          const qr = u['qr'];
-          if (typeof qr === 'string' && qr) {
-            // Код живёт секунд двадцать, потом библиотека выдаёт новый.
-            await setState(loginId, { state: 'qr', qrUrl: qr, qrExpires: Date.now() + 20_000 });
-            return;
-          }
+      const open = (): void => {
+        const s = makeWASocket({
+          version,
+          logger: quietLogger,
+          printQRInTerminal: false,
+          browser: ['Rozmovio', 'Chrome', '1.0.0'],
+          auth: {
+            creds: store.state.creds,
+            keys: makeCacheableSignalKeyStore(store.state.keys as never, quietLogger),
+          },
+          syncFullHistory: false,
+          markOnlineOnConnect: false,
+        } as never);
+        sock = s;
 
-          if (String(u['connection'] ?? '') === 'open') {
+        s.ev.on('creds.update', () => store.saveCreds());
+
+        s.ev.on('connection.update', (u: Record<string, unknown>) => {
+          void (async () => {
+            if (done) return;
+
+            const qr = u['qr'];
+            if (typeof qr === 'string' && qr) {
+              // Код живёт секунд двадцать, потом библиотека выдаёт новый.
+              await setState(loginId, { state: 'qr', qrUrl: qr, qrExpires: Date.now() + 20_000 });
+              return;
+            }
+
+            const state = String(u['connection'] ?? '');
+
+            if (state === 'close') {
+              const err = u['lastDisconnect'] as
+                | { error?: { output?: { statusCode?: number } } }
+                | undefined;
+              const code = err?.error?.output?.statusCode;
+
+              // Код принят, ключи выданы — WhatsApp просит прийти заново.
+              if (code === DisconnectReason.restartRequired) {
+                await setState(loginId, { state: 'linking' });
+                try {
+                  s.ev.removeAllListeners('connection.update');
+                } catch {
+                  // Библиотека уже свернула шину событий.
+                }
+                open();
+                return;
+              }
+
+              if (code === DisconnectReason.loggedOut) {
+                await fail('Вхід відхилено на телефоні. Спробуйте ще раз.', { code });
+                return;
+              }
+              await fail('Зв’язок із WhatsApp обірвався. Спробуйте ще раз.', { code });
+              return;
+            }
+
+            if (state !== 'open') return;
+
             done = true;
             clearTimeout(timer);
             try {
-              const me = String((sock.user as { id?: string } | undefined)?.id ?? '');
+              const me = String((s.user as { id?: string } | undefined)?.id ?? '');
               const phone = chatToPhone(me.split(':')[0] + '@s.whatsapp.net') ?? '';
               const digits = phone.replace(/[^0-9]/g, '');
               if (!digits) throw new Error('WhatsApp не назвав номер');
 
-              await saveChannel(channelId, tenantId, digits, job.displayName);
-              await store.flush();
+              const channelId = await saveChannel(tenantId, digits, job.displayName);
+              await store.bind(channelId);
               await setState(loginId, { state: 'done', channelId });
               log('info', 'Номерной WhatsApp подключён', { channelId, tenantId });
             } catch (err) {
@@ -515,22 +589,23 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
             }
             // Соединение закрываем: постоянную сессию поднимет сверка,
             // и она будет одна, а не две.
-            try { sock.end(undefined) } catch { /* уже мёртв */ }
+            shut();
             resolve();
-          }
-        })();
-      });
+          })();
+        });
+      };
+
+      open();
     });
 
     await reconcile().catch(() => undefined);
   }
 
   async function saveChannel(
-    channelId: string,
     tenantId: string,
     digits: string,
     name?: string,
-  ): Promise<void> {
+  ): Promise<string> {
     /*
      * Тот же номер, подключённый заново, — это тот же канал: переписка
      * должна остаться на месте, а не начаться с чистого листа.
@@ -548,16 +623,16 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
       throw new Error('Номер уже подключён в другом аккаунте');
     }
 
-    const id = owner?.channel_id ?? channelId;
-    await withTenant(pool, tenantId, async (db) => {
-      await db.query(
+    return withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{ id: string }>(
         `INSERT INTO channels (id, tenant_id, type, display_name, external_id, meta, status)
          VALUES ($1, $2, $3, $4, $5, $6, 'active')
          ON CONFLICT (type, external_id) DO UPDATE
            SET display_name = EXCLUDED.display_name, meta = EXCLUDED.meta,
-               status = 'active', last_error = NULL`,
+               status = 'active', last_error = NULL
+         RETURNING id`,
         [
-          id,
+          owner?.channel_id ?? randomUUID(),
           tenantId,
           WHATSAPP_USER_CHANNEL,
           (name ?? '').trim() || `WhatsApp +${digits}`,
@@ -565,18 +640,12 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
           JSON.stringify({ phone: `+${digits}` }),
         ],
       );
+      // Номер канала берём из ответа базы, а не из того, что послали:
+      // при повторном подключении строка уже есть, и номер у неё свой.
+      const id = rows[0]?.id;
+      if (!id) throw new Error('Канал не создался');
+      return id;
     });
-
-    // Сессию, собранную на временном номере, переносим на настоящий
-    // канал: иначе она осталась бы сиротой, а канал — без сессии.
-    if (id !== channelId) {
-      await withTenant(pool, tenantId, async (db) => {
-        await db.query(`DELETE FROM wa_sessions WHERE channel_id = $1`, [id]);
-        await db.query(`UPDATE wa_sessions SET channel_id = $2 WHERE channel_id = $1`, [
-          channelId, id,
-        ]);
-      });
-    }
   }
 
   // ── Исходящие ──────────────────────────────────────────────────────
