@@ -1060,7 +1060,42 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .pg-head{margin-bottom:16px}
     .pg-head h2{font-size:23px}
     .pg-head p{font-size:13px}
+
+    /* На телефоне окно поддержки — весь экран: панель в 360 точек на
+       экране в 390 это и есть весь экран, только с щелями по краям. */
+    #sup{left:0;right:0;bottom:0;top:0;width:auto;height:auto;border-radius:0}
   }
+
+  /* ── Поддержка ──────────────────────────────────────────────────
+     Переписка с нами живёт поверх кабинета, а не отдельной страницей:
+     вопрос возникает в тот момент, когда человек на что-то смотрит, и
+     уводить его с этого места означает потерять и вопрос, и место. */
+  #sup{position:fixed;right:18px;bottom:18px;width:368px;height:min(560px,78vh);
+    z-index:96;display:none;flex-direction:column;overflow:hidden;
+    background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r4);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),var(--lift2);
+    animation:pop var(--calm) var(--ease)}
+  #sup.on{display:flex}
+  @media(prefers-reduced-motion:reduce){#sup{animation:none}}
+  #sup .sh{display:flex;align-items:center;gap:9px;padding:12px 12px 12px 14px;
+    border-bottom:1px solid var(--line);flex:none}
+  #sup .sh b{font-size:13.5px;letter-spacing:-.012em}
+  #sup .sh .s{font-size:11.5px;color:var(--t3);display:block;font-weight:400}
+  #sup .sh .x{margin-left:auto}
+  #sup .sb{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:7px}
+  /* Свои сообщения справа, наши слева — так же, как в самой скриньке:
+     человек уже знает эту раскладку, ей незачем быть другой. */
+  #sup .sm{max-width:82%;padding:8px 11px;border-radius:var(--r2);font-size:13px;
+    line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+  #sup .sm.mine{align-self:flex-end;background:var(--accent);color:var(--on-accent);
+    border-bottom-right-radius:4px}
+  #sup .sm.them{align-self:flex-start;background:var(--solid);border:1px solid var(--line);
+    border-bottom-left-radius:4px}
+  #sup .sm .t{display:block;font-size:10.5px;opacity:.65;margin-top:3px}
+  #sup .sf{flex:none;border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:7px;
+    align-items:flex-end}
+  #sup .sf textarea{min-height:40px;max-height:120px}
 </style>
 </head>
 <body>
@@ -1155,6 +1190,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
+    <button class="rbtn" id="sup0" data-icon="help" data-t>Підтримка</button>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
     <button class="rbtn" data-view="profile" data-icon="gear" data-t>Профіль</button>
@@ -1306,13 +1342,17 @@ function payWall(info){
         L('напишіть нам, і ми розберемося.</p>')
       : L('<h2>Термін доступу вичерпано</h2>') +
         L('<p class="dim">Пробний період завершився') +
-        ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') +
+        ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') + '.' +
         L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>')) +
     '<div id="bill" class="card">' + L('<div class="hint">Завантажую...</div>') + '</div>' +
-    L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallOut">Вийти</button></div>') +
+    L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallSup">Написати нам</button>') +
+    L('<button class="ghost mini" id="wallOut">Вийти</button></div>') +
     '</div>';
   document.body.appendChild(w);
   el('wallOut').onclick = logout;
+  /* Закрытый доступ — первая причина нам написать, и кнопка должна
+     быть здесь же: искать её в закрытом кабинете человек не станет. */
+  el('wallSup').onclick = supOpen;
   billLoad();
 }
 
@@ -8208,7 +8248,8 @@ var ICONS = {
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>',
-  card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'
+  card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.4-2.8 4M12 17.5h.01"/>'
 };
 
 function icon(name){
@@ -10013,6 +10054,181 @@ function applyRole(){
 
 function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
 
+/* ── Поддержка ─────────────────────────────────────────────────────
+ *
+ * Написать нам можно из кабинета, и это не форма, а переписка: на
+ * вопрос «а как подключить второй номер» нужен ответ, а не квитанция
+ * о приёме обращения.
+ *
+ * Работает окно на нашем же чате для сайтов — том, который мы продаём.
+ * Никакой второй реализации переписки в продукте нет, и собственная
+ * поддержка сидит в той же скриньке, что и поддержка любого клиента.
+ * Если однажды окно сломается, мы узнаем об этом первыми, потому что
+ * это тот же самый код.
+ */
+var SUP = null;       // { ready, key, visitorId, name }
+var SUP_MSGS = [];    // пришедшее с сервера
+var SUP_PEND = [];    // отправленное, но ещё не вернувшееся из скриньки
+var SUP_AT = null;    // метка последнего показанного сообщения
+var SUP_T = null;     // опрос: пока окно открыто — часто, иначе редко
+
+function supSeen(v){
+  try { if (v === undefined) return localStorage.getItem('rz.sup') || ''; localStorage.setItem('rz.sup', v || '') }
+  catch(e){ return '' }
+}
+
+function supOn(){ return el('sup') && el('sup').classList.contains('on') }
+
+/* Окно собирается при первом нажатии: до него это разметка, которой
+   никто не видел, и место в каждой загрузке страницы. */
+function supBox(){
+  if (el('sup')) return el('sup');
+  var d = document.createElement('div');
+  d.id = 'sup';
+  d.innerHTML =
+    '<div class="sh"><div class="grow"><b>' + L('Підтримка') + '</b>' +
+      '<span class="s">' + L('Зазвичай відповідаємо протягом години') + '</span></div>' +
+      '<button class="quiet mini x" id="supX" title="' + L('Закрити') + '">&#215;</button></div>' +
+    '<div class="sb" id="supList"></div>' +
+    '<div class="sf"><textarea id="supT" rows="1" placeholder="' + L('Що сталося?') + '"></textarea>' +
+      '<button class="mini" id="supGo">' + L('Надіслати') + '</button></div>';
+  document.body.appendChild(d);
+  el('supX').onclick = supClose;
+  el('supGo').onclick = supSend;
+  el('supT').oninput = function(){
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  };
+  /* Enter отправляет, Shift+Enter переносит строку — как в самой
+     скриньке и как во всех мессенджерах, из которых сюда приходят. */
+  el('supT').onkeydown = function(e){
+    if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); supSend() }
+  };
+  return d;
+}
+
+function supOpen(){
+  supBox().classList.add('on');
+  supPaint();
+  if (!SUP) api('/support')
+    .then(function(d){ SUP = d || { ready:false }; supPaint(); supTick() })
+    .catch(function(){ SUP = { ready:false }; supPaint() });
+  else supTick();
+  if (SUP_MSGS.length) supSeen(SUP_MSGS[SUP_MSGS.length - 1].cursor || '');
+  supBell();
+  setTimeout(function(){ if (el('supT')) el('supT').focus() }, 60);
+}
+
+function supClose(){
+  if (el('sup')) el('sup').classList.remove('on');
+  if (SUP_MSGS.length) supSeen(SUP_MSGS[SUP_MSGS.length - 1].cursor || '');
+  supBell();
+  supTick();
+}
+
+function supToggle(){ if (supOn()) supClose(); else supOpen() }
+
+/* Опрос. Пока окно открыто — каждые четыре секунды: человек ждёт
+   ответа и смотрит в него. Закрытое окно спрашивает раз в полминуты,
+   и только чтобы поставить точку на кнопке. */
+function supTick(){
+  if (SUP_T) clearTimeout(SUP_T);
+  if (!SUP || !SUP.ready) return;
+  supFetch();
+  SUP_T = setTimeout(supTick, supOn() ? 4000 : 30000);
+}
+
+function supFetch(){
+  if (!SUP || !SUP.ready) return Promise.resolve();
+  var u = '/chat/' + encodeURIComponent(SUP.key) + '/messages?visitorId=' +
+    encodeURIComponent(SUP.visitorId) + (SUP_AT ? '&after=' + encodeURIComponent(SUP_AT) : '');
+  return fetch(u).then(function(r){ return r.json() }).then(function(d){
+    var list = (d && d.messages) || [];
+    if (!list.length) return;
+    SUP_MSGS = SUP_MSGS.concat(list);
+    SUP_AT = list[list.length - 1].cursor || SUP_AT;
+    /* Своё сообщение вернулось из скриньки — убираем его копию,
+       нарисованную сразу после отправки, иначе оно стоит дважды. */
+    SUP_PEND = SUP_PEND.filter(function(p){
+      return !list.some(function(m){ return m.mine && m.text === p.text });
+    });
+    if (supOn()) supSeen(SUP_MSGS[SUP_MSGS.length - 1].cursor || '');
+    supPaint();
+    supBell();
+  }).catch(function(){});
+}
+
+/* Точка на кнопке: пришёл ответ, которого человек не видел. */
+function supBell(){
+  var b = el('sup0');
+  if (!b) return;
+  var last = SUP_MSGS.length ? SUP_MSGS[SUP_MSGS.length - 1] : null;
+  var fresh = Boolean(last && !last.mine && (last.cursor || '') !== supSeen());
+  var dot = b.querySelector('.cnt');
+  if (fresh && !dot){
+    b.insertAdjacentHTML('beforeend', '<span class="cnt">1</span>');
+  } else if (!fresh && dot){
+    dot.remove();
+  }
+}
+
+function supPaint(){
+  var box = el('supList');
+  if (!box) return;
+  if (SUP && SUP.ready === false){
+    box.innerHTML = '<div class="empty"><div class="ttl">' + L('Чат поки недоступний') + '</div>' +
+      L('Напишіть нам на support@rozmovio.com — відповімо так само швидко.') + '</div>';
+    if (el('supGo')) el('supGo').disabled = true;
+    if (el('supT')) el('supT').disabled = true;
+    return;
+  }
+  var all = SUP_MSGS.concat(SUP_PEND);
+  if (!all.length){
+    box.innerHTML = '<div class="empty"><div class="ttl">' + L('Питання, побажання, поломка') + '</div>' +
+      L('Напишіть — тут відповідають люди, які цей сервіс і зробили.') + '</div>';
+    return;
+  }
+  /* Прокрутку держим у низа, только если человек и так стоял внизу:
+     иначе новый ответ выдёргивал бы его из середины переписки,
+     которую он в этот момент перечитывает. */
+  var down = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  box.innerHTML = all.map(function(m){
+    return '<div class="sm ' + (m.mine ? 'mine' : 'them') + '">' + esc(m.text) +
+      '<span class="t">' + (m.at ? esc(fmtTime(m.at)) : L('надсилаю...')) + '</span></div>';
+  }).join('');
+  if (down) box.scrollTop = box.scrollHeight;
+}
+
+function supSend(){
+  var ta = el('supT');
+  if (!ta || !SUP || !SUP.ready) return;
+  var text = ta.value.trim();
+  if (!text) return;
+  var btn = el('supGo');
+  busy(btn, true);
+  /* Сообщение показываем сразу, не дожидаясь, пока оно пройдёт
+     скриньку: между нажатием и появлением проходит секунда-другая, и
+     пустое окно в этот момент читается как «не отправилось». */
+  SUP_PEND.push({ mine:true, text:text, at:null });
+  ta.value = '';
+  ta.style.height = 'auto';
+  supPaint();
+  fetch('/chat/' + encodeURIComponent(SUP.key) + '/messages', {
+    method:'POST', headers:{ 'content-type':'application/json' },
+    body: JSON.stringify({ visitorId: SUP.visitorId, text: text, name: SUP.name, page: 'app' })
+  }).then(function(r){
+    busy(btn, false);
+    if (!r.ok) throw new Error(String(r.status));
+    setTimeout(supFetch, 900);
+  }).catch(function(){
+    busy(btn, false);
+    SUP_PEND = SUP_PEND.filter(function(p){ return p.text !== text });
+    ta.value = text;
+    supPaint();
+    toast(L('Не вдалося надіслати. Спробуйте ще раз'));
+  });
+}
+
 function start(){
   applyLang();
   wireTips();
@@ -10037,6 +10253,10 @@ function start(){
     if (d && d.access && d.access.blocked)
       payWall({ why: d.access.blocked, paidUntil: d.access.paidUntil });
   }).catch(function(){});
+  /* Поддержку спрашиваем сразу, но тихо: ответ нужен не для окна, а
+     для точки на кнопке — человек должен увидеть, что ему ответили,
+     не открывая переписку. */
+  api('/support').then(function(d){ SUP = d || { ready:false }; supTick() }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   loadTags();
   loadStatuses();
@@ -10077,6 +10297,11 @@ function redrawAll(){
 
 function logout(){
   clearInterval(timer);
+  /* Переписка с поддержкой — личная. На общем компьютере следующий
+     вошедший не должен увидеть чужие вопросы. */
+  if (SUP_T) clearTimeout(SUP_T);
+  SUP = null; SUP_MSGS = []; SUP_PEND = []; SUP_AT = null; SUP_T = null;
+  if (el('sup')) el('sup').remove();
   api('/auth/session', { method:'DELETE' }).catch(function(){});
   TOKEN = ''; current = null; convs = [];
   tokenWrite('');
@@ -10091,6 +10316,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), func
   b.onclick = function(){ setView(b.dataset.view) };
 });
 el('logo').onclick = function(){ setView('chats') };
+el('sup0').onclick = supToggle;
 
 Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
   b.onclick = function(){

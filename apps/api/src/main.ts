@@ -54,6 +54,7 @@ import { registerDocs } from './openapi.js';
 import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
+import { registerSupport } from './support.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
 import { registerAdmin } from './admin.js';
@@ -386,6 +387,8 @@ function payFree(path: string): boolean {
   return (
     path === '/me' ||
     path === '/tenant/requisites' ||
+    // Написать нам должен уметь именно тот, у кого доступ закрыт.
+    path === '/support' ||
     path.startsWith('/billing') ||
     path.startsWith('/auth') ||
     path.startsWith('/webhooks') ||
@@ -713,6 +716,21 @@ registerWebchat(app, {
   storage,
   appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+/*
+ * Окно поддержки в кабинете — на нашем же чате.
+ *
+ * Ключ по умолчанию тот же, что у чата на сайте: обращения клиентов и
+ * вопросы с витрины приходят одним потоком к одним людям. Своя
+ * переменная нужна на случай, когда поддержку захочется отделить от
+ * продаж, — тогда достаточно другого канала, а не другого кода.
+ */
+registerSupport(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+  siteKey: process.env['SUPPORT_SITE_KEY'] ?? process.env['WEBCHAT_SITE_KEY'] ?? '',
+  secret: JWT_SECRET,
 });
 
 registerCustom(app, {
