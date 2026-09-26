@@ -508,14 +508,32 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
         `SELECT api_domain FROM zoho_installations
           WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`,
       );
-      const c = contact[0] as { crm_module?: string; crm_record_id?: string } | undefined;
+      const c = contact[0] as
+        | { crm_kind?: string; crm_module?: string; crm_record_id?: string }
+        | undefined;
+
+      /*
+       * Карточка в Битриксе. Адрес портала лежит в подключении: у
+       * коробки он свой, и собрать его из имени компании нельзя.
+       */
+      let crmUrl = zohoRecordUrl(inst[0]?.api_domain, c?.crm_module, c?.crm_record_id);
+      if (!crmUrl && c?.crm_kind === 'bitrix24' && c?.crm_record_id) {
+        const { rows: bx } = await db.query<{ title: string }>(
+          `SELECT title FROM crm_connections WHERE kind = 'bitrix24' LIMIT 1`,
+        );
+        const host = bx[0]?.title ?? '';
+        const mod =
+          c.crm_module === 'lead' ? 'lead' : c.crm_module === 'company' ? 'company' : 'contact';
+        if (host) crmUrl = `https://${host}/crm/${mod}/details/${c.crm_record_id}/`;
+      }
 
       return {
         contact: contact[0] ?? null,
         identities,
         notes,
         stats: stats[0] ?? null,
-        crmUrl: zohoRecordUrl(inst[0]?.api_domain, c?.crm_module, c?.crm_record_id),
+        crmUrl,
+        crmKind: c?.crm_kind ?? null,
       };
     });
 

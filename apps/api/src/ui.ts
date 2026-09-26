@@ -2799,7 +2799,19 @@ function renderCard(){
     '</div>' +
 
     '<h4>CRM</h4>' +
-    (d.crmUrl
+    /* Битрикс: карточка та же, а вокруг неё другое. Компания у сделки
+       не обязательна, лида конвертировать не нужно — сделка умеет
+       ссылаться и на него. Поэтому здесь своя короткая ветка, а не
+       десять условий внутри общей. */
+    (d.crmUrl && d.crmKind === 'bitrix24'
+      ? L('<div class="kv2"><div class="k">Картка</div>') +
+        '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Бітріксі</a></div></div>') +
+        L('<h4>Замовлення</h4>') +
+        L('<button class="ghost mini" id="oOpen">Зібрати замовлення</button>') +
+        '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
+        '<span class="ok" id="oDone"></span>' +
+        '<div class="err" id="oErr"></div>'
+      : d.crmUrl
       ? L('<div class="kv2"><div class="k">Картка</div>') +
         '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Zoho</a></div></div>') +
         /* Компания. Стоит здесь, а не в «Контакті»: это поле не наше,
@@ -2841,6 +2853,7 @@ function renderCard(){
     '</div>';
 
   paintAvatars();
+  ORD.crm = d.crmKind === 'bitrix24' ? 'bitrix24' : 'zoho';
   wireOrder();
 
   if (el('cReSync')) el('cReSync').onclick = function(){
@@ -2980,12 +2993,23 @@ function renderCard(){
  * сохраняется намеренно: недособранный заказ не нужен ни отчётам, ни
  * второму оператору.
  */
-var ORD = { conv:null, lines:[], subject:'', vals:{}, off:'',
+var ORD = { conv:null, crm:'zoho', lines:[], subject:'', vals:{}, off:'', amount:'',
   cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
 
 function ordFresh(){
-  ORD = { conv:current, lines:[], subject:'', vals:{}, off:'',
+  // Какая CRM — не забываем: карточка её уже определила, а окно
+  // открывается позже и спрашивать второй раз не у кого.
+  var crm = ORD.crm || 'zoho';
+  ORD = { conv:current, crm:crm, lines:[], subject:'', vals:{}, off:'', amount:'',
     cat:[], truncated:false, form:null, pipe:'', ready:false, q:'', all:false, err:'' };
+}
+
+/** Адреса окна заказа у каждой CRM свои, а поведение общее. */
+function ordApi(what){
+  var bx = ORD.crm === 'bitrix24';
+  if (what === 'products') return bx ? '/crm/bitrix/products' : '/crm/products';
+  if (what === 'form') return bx ? '/crm/bitrix/order-form' : '/crm/order-form';
+  return bx ? '/bitrix-order' : '/order';
 }
 
 /**
@@ -3078,11 +3102,11 @@ function ordCount(){
  * без него собирать нечего, и отказ показывается прямо в окне.
  */
 function ordLoad(){
-  api('/crm/products').then(function(r){
+  api(ordApi('products')).then(function(r){
     ORD.cat = r.products || [];
     ORD.truncated = !!r.truncated;
     for (var i = 0; i < ORD.cat.length; i++) ORD.cat[i].i = i;
-    return api('/crm/order-form')
+    return api(ordApi('form'))
       .then(function(f){
         ORD.form = f;
         var ps = f.pipelines || [];
@@ -3111,7 +3135,9 @@ function ordPaint(){
     (ORD.err
       ? '<div class="err" style="margin-top:10px">' + esc(ORD.err) + '</div>'
       : !ORD.ready
-        ? L('<div class="empty">Тягнемо каталог із Zoho...</div>')
+        ? (ORD.crm === 'bitrix24'
+            ? L('<div class="empty">Тягнемо каталог із Бітрікса...</div>')
+            : L('<div class="empty">Тягнемо каталог із Zoho...</div>'))
         : '<div class="ocols">' +
             '<div class="ocol">' +
               L('<input id="oQ" placeholder="пошук: назва або артикул">') +
@@ -3130,11 +3156,36 @@ function ordPaint(){
   if (ORD.err || !ORD.ready) return;
 
   el('oQ').value = ORD.q;
-  el('oQ').oninput = function(){ ORD.q = el('oQ').value; ordList() };
+  el('oQ').oninput = function(){ ORD.q = el('oQ').value; ordList(); ordSeek() };
   ordList();
   ordCart();
   ordFlds();
   el('oQ').focus();
+}
+
+/*
+ * Поиск по большому каталогу.
+ *
+ * Тысяча товаров — это двадцать страниц у Битрикса, и тянуть их на
+ * каждое открытие окна незачем. Взяли первые, а дальше ищет сам
+ * портал: он умеет по части названия. Спрашиваем не на каждую букву —
+ * человек печатает быстрее, чем отвечает чужой сервер.
+ */
+var ORD_SEEK = null;
+
+function ordSeek(){
+  if (ORD.crm !== 'bitrix24' || !ORD.truncated) return;
+  if (ORD_SEEK) clearTimeout(ORD_SEEK);
+  var q = ORD.q;
+  if (q.length < 2) return;
+  ORD_SEEK = setTimeout(function(){
+    api('/crm/bitrix/products?q=' + encodeURIComponent(q)).then(function(r){
+      if (ORD.q !== q || !el('oList')) return;
+      ORD.cat = r.products || [];
+      for (var i = 0; i < ORD.cat.length; i++) ORD.cat[i].i = i;
+      ordList();
+    }).catch(function(){});
+  }, 400);
 }
 
 /** Сколько строк каталога показываем разом. */
@@ -3291,6 +3342,13 @@ function ordFlds(){
       ? L('<div class="hint">Замовлення ще не налаштоване: у «Інтеграціях» вкажіть, ') +
         L('куди його створювати.</div>')
       : '') +
+    /* Сумма — только пока позиций нет: с позициями её считает CRM, и
+       поле рядом обещало бы, что итог назначает оператор. */
+    (f && f.askAmount && !ORD.lines.length
+      ? L('<div class="fld"><label>Сума</label>') +
+        '<input id="oAmt" inputmode="decimal" value="' + esc(ORD.amount || '') + '"' +
+        L(' placeholder="без товарів — просто сума"></div>')
+      : '') +
     (ps.length > 1
       ? L('<div class="fld"><label>Воронка</label><select id="oPipe">') +
         ps.map(function(p){
@@ -3305,6 +3363,7 @@ function ordFlds(){
     ORD.pipe = el('oPipe').value;
     ordFlds();
   };
+  if (el('oAmt')) el('oAmt').oninput = function(){ ORD.amount = el('oAmt').value };
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-off]'), function(x){
     x.onchange = function(){
@@ -3325,6 +3384,16 @@ function ordFlds(){
   el('oMake').onclick = ordCreate;
 }
 
+/*
+ * Что видит человек в списке.
+ *
+ * У Zoho значение списка — оно же подпись. У Битрикса в поле уезжает
+ * номер значения, и показывать номер человеку бессмысленно.
+ */
+function ordTitle(f, i, fallback){
+  return (f.titles && f.titles[i]) || fallback;
+}
+
 function ordFld(f){
   var v = ORD.vals[f.api];
   var lab = esc(f.label) + (f.required ? ' <span class="req">*</span>' : '');
@@ -3336,16 +3405,16 @@ function ordFld(f){
   var body =
     f.kind === 'pick'
       ? '<select data-off="' + esc(f.api) + '"><option value=""></option>' +
-        f.options.map(function(o){
+        f.options.map(function(o, i){
           return '<option value="' + esc(o) + '"' + (v === o ? ' selected' : '') + '>' +
-            esc(o) + '</option>';
+            esc(ordTitle(f, i, o)) + '</option>';
         }).join('') + '</select>'
       : f.kind === 'multi'
         ? '<select multiple size="3" data-ofm="' + esc(f.api) + '">' +
-          f.options.map(function(o){
+          f.options.map(function(o, i){
             var on = Array.isArray(v) && v.indexOf(o) >= 0;
             return '<option value="' + esc(o) + '"' + (on ? ' selected' : '') + '>' +
-              esc(o) + '</option>';
+              esc(ordTitle(f, i, o)) + '</option>';
           }).join('') + '</select>'
         : f.kind === 'long'
           ? '<textarea rows="2" data-off="' + esc(f.api) + '">' +
@@ -3366,6 +3435,7 @@ function ordFld(f){
  */
 function ordWhy(e){
   var p = (e && e.payload) || {};
+  if (ORD.crm === 'bitrix24') return bxWhy(p);
   return p.error === 'not_linked' ? L('Спершу надішліть клієнта в Zoho')
     : p.error === 'lead_not_converted' ? L('У Zoho це лід — сконвертуйте його в контакт')
     : p.error === 'lead_has_no_company' ? L('У ліда немає компанії — сконвертуйте його в контакт')
@@ -3383,17 +3453,39 @@ function ordWhy(e){
     : L('Zoho не прийняла запит');
 }
 
+/** Отказы Битрикса: каждый лечится по-своему, и лечит их оператор. */
+function bxWhy(p){
+  return p.error === 'not_linked' ? L('Спершу надішліть клієнта в Бітрікс')
+    : p.error === 'bitrix_not_connected' ? L('Бітрікс не підключений')
+    : p.error === 'order_not_set_up' ? L('Замовлення не налаштоване: у «Інтеграціях» виберіть воронку і стадію')
+    : p.error === 'pipeline_not_allowed' ? L('Ця воронка закрита для замовлень')
+    : p.error === 'empty_order' ? L('Додайте товар або вкажіть суму')
+    : p.error === 'fields_required' ? L('Заповніть обовʼязкові поля: ') + (p.detail || '')
+    : p.error === 'expired_token' || p.error === 'bad_key' || p.error === 'bad_app'
+      ? L('Доступ до Бітрікса треба поновити — відкрийте застосунок у Бітріксі ще раз')
+    : p.error === 'scope' ? L('Застосунку в Бітріксі не вистачає прав: crm, placement, user')
+    : p.detail ? L('Бітрікс відмовив: ') + p.detail
+    : L('Бітрікс не прийняв запит');
+}
+
 function ordCreate(){
-  if (!ORD.lines.length){ el('oErr2').textContent = L('Замовлення порожнє'); return }
+  var noItemsOk = ORD.form && ORD.form.askAmount;
+  if (!ORD.lines.length && !(noItemsOk && ORD.amount)){
+    el('oErr2').textContent = noItemsOk
+      ? L('Додайте товар або вкажіть суму')
+      : L('Замовлення порожнє');
+    return;
+  }
   el('oErr2').textContent = '';
   el('oDone2').textContent = '';
   busy(el('oMake'), true);
 
-  api('/conversations/' + current + '/order', { method:'POST', body:{
+  api('/conversations/' + current + ordApi('make'), { method:'POST', body:{
     subject: ORD.subject || '',
     pipeline: ORD.pipe || '',
     fields: ORD.vals,
     discount: ORD.off || '',
+    amount: ORD.amount || '',
     items: ORD.lines.map(function(l){
       return { productId: l.id, quantity: l.qty, price: l.price, discount: l.off || '' };
     })
@@ -3404,6 +3496,7 @@ function ordCreate(){
     ORD.subject = '';
     ORD.vals = {};
     ORD.off = '';
+    ORD.amount = '';
     ORD.q = '';
     ORD.autoAmount = true;
     ordClose();
@@ -3420,6 +3513,164 @@ function wireOrder(){
   if (ORD.conv !== current) ordFresh();
   el('oOpen').onclick = ordOpen;
   ordCount();
+}
+
+/* ══════════════ Заказ в Битриксе ══════════════ */
+
+/**
+ * Куда уезжает заказ в Битриксе.
+ *
+ * Здесь описывается чужая разметка, а не наша: воронки, стадии и поля
+ * придумали в CRM клиента. Поэтому всё, что выбирается, приходит из
+ * самого портала — списки, а не поля ввода. Вписанное руками имя поля
+ * ошибается молча и находится на первом заказе.
+ */
+var BOS = { set:null, meta:null, err:'', open:'' };
+
+function bosLoad(){
+  return Promise.all([
+    api('/settings/orders/bitrix'),
+    api('/crm/bitrix/order-meta').catch(function(e){
+      BOS.err = bxWhy((e && e.payload) || {});
+      return null;
+    })
+  ]).then(function(r){
+    BOS.set = r[0].settings;
+    BOS.meta = r[1];
+    bosPaint();
+  }).catch(function(e){
+    var box = el('bosBox');
+    if (box) box.innerHTML = '<div class="err">' + esc(bxWhy((e && e.payload) || {})) + '</div>';
+  });
+}
+
+/** Выбрана ли воронка и на какой стадии заводим. */
+function bosPipe(id){
+  var list = (BOS.set && BOS.set.pipelines) || [];
+  return list.filter(function(p){ return p.id === id })[0] || null;
+}
+
+function bosPaint(){
+  var box = el('bosBox');
+  if (!box) return;
+
+  if (!BOS.meta){
+    box.innerHTML = '<div class="err">' + esc(BOS.err || L('Не вдалося прочитати воронки')) + '</div>';
+    return;
+  }
+
+  var s = BOS.set;
+  var pipes = BOS.meta.pipelines || [];
+  var fields = BOS.meta.fields || [];
+
+  box.innerHTML =
+    L('<div class="int-s" style="white-space:normal">Замовлення в Бітріксі — це угода у воронці. ') +
+    L('Відмітьте воронки, у які її можна заводити, і стадію, з якої вона починається.</div>') +
+
+    '<div style="margin-top:12px">' +
+    pipes.map(function(p){
+      var on = bosPipe(p.id);
+      var stages = p.stages || [];
+      return '<div class="osp">' +
+        '<label class="ochk"><input type="checkbox" data-bxp="' + esc(p.id) + '"' +
+          (on ? ' checked' : '') + '> <b>' + esc(p.name) + '</b></label>' +
+        (on
+          ? L('<div class="fld" style="margin:6px 0 0 22px"><label>Стадія нової угоди</label>') +
+            '<select data-bxs="' + esc(p.id) + '">' +
+            stages.map(function(st){
+              return '<option value="' + esc(st.id) + '"' +
+                (on.stage === st.id ? ' selected' : '') + '>' + esc(st.name) + '</option>';
+            }).join('') + '</select></div>' +
+            (s.sameFields ? '' :
+              '<div style="margin:8px 0 0 22px">' +
+              L('<div class="hint" style="margin:0 0 4px">Поля цієї воронки</div>') +
+              bosFields(fields, on.fields || [], p.id) + '</div>')
+          : '') +
+        '</div>';
+    }).join('') +
+    '</div>' +
+
+    '<label class="ochk" style="margin-top:10px"><input type="checkbox" id="bxSame"' +
+      (s.sameFields ? ' checked' : '') + L('> Однакові поля у всіх воронках</label>') +
+
+    (s.sameFields
+      ? L('<div style="margin-top:10px"><div class="hint" style="margin:0 0 4px">Поля, які питати в оператора</div>') +
+        bosFields(fields, s.fields || [], '') + '</div>'
+      : '') +
+
+    '<label class="ochk" style="margin-top:10px"><input type="checkbox" id="bxAmt"' +
+      (s.askAmount ? ' checked' : '') + L('> Питати суму, коли товарів немає</label>') +
+    L('<div class="hint">Угода без позицій — звичайна річ: тоді сума єдине, що в ній є. ') +
+    L('Коли позиції є, суму рахує Бітрікс.</div>') +
+
+    '<div class="acts"><button id="bxOsSave">' + L('Зберегти') + '</button>' +
+    '<span class="ok" id="bxOsOk"></span><span class="err" id="bxOsErr"></span></div>';
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-bxp]'), function(x){
+    x.onchange = function(){
+      var id = x.dataset.bxp;
+      var list = BOS.set.pipelines || [];
+      if (x.checked){
+        var live = pipes.filter(function(p){ return p.id === id })[0] || {};
+        var first = (live.stages || [])[0];
+        list.push({ id:id, name:live.name || '', stage:first ? first.id : '', fields:[] });
+      } else {
+        list = list.filter(function(p){ return p.id !== id });
+      }
+      BOS.set.pipelines = list;
+      bosPaint();
+    };
+  });
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-bxs]'), function(x){
+    x.onchange = function(){
+      var p = bosPipe(x.dataset.bxs);
+      if (p) p.stage = x.value;
+    };
+  });
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-bxf]'), function(x){
+    x.onchange = function(){
+      var where = x.dataset.bxfp;
+      var target = where ? (bosPipe(where) || {}) : BOS.set;
+      var list = (target.fields || []).filter(function(a){ return a !== x.dataset.bxf });
+      if (x.checked) list.push(x.dataset.bxf);
+      target.fields = list;
+    };
+  });
+
+  el('bxSame').onchange = function(){
+    BOS.set.sameFields = el('bxSame').checked;
+    bosPaint();
+  };
+  el('bxAmt').onchange = function(){ BOS.set.askAmount = el('bxAmt').checked };
+
+  el('bxOsSave').onclick = function(){
+    el('bxOsErr').textContent = ''; el('bxOsOk').textContent = '';
+    busy(el('bxOsSave'), true);
+    api('/settings/orders/bitrix', { method:'PATCH', body: BOS.set })
+      .then(function(r){
+        BOS.set = r.settings;
+        el('bxOsOk').textContent = L('Збережено');
+        bosPaint();
+      })
+      .catch(function(e){
+        el('bxOsErr').textContent = bxWhy((e && e.payload) || {});
+        busy(el('bxOsSave'), false);
+      });
+  };
+}
+
+/* Обязательные поля Битрикс добавит сам — отмечать их не нужно. */
+function bosFields(fields, chosen, pipeId){
+  if (!fields.length) return L('<div class="hint">У цій угоді немає полів, які можна питати.</div>');
+  return '<div class="osf">' + fields.map(function(f){
+    var on = chosen.indexOf(f.api) >= 0;
+    return '<label class="ochk"><input type="checkbox" data-bxf="' + esc(f.api) + '"' +
+      (pipeId ? ' data-bxfp="' + esc(pipeId) + '"' : '') +
+      (on ? ' checked' : '') + (f.required ? ' checked disabled' : '') + '> ' +
+      esc(f.label) + (f.required ? L(' <span class="dim">обовʼязкове</span>') : '') + '</label>';
+  }).join('') + '</div>';
 }
 
 /* ══════════════ Настройка заказа ══════════════ */
@@ -6488,8 +6739,16 @@ function pageIntegrations(){
     if (CRM_OPEN === 'bitrix24'){
       pageBox().innerHTML = '<div class="pg">' + crmBack() +
         pageHead(L('Бітрікс24'), L('Хмара і коробка на своєму сервері.'), pill(stb)) +
-        bitrix + '</div>';
+        bitrix +
+        /* Заказ стоит под подключением: это умение этой связки, и
+           настраивают его, глядя на то, какая воронка подключена. */
+        (bxa.installed || bx
+          ? L('<div class="pg-sec"><h3>Замовлення з розмови</h3><div class="card">') +
+            '<div id="bosBox"></div></div></div>'
+          : '') +
+        '</div>';
       wireCrm();
+      if (el('bosBox')) bosLoad();
       return;
     }
 

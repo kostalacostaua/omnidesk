@@ -63,7 +63,7 @@ import { registerAdmin } from './admin.js';
 import { registerAnalytics } from './analytics.js';
 import { backfillEvents } from './backfill.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
-import { registerBitrix } from './bitrix.js';
+import { registerBitrix, registerBitrixOrders } from './bitrix.js';
 import { denial, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG } from './brand.js';
@@ -824,6 +824,13 @@ registerBitrix(app, {
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
   appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+registerBitrixOrders(app, {
+  pool,
+  masterKey,
+  requireAuth: (req) => requireAuth(req as never),
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 
