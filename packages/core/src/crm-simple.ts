@@ -86,6 +86,24 @@ export function bitrixPortal(webhook: string): string {
   return root.slice(0, root.indexOf('/rest/'));
 }
 
+/**
+ * Вызов метода Битрикса.
+ *
+ * Вызывающему всё равно, чем мы представились порталу — вебхуком или
+ * токеном приложения. Поэтому наружу отсюда идёт не адрес и не ключ, а
+ * функция: подключение по приложению даёт такую же, и весь код, который
+ * ищет клиента и заводит лид, остаётся один на оба случая.
+ */
+export type BitrixCall = (
+  method: string,
+  params: Record<string, unknown>,
+) => Promise<unknown>;
+
+export function bitrixWebhookCall(webhook: string, doFetch?: FetchLike): BitrixCall {
+  const fetchImpl = doFetch ?? (globalThis.fetch as unknown as FetchLike);
+  return (method, params) => bitrixCall(webhook, method, params, fetchImpl);
+}
+
 async function bitrixCall(
   webhook: string,
   method: string,
@@ -118,18 +136,29 @@ export async function bitrixFindOrCreate(
   person: CrmPerson,
   opts: { fetchImpl?: FetchLike } = {},
 ): Promise<CrmMatch> {
-  const doFetch = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-  const portal = bitrixPortal(webhook);
+  return bitrixFindOrCreateVia(
+    bitrixWebhookCall(webhook, opts.fetchImpl),
+    bitrixPortal(webhook),
+    person,
+  );
+}
+
+/** То же самое, но чем говорить с порталом — решает вызывающий. */
+export async function bitrixFindOrCreateVia(
+  call: BitrixCall,
+  portal: string,
+  person: CrmPerson,
+): Promise<CrmMatch> {
   const phone = digits(person.phone);
 
   if (phone) {
     // crm.duplicate.findbycomm — штатный способ Битрикса спросить
     // «есть ли уже такой телефон»: он сам знает про форматы номера.
-    const found = (await bitrixCall(webhook, 'crm.duplicate.findbycomm', {
+    const found = (await call('crm.duplicate.findbycomm', {
       type: 'PHONE',
       values: [person.phone],
       entity_type: 'CONTACT',
-    }, doFetch)) as { CONTACT?: number[] } | null;
+    })) as { CONTACT?: number[] } | null;
 
     const contactId = found?.CONTACT?.[0];
     if (contactId) {
@@ -140,11 +169,11 @@ export async function bitrixFindOrCreate(
       };
     }
 
-    const foundLead = (await bitrixCall(webhook, 'crm.duplicate.findbycomm', {
+    const foundLead = (await call('crm.duplicate.findbycomm', {
       type: 'PHONE',
       values: [person.phone],
       entity_type: 'LEAD',
-    }, doFetch)) as { LEAD?: number[] } | null;
+    })) as { LEAD?: number[] } | null;
 
     const leadId = foundLead?.LEAD?.[0];
     if (leadId) {
@@ -161,7 +190,7 @@ export async function bitrixFindOrCreate(
   if (person.phone) fields.PHONE = [{ VALUE: person.phone, VALUE_TYPE: 'MOBILE' }];
   if (person.email) fields.EMAIL = [{ VALUE: person.email, VALUE_TYPE: 'WORK' }];
 
-  const created = await bitrixCall(webhook, 'crm.lead.add', { fields }, doFetch);
+  const created = await call('crm.lead.add', { fields });
   const id = typeof created === 'number' ? created : Number(created);
   if (!id || Number.isNaN(id)) throw new CrmError('Битрикс не вернул номер лида', 'no_id');
 
@@ -365,6 +394,46 @@ export function pipedriveAuthorizeUrl(clientId: string, redirectUri: string, sta
   return `https://oauth.pipedrive.com/oauth/authorize?${q.toString()}`;
 }
 
+/**
+ * Телефон открытой карточки Битрикса.
+ *
+ * Нужен вкладке внутри карточки: Битрикс сообщает рамке только номер
+ * записи, а диалог ищется по телефону, если связь с карточкой ещё не
+ * проставлена — карточка в CRM могла появиться раньше переписки.
+ *
+ * У сделки своего телефона нет: он у человека, с которым она ведётся.
+ */
+export async function bitrixPhone(
+  call: BitrixCall,
+  module: string,
+  recordId: string,
+): Promise<string | null> {
+  const id = String(recordId ?? '').replace(/[^0-9]/g, '');
+  if (!id) return null;
+
+  if (module === 'deal') {
+    const deal = (await call('crm.deal.get', { id })) as { CONTACT_ID?: string | number } | null;
+    const contactId = String(deal?.CONTACT_ID ?? '');
+    return contactId ? bitrixPhone(call, 'contact', contactId) : null;
+  }
+
+  const method =
+    module === 'lead' ? 'crm.lead.get' : module === 'company' ? 'crm.company.get' : 'crm.contact.get';
+  const card = (await call(method, { id })) as
+    | { PHONE?: Array<{ VALUE?: string }> }
+    | null;
+  const first = (card?.PHONE ?? [])[0]?.VALUE;
+  return first ? String(first) : null;
+}
+
+/** Кто мы для портала. Проверка связи — чтобы опечатку видеть сразу. */
+export async function bitrixWhoAmI(call: BitrixCall): Promise<string> {
+  const who = (await call('profile', {})) as
+    { NAME?: string; LAST_NAME?: string; ID?: number } | null;
+  const name = [who?.NAME, who?.LAST_NAME].filter(Boolean).join(' ');
+  return name || `пользователь ${who?.ID ?? ''}`.trim();
+}
+
 /** Проверка связи при подключении — чтобы опечатку видеть сразу. */
 export async function crmPing(
   kind: CrmKind,
@@ -374,10 +443,7 @@ export async function crmPing(
   const doFetch = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
 
   if (kind === 'bitrix24') {
-    const who = (await bitrixCall(creds.webhook ?? '', 'profile', {}, doFetch)) as
-      { NAME?: string; LAST_NAME?: string; ID?: number } | null;
-    const name = [who?.NAME, who?.LAST_NAME].filter(Boolean).join(' ');
-    return name || `пользователь ${who?.ID ?? ''}`.trim();
+    return bitrixWhoAmI(bitrixWebhookCall(creds.webhook ?? '', doFetch));
   }
 
   const me = (await pipedriveCall(creds.domain ?? '', creds.token ?? '', '/users/me', {}, doFetch)) as

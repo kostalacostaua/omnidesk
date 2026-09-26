@@ -108,6 +108,10 @@ export const ROUTING_TABLES = [
   'zoho_org_routes',
   'user_routes',
   'data_deletion_requests',
+  // Битрикс приходит сам — при установке приложения и при каждом
+  // открытии виджета, — и о компании в его запросе нет ничего, кроме
+  // ключа в адресе и опознавателя портала.
+  'bitrix_portals',
 ] as const;
 
 /**

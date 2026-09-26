@@ -63,6 +63,7 @@ import { registerAdmin } from './admin.js';
 import { registerAnalytics } from './analytics.js';
 import { backfillEvents } from './backfill.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
+import { registerBitrix } from './bitrix.js';
 import { denial, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG } from './brand.js';
@@ -172,6 +173,28 @@ const app = Fastify({
  * Разбитый JSON по-прежнему отвечает ошибкой, а не тихо превращается в
  * пустой объект: молчаливое «ничего не пришло» отлаживать невозможно.
  */
+/*
+ * Битрикс говорит формой, а не JSON.
+ *
+ * Он приходит к нам сам — при установке приложения и при каждом
+ * открытии вкладки в карточке — и присылает обычную форму браузера.
+ * Без разбора такого тела сервер отвечает ему «не понимаю тип», и
+ * человек видит внутри Битрикса пустую рамку без единого объяснения.
+ */
+app.addContentTypeParser(
+  'application/x-www-form-urlencoded',
+  { parseAs: 'string' },
+  (_req, body, done) => {
+    try {
+      const out: Record<string, string> = {};
+      for (const [k, v] of new URLSearchParams(String(body))) out[k] = v;
+      done(null, out);
+    } catch (err) {
+      done(err as Error);
+    }
+  },
+);
+
 app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
   const buf = body as Buffer;
   if (String(req.url ?? '').startsWith('/webhooks/')) {
@@ -794,6 +817,14 @@ registerCrm(app, {
     clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
   },
   redis,
+});
+
+registerBitrix(app, {
+  pool,
+  masterKey,
+  requireAuth: (req) => requireAuth(req as never),
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, '') || PUBLIC_URL,
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 
 registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));

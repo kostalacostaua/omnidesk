@@ -488,6 +488,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .tile-st.warn{color:var(--warn)}
   .tile-st.warn i{background:var(--warn)}
   .pg-back{margin-bottom:14px}
+  /* Ссылка, открывающая спрятанный кусок настройки: не кнопка — за ней
+     не действие, а «покажи остальное». */
+  .lnk{color:var(--link);cursor:pointer;text-decoration:underline;font-weight:600}
   /* Полоска «показан один диалог»: состояние списка, в которое можно
      попасть из отчёта, обязано быть видно и сниматься одним щелчком. */
   .drill{display:flex;align-items:center;gap:8px;margin-top:9px;padding:7px 10px;
@@ -6295,7 +6298,8 @@ function pageIntegrations(){
   Promise.all([
     api('/settings/zoho'),
     api('/settings/ai').catch(function(){ return null }),
-    api('/settings/crm').catch(function(){ return null })
+    api('/settings/crm').catch(function(){ return null }),
+    api('/settings/crm/bitrix').catch(function(){ return null })
   ]).then(function(res){
     var d = res[0], ai = res[1] || {}, crm = (res[2] && res[2].connections) || [];
     var cset = (res[2] && res[2].settings) || {};
@@ -6337,27 +6341,63 @@ function pageIntegrations(){
         : ''
     });
 
-    // ── Битрикс24 ─────────────────────────────────────────────────
-    var bxBody = bx
-      ? '<div class="int-row"><div style="min-width:0">' +
-        '<div class="int-n">' + esc(bx.title) + '</div>' +
-        '<div class="int-s">' + (bx.lastError ? esc(bx.lastError) : L('ліди йдуть сюди')) + '</div>' +
-        '</div><div class="int-rb">' +
-        '<button class="ghost mini" data-crmcheck="' + bx.id + L('">Перевірити</button>') +
-        '<button class="ghost mini" data-crmdel="' + bx.id + L('">Відключити</button></div></div>')
-      : L('<div class="int-s" style="white-space:normal">Підходить і хмара, і коробка на своєму ') +
-        L('сервері — відрізняється тільки адреса. У Бітріксі: <b>Розробникам → Інше → ') +
-        L('Вхідний вебхук</b>, права <b>crm</b>. Скопіюйте адресу вебхука сюди.</div>') +
+    /* ── Битрикс24 ────────────────────────────────────────────────
+       Приложение, а не вебхук: вкладка в карточке клиента ставится
+       методом, на который вебхуку отвечают отказом. Вебхук остался
+       ссылкой внизу — у кого он настроен, тот ничего не переделывает. */
+    var bxa = res[3] || {};
+
+    var bxConnected =
+      '<div class="int-row"><div style="min-width:0">' +
+      '<div class="int-n">' + esc(bx ? bx.title : bxa.portal) + '</div>' +
+      '<div class="int-s">' + (bx && bx.lastError ? esc(bx.lastError)
+        : bxa.installed ? L('вкладка Rozmovio стоїть у картках клієнтів, лідів і угод')
+        : L('ліди йдуть сюди, вкладки в картці немає')) + '</div>' +
+      '</div><div class="int-rb">' +
+      '<button class="ghost mini" id="bxCheck">' + L('Перевірити') + '</button>' +
+      (bx ? '<button class="ghost mini" data-crmdel="' + bx.id + L('">Відключити</button>') : '') +
+      '</div></div>' +
+      (bxa.installed ? '' :
+        '<div class="hint">' +
+        L('Це підключення вебхуком: воно заводить ліди, але вкладки в картці не дає. ') +
+        L('Щоб зʼявилася вкладка, заведіть локальний застосунок нижче.') + '</div>');
+
+    var bxSetup =
+      '<ol class="steps">' +
+      L('<li>У Бітріксі: <b>Розробникам → Інше → Локальний застосунок</b>.</li>') +
+      L('<li><b>Шлях до обробника</b> і <b>початковий шлях для встановлення</b> — ось ця адреса:') +
+      ' <code id="bxHnd">' + esc(bxa.handler || '') + '</code> ' +
+      '<button class="ghost mini" id="bxCopy">' + L('Скопіювати') + '</button></li>' +
+      L('<li>Права: <b>') + esc(bxa.scopes || 'crm, placement, user') +
+      L('</b>. Галочку «Використовувати лише API» не ставте: без інтерфейсу вкладка в картці не зʼявиться.</li>') +
+      L('<li>Збережіть застосунок і скопіюйте звідти <b>код застосунку</b> і <b>ключ застосунку</b> сюди.</li>') +
+      '</ol>' +
+      '<div class="row2" style="margin-top:9px">' +
+      L('<input id="bxCid" placeholder="код застосунку">') +
+      L('<input id="bxSec" type="password" autocomplete="new-password" placeholder="ключ застосунку">') +
+      '<button id="bxSave">' + L('Зберегти ключі') + '</button></div>' +
+      (bxa.appSaved
+        ? '<div class="hint" id="bxWait">' +
+          L('Ключі збережено. Тепер відкрийте застосунок у Бітріксі — він сам скаже нам, що встановлений. ') +
+          L('Ця сторінка оновиться сама.') + '</div>'
+        : '<div class="hint">' +
+          L('Ключі бачить лише сервер: назад ми їх не показуємо навіть вам.') + '</div>');
+
+    var bxBody =
+      (bx || bxa.installed ? bxConnected : '') +
+      (bxa.installed ? '' : bxSetup) +
+      (bx || bxa.installed ? '' :
+        '<div class="hint" style="margin-top:10px">' +
+        '<a class="lnk" id="bxWhLink">' + L('У мене вже є вхідний вебхук') + '</a></div>' +
+        '<div id="bxWhBox" style="display:none">' +
+        L('<div class="int-s" style="white-space:normal;margin-top:9px">Вебхук заводить ліди, але ') +
+        L('вкладки в картці не дає. У Бітріксі: <b>Розробникам → Інше → Вхідний вебхук</b>, права <b>crm</b>.</div>') +
         '<div class="row2" style="margin-top:9px">' +
         L('<input id="bxUrl" placeholder="https://компанія.bitrix24.ua/rest/1/ключ/">') +
-        L('<button id="bxAdd">Підключити</button></div>');
-
-    var bxSoon = '<div class="hint" style="margin-top:10px">' +
-      L('Переписка в «Відкритих лініях» Бітрікса — скоро. Зараз листування живе в Rozmovio, ') +
-      L('а в Бітрікс їде картка клієнта і лід.') + '</div>';
+        L('<button id="bxAdd">Підключити</button></div></div>'));
 
     var bitrix = crmCard({
-      body: bxBody + bxSoon,
+      body: bxBody,
       acts: '<span class="err" id="bxErr"></span><span class="ok" id="bxOk"></span>'
     });
 
@@ -6396,9 +6436,10 @@ function pageIntegrations(){
 
     // Состояние для плитки: точка, слово и ничего больше.
     var stz = list.length ? { on:1, text:L('підключено') } : { text:L('не підключено') };
-    var stb = bx
-      ? (bx.status === 'active' ? { on:1, text:L('підключено') }
-                                : { warn:1, text:L('потрібно перепідключити') })
+    var stb = bxa.installed ? { on:1, text:L('підключено') }
+      : bxa.appSaved ? { warn:1, text:L('застосунок не встановлено') }
+      : bx ? (bx.status === 'active' ? { on:1, text:L('підключено вебхуком') }
+                                     : { warn:1, text:L('потрібно перепідключити') })
       : { text:L('не підключено') };
     var stp = pd
       ? (pd.status === 'active' ? { on:1, text:L('підключено') }
@@ -6530,6 +6571,21 @@ function pageIntegrations(){
  * на странице нет, просто не находится — проверка на наличие дешевле,
  * чем три почти одинаковых куска.
  */
+var BX_T = null;
+
+/** Ждём, пока приложение откроют в Битриксе: он скажет нам сам. */
+function bxWatch(){
+  if (BX_T) clearTimeout(BX_T);
+  BX_T = setTimeout(function(){
+    if (!el('bxWait')) return;
+    api('/settings/crm/bitrix').then(function(s){
+      if (!el('bxWait')) return;
+      if (s && s.installed){ toast(L('Бітрікс підключено')); pageIntegrations(); return }
+      bxWatch();
+    }).catch(function(){ bxWatch() });
+  }, 4000);
+}
+
 function wireCrm(){
   if (el('crmBack')) el('crmBack').onclick = function(){ CRM_OPEN = null; pageIntegrations() };
 
@@ -6605,6 +6661,46 @@ function wireCrm(){
           busy(el('pdAdd'), false);
         });
     };
+
+    if (el('bxCopy')) el('bxCopy').onclick = function(){ copyText(el('bxHnd').textContent) };
+
+    if (el('bxWhLink')) el('bxWhLink').onclick = function(){
+      el('bxWhBox').style.display = 'block';
+      el('bxWhLink').style.display = 'none';
+    };
+
+    if (el('bxSave')) el('bxSave').onclick = function(){
+      el('bxErr').textContent = '';
+      busy(el('bxSave'), true);
+      api('/settings/crm/bitrix/app', { method:'POST', body:{
+        clientId: el('bxCid').value.trim(), clientSecret: el('bxSec').value.trim()
+      }})
+        .then(function(){ toast(L('Ключі збережено')); pageIntegrations() })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('bxErr').textContent = p.detail || L('Не вдалося зберегти ключі');
+          busy(el('bxSave'), false);
+        });
+    };
+
+    if (el('bxCheck')) el('bxCheck').onclick = function(){
+      busy(el('bxCheck'), true);
+      el('bxErr').textContent = ''; el('bxOk').textContent = '';
+      api('/settings/crm/bitrix/check', { method:'POST' })
+        .then(function(r){
+          el('bxOk').textContent = L('Звʼязок є') + (r.who ? ': ' + r.who : '');
+          pageIntegrations();
+        })
+        .catch(function(e){
+          var p = e.payload || {};
+          el('bxErr').textContent = p.detail || L('Бітрікс не відповів');
+          busy(el('bxCheck'), false);
+        });
+    };
+
+    // Установка происходит не у нас: человек в этот момент в Битриксе,
+    // и возвращаться сюда нажимать «готово» он не должен.
+    if (el('bxWait')) bxWatch();
 
     if (el('pdcopy')) el('pdcopy').onclick = function(){ copyText(el('pdurl').textContent) };
 

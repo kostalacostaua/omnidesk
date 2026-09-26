@@ -1,5 +1,12 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { withTenant, type Pool } from '@omnidesk/core';
+import {
+  bitrixHost,
+  placementModule,
+  placementRecord,
+  withSystem,
+  withTenant,
+  type Pool,
+} from '@omnidesk/core';
 import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
 
 /**
@@ -34,17 +41,18 @@ import { BRAND_CSS, EMOJI_CSS, EMOJI_JS, THEME_JS } from './theme.js';
  * кусков. Две почти одинаковые страницы разъехались бы к третьему
  * исправлению.
  */
-function widgetPage(platform: 'zoho' | 'pipedrive'): string {
+function widgetPage(platform: 'zoho' | 'pipedrive' | 'bitrix'): string {
   return WIDGET_HTML
-    .replace('__SDK__', platform === 'zoho' ? ZOHO_SDK : PIPEDRIVE_SDK)
+    .replace('__SDK__', SDK[platform])
     .replace('__PLATFORM__', platform);
 }
 
-const ZOHO_SDK =
-  '<script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>';
-
-const PIPEDRIVE_SDK =
-  '<script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>';
+const SDK: Record<'zoho' | 'pipedrive' | 'bitrix', string> = {
+  zoho: '<script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>',
+  pipedrive:
+    '<script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>',
+  bitrix: '<script src="https://api.bitrix24.com/api/v1/"></script>',
+};
 
 export const WIDGET_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -579,6 +587,24 @@ el('txt').onkeydown = function(e){
    нет, и просить его ради телефона незачем. */
 var PLATFORM = '__PLATFORM__';
 
+/* Битрикс не кладёт номер карточки ни в адрес, ни в событие: он
+   присылает его запросом на наш адрес и ждёт страницу в ответ.
+   Поэтому здесь он уже подставлен сервером. */
+var BX_CTX = __BXCTX__;
+
+function startBitrix(){
+  if (!BX_CTX || !BX_CTX.id) return false;
+  record = { module: BX_CTX.module || 'contact', id: BX_CTX.id, phone: null, email: null,
+    crm: 'bitrix24' };
+
+  // Рамка Битрикса по умолчанию высотой в пару строк: без этого
+  // переписки не видно вовсе.
+  try { BX24.init(function(){ try { BX24.fitWindow() } catch(e){} }) } catch(e){}
+
+  if (TOKEN){ el('gate').style.display = 'none'; lookup() }
+  return true;
+}
+
 function startZoho(){
   if (!window.ZOHO || !ZOHO.embeddedApp) return false;
   ZOHO.embeddedApp.on('PageLoad', function(data){
@@ -618,7 +644,9 @@ function startPipedrive(){
 }
 
 function start(){
-  var ok = PLATFORM === 'pipedrive' ? startPipedrive() : startZoho();
+  var ok = PLATFORM === 'pipedrive' ? startPipedrive()
+    : PLATFORM === 'bitrix' ? startBitrix()
+    : startZoho();
   if (ok) return;
 
   // Открыли страницу напрямую, не из CRM: показываем, зачем она, и
@@ -628,7 +656,9 @@ function start(){
   el('empty').style.display = 'block';
   el('emptyText').textContent = PLATFORM === 'pipedrive'
     ? 'Эта страница открывается внутри карточки клиента в Pipedrive.'
-    : 'Эта страница открывается внутри карточки клиента в Zoho CRM.';
+    : PLATFORM === 'bitrix'
+      ? 'Эта страница открывается вкладкой внутри карточки в Битрикс24.'
+      : 'Эта страница открывается внутри карточки клиента в Zoho CRM.';
 }
 
 if (!TOKEN) showGate('');
@@ -641,13 +671,22 @@ start();
 export interface WidgetDeps {
   pool: Pool;
   requireAuth: (req: unknown) => { tenantId: string; userId: string } | null;
-  /** Спросить телефон карточки у CRM. Нужен панели Pipedrive. */
-  crmPhone?: (tenantId: string, recordId: string) => Promise<string | null>;
+  /** Спросить телефон карточки у CRM. Нужен вкладкам в Pipedrive и Битриксе. */
+  crmPhone?: (
+    tenantId: string,
+    recordId: string,
+    kind?: string,
+    module?: string,
+  ) => Promise<string | null>;
 }
 
 export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
-  const ZOHO_PAGE = widgetPage('zoho');
-  const PIPEDRIVE_PAGE = widgetPage('pipedrive');
+  // Карточки в этих двух известны рамке, поэтому страница собирается
+  // один раз; у Битрикса номер карточки приходит запросом, и подстановка
+  // делается на каждый ответ.
+  const ZOHO_PAGE = widgetPage('zoho').replace('__BXCTX__', 'null');
+  const PIPEDRIVE_PAGE = widgetPage('pipedrive').replace('__BXCTX__', 'null');
+  const BITRIX_PAGE = widgetPage('bitrix');
 
   app.get('/widget', async (_req, reply: FastifyReply) =>
     reply
@@ -679,6 +718,70 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
       .header('cache-control', 'no-store, must-revalidate')
       .send(PIPEDRIVE_PAGE),
   );
+
+  /**
+   * Вкладка внутри карточки Битрикса.
+   *
+   * Битрикс открывает её запросом POST и в нём же сообщает, какая
+   * карточка открыта, — ни адреса с номером, ни события у него нет.
+   * Поэтому номер подставляется в страницу здесь.
+   *
+   * Разрешённый родитель рамки берётся из того же запроса: у коробки
+   * на своём сервере адрес портала любой, и списком его не перечислить.
+   * Адрес проверяется как чужой ввод — в заголовке рамки «своё»
+   * означает, что нашу страницу можно показать под чужим именем.
+   */
+  const bitrixPage = async (req: { body?: unknown; query?: unknown }, reply: FastifyReply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const query = (req.query ?? {}) as Record<string, unknown>;
+
+    let host = '';
+    try {
+      host = bitrixHost(String(query['DOMAIN'] ?? body['DOMAIN'] ?? ''));
+    } catch {
+      host = '';
+    }
+
+    /*
+     * Адрес портала в заголовке рамки — это разрешение показывать нашу
+     * страницу внутри чужой. Облачные адреса Битрикса перечислимы, а
+     * коробка живёт на своём домене — и такой домен разрешаем, только
+     * если этот портал у нас установлен. Иначе любой, кто пришлёт своё
+     * имя в запросе, сам себе выпишет разрешение.
+     */
+    if (host && !/\.bitrix24\.[a-z.]+$/.test(host)) {
+      const known = await withSystem(opts.pool, 'портал Битрикса', async (db) => {
+        const { rows } = await db.query<{ n: string }>(
+          `SELECT domain AS n FROM bitrix_portals WHERE domain = $1 LIMIT 1`,
+          [host],
+        );
+        return rows.length > 0;
+      }).catch(() => false);
+      if (!known) host = '';
+    }
+
+    const module = placementModule(String(body['PLACEMENT'] ?? '')) || 'contact';
+    const id = placementRecord(String(body['PLACEMENT_OPTIONS'] ?? ''));
+    // В страницу уезжает только то, что мы сами проверили: номер из
+    // цифр и слово из нашего списка.
+    const ctx = JSON.stringify({ id, module });
+
+    return reply
+      .type('text/html; charset=utf-8')
+      .header(
+        'content-security-policy',
+        'frame-ancestors ' +
+          (host ? `https://${host} ` : '') +
+          'https://*.bitrix24.com https://*.bitrix24.ru https://*.bitrix24.ua ' +
+          'https://*.bitrix24.eu https://*.bitrix24.kz https://*.bitrix24.by ' +
+          'https://*.bitrix24.pl https://*.bitrix24.de',
+      )
+      .header('cache-control', 'no-store, must-revalidate')
+      .send(BITRIX_PAGE.replace('__BXCTX__', ctx));
+  };
+
+  app.post('/widget/bitrix', async (req, reply: FastifyReply) => bitrixPage(req, reply));
+  app.get('/widget/bitrix', async (req, reply: FastifyReply) => bitrixPage(req, reply));
 
   /**
    * Поиск диалога по открытой карточке CRM.
@@ -728,8 +831,11 @@ export function registerWidget(app: FastifyInstance, opts: WidgetDeps): void {
      * записи. Спрашиваем сами — и только если по номеру записи ничего
      * не нашлось: карточка в CRM могла появиться раньше переписки.
      */
-    if (!found && req.query.crm === 'pipedrive' && recordId && opts.crmPhone) {
-      const phone = await opts.crmPhone(auth.tenantId, recordId);
+    const askCrm = req.query.crm === 'pipedrive' || req.query.crm === 'bitrix24';
+    if (!found && askCrm && recordId && opts.crmPhone) {
+      const phone = await opts.crmPhone(
+        auth.tenantId, recordId, req.query.crm, req.query.module ?? '',
+      );
       const pd = (phone ?? '').replace(/[^0-9]/g, '');
       if (pd.length >= 9) {
         const byPhone = await withTenant(opts.pool, auth.tenantId, async (db) => {

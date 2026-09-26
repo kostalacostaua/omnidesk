@@ -1,7 +1,8 @@
 import type { Redis } from 'ioredis';
 import {
   CrmError,
-  bitrixFindOrCreate,
+  bitrixFindOrCreateVia,
+  bitrixLink,
   crmSource,
   decryptJson,
   parseCrmSettings,
@@ -278,12 +279,24 @@ export function createCrmSync(deps: CrmDeps) {
     };
 
     try {
-      const creds = decryptJson<{ webhook?: string; domain?: string; token?: string }>(
-        masterKey, job.tenantId, conn.creds_enc,
-      );
-      const match = conn.kind === 'bitrix24'
-        ? await bitrixFindOrCreate(creds.webhook ?? '', person)
-        : await pipedriveFindOrCreate(creds.domain ?? '', creds.token ?? '', person);
+      const creds = decryptJson<{
+        webhook?: string; domain?: string; token?: string;
+      }>(masterKey, job.tenantId, conn.creds_enc);
+
+      /*
+       * Битрикс бывает подключён приложением и вебхуком, и лид
+       * заводится одинаково: чем именно мы представляемся порталу,
+       * решает одно место, а не каждый вызывающий по-своему.
+       */
+      let match;
+      if (conn.kind === 'bitrix24') {
+        const link = await bitrixLink({
+          pool, masterKey, tenantId: job.tenantId, rowId: conn.id, creds,
+        });
+        match = await bitrixFindOrCreateVia(link.call, link.portal, person);
+      } else {
+        match = await pipedriveFindOrCreate(creds.domain ?? '', creds.token ?? '', person);
+      }
 
       await withTenant(pool, job.tenantId, async (db) => {
         await db.query(

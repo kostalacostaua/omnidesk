@@ -1,8 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import {
   CrmError,
+  bitrixLink,
+  bitrixPhone,
+  bitrixWhoAmI,
   bitrixPortal,
   bitrixRoot,
+  type BitrixCreds,
   crmPing,
   decryptJson,
   encryptJson,
@@ -156,11 +160,18 @@ async function pipedriveToken(deps: CrmDeps, tenantId: string, creds: Creds, row
 }
 
 export function crmPhoneReader(deps: CrmDeps) {
-  return async function crmPhone(tenantId: string, recordId: string): Promise<string | null> {
+  return async function crmPhone(
+    tenantId: string,
+    recordId: string,
+    kind = 'pipedrive',
+    module = '',
+  ): Promise<string | null> {
+    const want = kind === 'bitrix24' ? 'bitrix24' : 'pipedrive';
     const row = await withTenant(deps.pool, tenantId, async (db) => {
       const { rows } = await db.query<{ id: string; creds_enc: Buffer }>(
         `SELECT id, creds_enc FROM crm_connections
-          WHERE kind = 'pipedrive' AND status = 'active' LIMIT 1`,
+          WHERE kind = $1 AND status = 'active' LIMIT 1`,
+        [want],
       );
       return rows[0] ?? null;
     });
@@ -168,6 +179,16 @@ export function crmPhoneReader(deps: CrmDeps) {
 
     try {
       const creds = decryptJson<Creds>(deps.masterKey, tenantId, row.creds_enc);
+      if (want === 'bitrix24') {
+        const link = await bitrixLink({
+          pool: deps.pool,
+          masterKey: deps.masterKey,
+          tenantId,
+          rowId: row.id,
+          creds: creds as BitrixCreds,
+        });
+        return await bitrixPhone(link.call, module, recordId);
+      }
       const { domain, token } = await pipedriveToken(deps, tenantId, creds, row.id);
       return await pipedrivePhone(domain, token, recordId);
     } catch {
@@ -1234,7 +1255,18 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
     try {
       const creds = decryptJson<Creds>(masterKey, a.tenantId, row.creds_enc);
-      const who = await crmPing(row.kind as CrmKind, creds);
+      /*
+       * Битрикс бывает подключён приложением, а не вебхуком: тогда и
+       * здороваемся мы токеном. Одно место решает чем — иначе проверка
+       * связи отвечала бы «нет связи» там, где связь есть.
+       */
+      const who = row.kind === 'bitrix24'
+        ? await bitrixWhoAmI(
+            (await bitrixLink({
+              pool, masterKey, tenantId: a.tenantId, rowId: row.id, creds: creds as BitrixCreds,
+            })).call,
+          )
+        : await crmPing(row.kind as CrmKind, creds);
       await withTenant(pool, a.tenantId, async (db) => {
         await db.query(
           `UPDATE crm_connections SET status = 'active', last_error = NULL WHERE id = $1`,
@@ -1339,14 +1371,28 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
 
-    const ok = await withTenant(pool, a.tenantId, async (db) => {
-      const { rowCount } = await db.query(`DELETE FROM crm_connections WHERE id = $1`, [
-        req.params.id,
-      ]);
-      return (rowCount ?? 0) > 0;
+    const gone = await withTenant(pool, a.tenantId, async (db) => {
+      const { rows } = await db.query<{ kind: string }>(
+        `DELETE FROM crm_connections WHERE id = $1 RETURNING kind`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
     });
 
-    if (!ok) return reply.code(404).send({ error: 'not_found' });
+    if (!gone) return reply.code(404).send({ error: 'not_found' });
+
+    /*
+     * Отключили Битрикс — отпускаем и портал. Иначе тот же портал
+     * нельзя будет подключить ни в другой компании, ни здесь заново:
+     * он так и останется числиться занятым за той записью, которой
+     * больше нет.
+     */
+    if (gone.kind === 'bitrix24') {
+      await withSystem(pool, 'портал Битрикса', async (db) => {
+        await db.query(`DELETE FROM bitrix_portals WHERE tenant_id = $1`, [a.tenantId]);
+      });
+    }
+
     return { ok: true };
   });
 }

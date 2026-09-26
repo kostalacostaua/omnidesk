@@ -10,6 +10,7 @@ export * from './scenario.js';
 export * from './zoho-links.js';
 export * from './ai.js';
 export * from './crm-simple.js';
+export * from './bitrix.js';
 export * from './crm-settings.js';
 export * from './zoho-token.js';
 export * from './viber.js';
