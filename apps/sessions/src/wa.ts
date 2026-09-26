@@ -625,8 +625,9 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
 
     return withTenant(pool, tenantId, async (db) => {
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO channels (id, tenant_id, type, display_name, external_id, meta, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'active')
+        `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                               credentials_enc, meta, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
          ON CONFLICT (type, external_id) DO UPDATE
            SET display_name = EXCLUDED.display_name, meta = EXCLUDED.meta,
                status = 'active', last_error = NULL
@@ -637,6 +638,13 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
           WHATSAPP_USER_CHANNEL,
           (name ?? '').trim() || `WhatsApp +${digits}`,
           digits,
+          /*
+           * Поле обязательное у всех каналов, а у этого секрета в нём
+           * нет: ключи живут в своей таблице, потому что меняются на
+           * каждом сообщении. Кладём пустое, а не выдумываем, что
+           * положить: канал без сессии всё равно ничего не умеет.
+           */
+          encryptJson(masterKey, tenantId, {}),
           JSON.stringify({ phone: `+${digits}` }),
         ],
       );
