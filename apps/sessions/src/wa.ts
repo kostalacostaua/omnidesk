@@ -189,6 +189,8 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
       },
       saveCreds: schedule,
       flush,
+      /** Была ли сессия в базе: с пустой открывать соединение незачем. */
+      saved: row !== null,
       /** Вход закончился, канал известен — с этого места пишем в базу. */
       bind: async (id: string): Promise<void> => {
         target = id;
@@ -222,9 +224,24 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
     const id = String(key['id'] ?? '');
     const chatId = String(key['remoteJid'] ?? '');
     if (!id || !chatId) return null;
-    // Группы и рассылки в скриньку не берём: модель «один диалог —
-    // один клиент» на них не натягивается.
-    if (!chatId.endsWith('@s.whatsapp.net')) return null;
+    /*
+     * Берём личную переписку, а отбрасываем то, что ею не является:
+     * группы, рассылки, каналы и статусы. Раньше здесь стояло обратное
+     * — «только @s.whatsapp.net», — и это молча теряло сообщения:
+     * WhatsApp давно адресует часть собеседников по внутреннему номеру
+     * (@lid), а не по телефону, и с делового аккаунта письмо приходит
+     * именно так. Перечислять то, что мы не берём, безопаснее, чем
+     * перечислять то, что берём: новый вид адреса окажется в переписке,
+     * а не в тишине.
+     */
+    if (
+      chatId.endsWith('@g.us') ||
+      chatId.endsWith('@broadcast') ||
+      chatId.endsWith('@newsletter') ||
+      chatId.startsWith('status@')
+    ) {
+      return null;
+    }
 
     const content = (raw['message'] ?? {}) as Record<string, unknown>;
     const text =
@@ -303,6 +320,13 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
     if (live.has(channelId)) return;
 
     const store = await authStore(channelId, tenantId);
+    /*
+     * Канал есть, а сессии нет — вход не доходил до конца или её
+     * стёрли. Поднимать сокет с пустыми ключами бессмысленно: он
+     * попросит QR, которого никто не увидит, и займёт номер.
+     */
+    if (!store.saved) return;
+
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -329,7 +353,7 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
     sock.ev.on('connection.update', (u: Record<string, unknown>) => {
       const state = String(u['connection'] ?? '');
       if (state === 'open') {
-        log('info', 'Сессия WhatsApp открыта', { channelId });
+        log('info', 'Сессия WhatsApp открыта', { channelId, tenantId });
         return;
       }
       if (state !== 'close') return;
@@ -428,24 +452,34 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
    * один номер и получать каждое сообщение дважды.
    */
   async function reconcile(): Promise<void> {
-    const rows = await withSystem(pool, 'сессии WhatsApp', async (db) => {
-      const { rows } = await db.query<{ id: string; tenant_id: string }>(
-        `SELECT c.id, c.tenant_id
-           FROM channels c JOIN wa_sessions s ON s.channel_id = c.id
-          WHERE c.type = $1 AND c.status = 'active'`,
+    /*
+     * Спрашиваем таблицу маршрутов, а не сами каналы.
+     *
+     * У службы сессий нет и не может быть тенанта: она поднимает
+     * соединения всех арендаторов сразу. А каналы закрыты изоляцией, и
+     * системное подключение видит в них ноль строк — не ошибку, а
+     * пустоту, из-за которой сверка молча не открывала ничего.
+     * Маршруты для того и существуют: они нужны до того, как тенант
+     * известен, и идентификаторов в них ровно столько, сколько надо.
+     */
+    const routes = await withSystem(pool, 'сессии номерного WhatsApp', async (db) => {
+      const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+        `SELECT channel_id, tenant_id FROM channel_routes
+          WHERE channel_type = $1 AND status = 'active'`,
         [WHATSAPP_USER_CHANNEL],
       );
       return rows;
     });
 
-    const want = new Set(rows.map((r) => r.id));
+    const want = new Map(routes.map((r) => [r.channel_id, r.tenant_id]));
     for (const id of [...live.keys()]) if (!want.has(id)) await stopSession(id);
-    for (const row of rows) {
-      if (live.has(row.id)) continue;
+
+    for (const [channelId, tenantId] of want) {
+      if (live.has(channelId)) continue;
       try {
-        await openSession(row.id, row.tenant_id);
+        await openSession(channelId, tenantId);
       } catch (err) {
-        log('error', 'Не удалось открыть сессию WhatsApp', { channelId: row.id, error: String(err) });
+        log('error', 'Не удалось открыть сессию WhatsApp', { channelId, error: String(err) });
       }
     }
   }

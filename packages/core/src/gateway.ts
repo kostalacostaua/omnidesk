@@ -70,8 +70,21 @@ export function phoneToChat(phone: string): string {
   return digits ? `${digits}@c.us` : '';
 }
 
+/**
+ * Телефон собеседника — только там, где он и правда телефон.
+ *
+ * WhatsApp адресует часть собеседников внутренним номером (@lid), а не
+ * телефоном. Цифр в нём столько же, и принять его за номер — значит
+ * завести клиента с телефоном, которого не существует, а потом свести
+ * по нему двух разных людей.
+ */
 export function chatToPhone(chatId: string): string | null {
-  const digits = String(chatId ?? '').split('@')[0]?.replace(/[^0-9]/g, '') ?? '';
+  const id = String(chatId ?? '');
+  const at = id.indexOf('@');
+  const domain = at >= 0 ? id.slice(at + 1) : 's.whatsapp.net';
+  if (domain !== 's.whatsapp.net' && domain !== 'c.us') return null;
+
+  const digits = id.slice(0, at >= 0 ? at : undefined).replace(/[^0-9]/g, '');
   return digits.length >= 9 ? `+${digits}` : null;
 }
 
