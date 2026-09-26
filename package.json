@@ -11,7 +11,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc --build && node scripts/check-ui.mjs && node scripts/check-sql.mjs && node scripts/check-rls.mjs && node scripts/check-parsers.mjs",
+    "build": "tsc --build && node scripts/check-ui.mjs && node scripts/check-sql.mjs && node scripts/check-rls.mjs && node scripts/check-parsers.mjs && node scripts/check-channels.mjs",
     "typecheck": "tsc --build --force",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,6 +23,7 @@
     "check:ui": "node scripts/check-ui.mjs",
     "check:sql": "node scripts/check-sql.mjs",
     "check:parsers": "node scripts/check-parsers.mjs",
+    "check:channels": "node scripts/check-channels.mjs",
     "migrate": "node apps/api/dist/migrate.js"
   },
   "devDependencies": {
