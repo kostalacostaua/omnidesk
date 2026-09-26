@@ -245,16 +245,12 @@ the account automatically and takes far longer to resolve than a refund.</p>
   app.get('/terms-of-service', send(terms) as never);
   app.get('/refund-policy', send(refunds) as never);
 
-  // Meta шлёт запрос на удаление данных как обычную форму, а не JSON.
-  // Fastify такой тип без плагина не разбирает, поэтому парсер здесь.
-  app.addContentTypeParser(
-    'application/x-www-form-urlencoded',
-    { parseAs: 'string' },
-    (_req, body, done) => {
-      const params = new URLSearchParams(body as string);
-      done(null, Object.fromEntries(params.entries()));
-    },
-  );
+  /*
+   * Meta шлёт запрос на удаление данных обычной формой, а не JSON, — и
+   * не она одна: так же приходит Битрикс. Разбор такого тела стоит
+   * один на всё приложение, рядом с разбором JSON: второй такой же
+   * Fastify не принимает и падает при запуске.
+   */
 
   /**
    * Запрос на удаление данных от Meta.
