@@ -362,6 +362,12 @@ export const KIT_CSS = `
   .seg button:hover{background:var(--hover);color:var(--t1)}
   .seg button.on{background:var(--solid);color:var(--t1);box-shadow:var(--shadow)}
 
+  /* Предупреждение внутри карточки. Не «мелкий шрифт под договором»:
+     это то, что человек обязан прочитать до действия, а не после. */
+  .warnbox{background:var(--warn-bg);border-left:3px solid var(--warn);color:var(--t2);
+    border-radius:0 var(--r1) var(--r1) 0;padding:9px 12px;font-size:12.5px;line-height:1.5;
+    margin:10px 0}
+
   /* Пустое состояние. Оно всегда отвечает на два вопроса: почему тут
      ничего нет и что сделать, чтобы появилось. */
   .empty{padding:26px 20px;color:var(--t3);font-size:12.5px;text-align:center;line-height:1.6}

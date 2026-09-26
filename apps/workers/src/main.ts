@@ -67,6 +67,11 @@ import {
   normalizeViber,
   viberFetch,
   viberSend,
+  WHATSAPP_USER_CHANNEL,
+  GatewayError,
+  gatewaySend,
+  normalizeGateway,
+  type GatewayCreds,
   type ViberCreds,
   AiError,
   AI_HISTORY_SQL,
@@ -874,6 +879,39 @@ async function handleInbound(job: InboundJob): Promise<void> {
     }
     return;
   }
+  /*
+   * Шлюз WhatsApp. Разбор чужого формата сделал приёмник — он же
+   * выбросил всё, что не сообщение. Здесь остаётся то же, что и в любом
+   * канале: привести к общему виду, записать, отдать боту и CRM.
+   */
+  if (job.provider === 'gateway') {
+    const channel = await findChannelById(job.channelId);
+    if (!channel) {
+      log('warn', 'Канал шлюза не найден или отключён', { channelId: job.channelId });
+      return;
+    }
+
+    const m = normalizeGateway(job.payload as never, {
+      tenantId: channel.tenant_id,
+      channelId: channel.id,
+    });
+    if (!m) return;
+
+    const { inserted, conversationId, contactId } = await persistMessage(m);
+    log('info', inserted ? 'Сообщение сохранено' : 'Дубликат, пропущен', {
+      channelId: channel.id, externalId: m.externalId, channelType: WHATSAPP_USER_CHANNEL,
+    });
+    if (inserted && contactId) await enqueueCrm(m, contactId, conversationId);
+    /* Бот отвечает только на входящее. Сообщение, отправленное самим
+       владельцем с телефона, мы записали ради полноты переписки — но
+       отвечать на собственную реплику было бы разговором с зеркалом. */
+    if (inserted && conversationId && m.direction === 'in') {
+      const sent = await onInbound(m, conversationId);
+      if (sent) log('info', 'Бот ответил', { conversationId, replies: sent });
+    }
+    return;
+  }
+
   if (job.provider === 'telegram') {
     const channel = await findChannelById(job.channelId);
     if (!channel) {
@@ -2411,6 +2449,8 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
 
   if (row.channel_type === VIBER_CHANNEL) return sendViber(job, row, row.peer_id);
 
+  if (row.channel_type === WHATSAPP_USER_CHANNEL) return sendGateway(job, row, row.peer_id);
+
   if (row.channel_type === 'whatsapp') return sendWhatsApp(job, row, row.peer_id);
 
   /*
@@ -2651,6 +2691,51 @@ const META_ATTACHMENT: Record<string, string> = {
  * ссылкой на публичный файл, а у нас хранилище закрытое; поэтому
  * вложения в Instagram пока честно отклоняем.
  */
+/**
+ * Отправка через шлюз WhatsApp.
+ *
+ * Окна здесь нет: на той стороне обычный WhatsApp Web, и он не знает
+ * про сутки — это правило официального API. Поэтому единственная
+ * проверка — есть ли что отправлять.
+ *
+ * Вложения пока не уходят. Поставщик забирает файл по ссылке, а ссылка
+ * на наше хранилище закрытая; отдать открытую значило бы выложить файл
+ * клиента в интернет. Текст уходит, на вложение оператор получает
+ * честный отказ, а не тишину.
+ */
+async function sendGateway(job: OutboundJob, row: OutboundRow, peerId: string): Promise<void> {
+  const creds = decryptJson<GatewayCreds>(masterKey, job.tenantId, row.credentials_enc);
+
+  const attachment = (row.content?.attachments ?? []).find((a) => a.storageKey);
+  if (attachment && !row.text) {
+    await markFailed(job, { reason: 'attachments_not_supported', channelType: WHATSAPP_USER_CHANNEL });
+    throw new UnrecoverableError('Вложения через шлюз пока не отправляются');
+  }
+
+  try {
+    const externalId = await gatewaySend(creds, peerId, {
+      ...(row.text ? { text: row.text } : {}),
+    });
+
+    await withTenant(pool, job.tenantId, async (db) => {
+      await db.query(
+        `UPDATE messages SET status = 'sent', external_id = $2, sent_at = now() WHERE id = $1`,
+        [job.messageId, externalId],
+      );
+    });
+    log('info', 'Отправлено через шлюз', { messageId: job.messageId, externalId });
+  } catch (err) {
+    const reason = err instanceof GatewayError ? err.code : 'network';
+    const detail = err instanceof Error ? err.message : String(err);
+    await markFailed(job, { reason, detail });
+    // Ключ не подошёл или номер отвалился — повтор не поможет.
+    if (reason === 'bad_key' || reason === 'empty' || reason === 'no_recipient') {
+      throw new UnrecoverableError(detail);
+    }
+    throw err;
+  }
+}
+
 /**
  * Отправка в Viber.
  *

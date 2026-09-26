@@ -13,6 +13,7 @@ export * from './crm-simple.js';
 export * from './crm-settings.js';
 export * from './zoho-token.js';
 export * from './viber.js';
+export * from './gateway.js';
 export * from './whatsapp.js';
 export * from './custom.js';
 export * from './webchat.js';

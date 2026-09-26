@@ -1,13 +1,21 @@
 import { channelListScope, folderScope } from './scope.js';
 import { mailboxWhy, verifyMailbox } from './mailbox.js';
 import type { FastifyInstance } from 'fastify';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import QRCode from 'qrcode';
 import {
   GRAPH_VERSION,
   VIBER_CHANNEL,
+  WHATSAPP_USER_CHANNEL,
+  GatewayError,
+  gatewayCredsOk,
+  gatewayDropHook,
+  gatewayQr,
+  gatewaySetHook,
+  gatewayState,
+  type GatewayCreds,
   ViberError,
   viberSenders,
   META_LOGIN_SCOPES,
@@ -2206,6 +2214,160 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return reply.code(201).send({ id: channelId, sender: found.name, status: found.status });
     },
   );
+
+  /*
+   * ── WhatsApp через шлюз ───────────────────────────────────────────
+   *
+   * Подключение в два шага: человек вводит номер инстанса и ключ из
+   * кабинета поставщика, мы проверяем их и сразу настраиваем вебхук на
+   * себя. Адрес вебхука зависит от номера канала, и оставить эту
+   * настройку человеку значит обречь половину подключений на «входящих
+   * нет, а почему — непонятно».
+   *
+   * Телефон к этому моменту ещё не подключён: дальше интерфейс
+   * показывает QR и ждёт, пока его отсканируют.
+   */
+  app.post<{ Body: { idInstance?: string; apiToken?: string; displayName?: string } }>(
+    '/settings/channels/gateway',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const creds: GatewayCreds = {
+        idInstance: String(req.body?.idInstance ?? '').trim(),
+        apiToken: String(req.body?.apiToken ?? '').trim(),
+      };
+      if (!gatewayCredsOk(creds)) {
+        return reply.code(400).send({ error: 'bad_credentials' });
+      }
+
+      // Проверяем ключ до записи: канал, который не отвечает, лучше не
+      // заводить вовсе, чем показать его активным и ждать входящих.
+      let state;
+      try {
+        state = await gatewayState(creds);
+      } catch (err) {
+        const detail = err instanceof GatewayError ? err.message : 'Шлюз не відповів';
+        return reply.code(400).send({ error: 'check_failed', detail });
+      }
+
+      const owner = await withSystem(pool, 'владелец канала шлюза', async (db) => {
+        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+          `SELECT channel_id, tenant_id FROM channel_routes
+            WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
+          [WHATSAPP_USER_CHANNEL, creds.idInstance],
+        );
+        return rows[0] ?? null;
+      });
+
+      if (owner && owner.tenant_id !== auth.tenantId) {
+        return reply.code(409).send({
+          error: 'channel_belongs_to_another_tenant',
+          detail: 'Цей інстанс уже підключений в іншому акаунті.',
+        });
+      }
+
+      const channelId = owner?.channel_id ?? randomUUID();
+      // Ключ вебхука свой у каждого канала: общий означал бы, что чужой
+      // канал того же поставщика может слать нам в чужую переписку.
+      const hookTok = randomBytes(24).toString('hex');
+
+      try {
+        await gatewaySetHook(creds, `${appUrl}/webhooks/gateway/${channelId}`, hookTok);
+      } catch (err) {
+        const detail = err instanceof GatewayError ? err.message : 'Не вдалося налаштувати вебхук';
+        return reply.code(400).send({ error: 'hook_failed', detail });
+      }
+
+      await withTenant(pool, auth.tenantId, async (db) => {
+        await db.query(
+          `INSERT INTO channels (id, tenant_id, type, display_name, external_id,
+                                 credentials_enc, meta, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+           ON CONFLICT (type, external_id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 credentials_enc = EXCLUDED.credentials_enc,
+                 meta = EXCLUDED.meta, status = 'active', last_error = NULL`,
+          [
+            channelId,
+            auth.tenantId,
+            WHATSAPP_USER_CHANNEL,
+            req.body?.displayName?.trim() || `WhatsApp ${creds.idInstance}`,
+            creds.idInstance,
+            encryptJson(masterKey, auth.tenantId, { ...creds, hookToken: hookTok }),
+            JSON.stringify({ provider: 'green', state }),
+          ],
+        );
+      });
+
+      app.log.info({ channelId, state }, 'Подключён WhatsApp через шлюз');
+      return reply.code(201).send({ id: channelId, state });
+    },
+  );
+
+  /*
+   * Состояние и QR.
+   *
+   * Одной ручкой, потому что спрашивают их всегда вместе: интерфейс
+   * опрашивает её, пока человек держит телефон над экраном, и ему нужен
+   * ответ «уже подключено» или «вот картинка».
+   */
+  app.get<{ Params: { id: string } }>('/settings/channels/:id/gateway', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ credentials_enc: Buffer | null }>(
+        `SELECT credentials_enc FROM channels WHERE id = $1 AND type = $2`,
+        [req.params.id, WHATSAPP_USER_CHANNEL],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row?.credentials_enc) return reply.code(404).send({ error: 'not_found' });
+
+    const creds = decryptJson<GatewayCreds>(masterKey, auth.tenantId, row.credentials_enc);
+
+    try {
+      const state = await gatewayState(creds);
+      if (state !== 'waiting_qr') return { state };
+      const qr = await gatewayQr(creds);
+      return { state, ...(qr.image ? { image: qr.image } : {}) };
+    } catch (err) {
+      const detail = err instanceof GatewayError ? err.message : 'Шлюз не відповів';
+      return reply.code(400).send({ error: 'gateway_failed', detail });
+    }
+  });
+
+  /*
+   * Отключение. Помимо нашей записи снимаем и вебхук у поставщика:
+   * иначе он продолжает стучаться в адрес отключённого канала, а мы
+   * продолжаем отвечать ему «принято» в пустоту.
+   */
+  app.delete<{ Params: { id: string } }>('/settings/channels/:id/gateway', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ credentials_enc: Buffer | null }>(
+        `SELECT credentials_enc FROM channels WHERE id = $1 AND type = $2`,
+        [req.params.id, WHATSAPP_USER_CHANNEL],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row?.credentials_enc) return reply.code(404).send({ error: 'not_found' });
+
+    try {
+      await gatewayDropHook(decryptJson<GatewayCreds>(masterKey, auth.tenantId, row.credentials_enc));
+    } catch {
+      // Поставщик не ответил — канал всё равно отключаем: держать его
+      // включённым из-за чужой недоступности незачем.
+    }
+
+    await withTenant(pool, auth.tenantId, async (db) => {
+      await db.query(`UPDATE channels SET status = 'disabled' WHERE id = $1`, [req.params.id]);
+    });
+    return { ok: true };
+  });
 
   // ── Подключение Telegram-бота из интерфейса ───────────────────────
   app.post<{ Body: { botToken?: string; displayName?: string; mode?: string } }>(

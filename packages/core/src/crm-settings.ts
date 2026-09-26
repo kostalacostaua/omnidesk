@@ -56,6 +56,9 @@ export const CRM_SOURCE: Record<string, string> = {
   instagram: 'Instagram Direct',
   messenger: 'Facebook Messenger',
   whatsapp: 'WhatsApp',
+  // В отчёте отдела продаж важен мессенджер, а не то, через какой
+  // шлюз он к нам попал: для клиента это один и тот же WhatsApp.
+  whatsapp_user: 'WhatsApp',
   viber_business: 'Viber',
   email: 'Пошта',
   messenger_comments: 'Facebook, коментарі',

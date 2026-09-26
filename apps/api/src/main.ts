@@ -55,6 +55,7 @@ import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
 import { registerSupport } from './support.js';
+import { registerGateway } from './gateway.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
 import { registerAdmin } from './admin.js';
@@ -736,6 +737,15 @@ registerSupport(app, {
 registerCustom(app, {
   pool,
   inboundQueue,
+  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+});
+
+/* Приёмник вебхуков шлюза WhatsApp: публичная дверь, вход по ключу
+   канала. Стоит рядом с остальными приёмниками, а не в настройках. */
+registerGateway(app, {
+  pool,
+  inboundQueue,
+  masterKey,
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 
