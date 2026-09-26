@@ -36,6 +36,19 @@ export interface GatewayCreds {
   idInstance: string;
   /** Ключ инстанса. */
   apiToken: string;
+  /**
+   * Адрес, по которому живёт этот инстанс. Поставщик возвращает его при
+   * создании и вправе посадить инстанс на другой хост — свой для
+   * каждого региона. Запомнить его дешевле, чем однажды получить
+   * «инстанс не найден» на половине клиентов.
+   */
+  apiUrl?: string;
+}
+
+/** Доступ партнёра: один на весь сервис, живёт в переменных окружения. */
+export interface PartnerCreds {
+  token: string;
+  apiUrl?: string;
 }
 
 /** Состояние подключения номера. */
@@ -93,7 +106,8 @@ async function green(
   doFetch?: FetchLike,
 ): Promise<unknown> {
   const fetchImpl = doFetch ?? (globalThis.fetch as unknown as FetchLike);
-  const url = `${GREEN_ROOT}/waInstance${creds.idInstance}/${method}/${creds.apiToken}`;
+  const root = String(creds.apiUrl || GREEN_ROOT).replace(/[/]+$/, '');
+  const url = `${root}/waInstance${creds.idInstance}/${method}/${creds.apiToken}`;
 
   let res;
   try {
@@ -122,6 +136,89 @@ async function green(
   } catch {
     return null;
   }
+}
+
+/**
+ * Создание инстанса от нашего имени.
+ *
+ * Это и есть разница между «подключить за минуту» и «сначала заведите
+ * себе аккаунт у поставщика». Раньше человек шёл регистрироваться,
+ * создавал инстанс, копировал два ключа и вставлял их к нам —
+ * половина на этом месте закрывала вкладку, и правильно делала.
+ *
+ * Теперь инстанс заводим мы на своём партнёрском счету, вебхук ставим
+ * сразу при создании, и клиенту остаётся одно действие — навести
+ * телефон на QR. Платим за инстанс тоже мы, это часть тарифа.
+ */
+export async function partnerCreate(
+  partner: PartnerCreds,
+  opts: { name?: string; hookUrl: string; hookToken: string; fetchImpl?: FetchLike },
+): Promise<GatewayCreds> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const root = String(partner.apiUrl || GREEN_ROOT).replace(/[/]+$/, '');
+
+  let res;
+  try {
+    res = await fetchImpl(`${root}/partner/createInstance/${partner.token}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...(opts.name ? { name: opts.name } : {}),
+        webhookUrl: opts.hookUrl,
+        webhookUrlToken: opts.hookToken,
+        incomingWebhook: 'yes',
+        outgoingWebhook: 'yes',
+        stateWebhook: 'yes',
+        markIncomingMessagesReaded: 'no',
+      }),
+    });
+  } catch {
+    throw new GatewayError('Шлюз не відповідає', 'network');
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    throw new GatewayError('Партнерський ключ шлюза не підійшов', 'bad_partner_key');
+  }
+  if (!res.ok) throw new GatewayError(`Шлюз відповів помилкою (${res.status})`, 'refused');
+
+  const raw = (await res.json()) as {
+    idInstance?: number | string;
+    apiTokenInstance?: string;
+    apiUrl?: string;
+  } | null;
+
+  if (!raw?.idInstance || !raw.apiTokenInstance) {
+    throw new GatewayError('Шлюз не повернув інстанс', 'no_instance');
+  }
+
+  return {
+    idInstance: String(raw.idInstance),
+    apiToken: String(raw.apiTokenInstance),
+    ...(raw.apiUrl ? { apiUrl: String(raw.apiUrl) } : {}),
+  };
+}
+
+/**
+ * Удаление инстанса, созданного нами.
+ *
+ * Отключённый канал продолжает стоить денег каждые сутки: поставщик
+ * считает по инстансам, а не по сообщениям. Забытый инстанс — это
+ * счёт, который растёт сам по себе.
+ */
+export async function partnerDelete(
+  partner: PartnerCreds,
+  idInstance: string,
+  opts: { fetchImpl?: FetchLike } = {},
+): Promise<void> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const root = String(partner.apiUrl || GREEN_ROOT).replace(/[/]+$/, '');
+
+  const res = await fetchImpl(`${root}/partner/deleteInstanceAccount/${partner.token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idInstance: Number(idInstance) }),
+  });
+  if (!res.ok) throw new GatewayError(`Шлюз не видалив інстанс (${res.status})`, 'refused');
 }
 
 /**

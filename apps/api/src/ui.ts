@@ -5382,19 +5382,25 @@ function tabChannels(){
       '<div class="tile"><div class="t1"><div class="chico whatsapp_user">' + chIcon('whatsapp_user') + '</div>' +
       L('<div><div class="ttl">WhatsApp за номером</div><div class="sub">Ваш звичайний номер, вхід по QR</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Для номера, на якому ви вже переписуєтесь роками і ') +
-      L('переносити який нікуди не будете. Листування зʼявляється тут, відповіді йдуть з того ж номера.</div>') +
+      L('переносити який нікуди не будете. Натисніть «Підключити», наведіть телефон на QR — і все.</div>') +
       /* Предупреждение стоит до полей, а не после подключения: это не
          мелкий шрифт под договором, а то, что человек должен знать
          прежде, чем отдаст сюда рабочий номер. */
       L('<div class="warnbox">Це не офіційний API. Сесію тримає не телефон, а сервер посередника, ') +
       L('і за це WhatsApp може заблокувати номер — назавжди. Для нового бізнесу краще ') +
       L('офіційний канал нижче.</div>') +
-      L('<div class="hint">Номер інстанса і ключ — у кабінеті шлюза (Green API). Вебхук ми ') +
-      L('налаштуємо самі.</div>') +
+      L('<div class="acts"><button id="gwGo">Підключити</button></div>') +
+      '<div id="gwBox"></div><div class="err" id="gwErr"></div>' +
+      /* Свой инстанс — редкий случай: у кого он есть, тот знает, что
+         ищет. Показывать два поля всем, чтобы их заполнил один из ста,
+         значит сделать сложным подключение для остальных девяноста
+         девяти. */
+      L('<div class="hint" style="margin-top:8px"><a href="#" id="gwOwn">У мене вже є інстанс Green API</a></div>') +
+      '<div id="gwManual" style="display:none">' +
       '<div class="row2"><input id="gwId" placeholder="idInstance" autocomplete="off">' +
       '<input id="gwTok" type="password" placeholder="apiTokenInstance" autocomplete="off"></div>' +
-      L('<div class="acts"><button id="gwGo">Підключити</button></div>') +
-      '<div id="gwBox"></div><div class="err" id="gwErr"></div></div>' +
+      L('<div class="acts"><button class="ghost mini" id="gwGo2">Підключити свій</button></div></div>') +
+      '</div>' +
 
       ['viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + chIcon(t) + '</div>' +
@@ -5478,22 +5484,34 @@ function tabChannels(){
 
     /* Подключение шлюза: ключи проверяет сервер, дальше человек держит
        телефон над QR, а мы спрашиваем состояние, пока он это делает. */
-    if (el('gwGo')) el('gwGo').onclick = function(){
+    /* Подключение: тело запроса пустое — инстанс заведёт сервер. Вторая
+       кнопка шлёт ключи того, у кого инстанс свой. */
+    var gwConnect = function(btn, body){
       el('gwErr').textContent = '';
-      busy(el('gwGo'), true);
-      api('/settings/channels/gateway', { method:'POST', body:{
-        idInstance: el('gwId').value.trim(), apiToken: el('gwTok').value.trim()
-      }})
+      busy(btn, true);
+      api('/settings/channels/gateway', { method:'POST', body: body || {} })
         .then(function(d){
-          busy(el('gwGo'), false);
+          busy(btn, false);
           if (d && d.state === 'authorized'){ toast(L('WhatsApp підключено')); tabChannels(); return }
           gwWatch(d && d.id);
         })
         .catch(function(e){
           var p = e.payload || {};
           el('gwErr').textContent = p.detail || L('Не вдалося підключити');
-          busy(el('gwGo'), false);
+          busy(btn, false);
         });
+    };
+
+    if (el('gwGo')) el('gwGo').onclick = function(){ gwConnect(el('gwGo')) };
+    if (el('gwGo2')) el('gwGo2').onclick = function(){
+      gwConnect(el('gwGo2'), {
+        idInstance: el('gwId').value.trim(), apiToken: el('gwTok').value.trim()
+      });
+    };
+    if (el('gwOwn')) el('gwOwn').onclick = function(e){
+      e.preventDefault();
+      el('gwManual').style.display = 'block';
+      el('gwOwn').parentNode.style.display = 'none';
     };
 
     if (el('vbGo')) el('vbGo').onclick = function(){

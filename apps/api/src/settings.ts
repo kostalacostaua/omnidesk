@@ -15,6 +15,8 @@ import {
   gatewayQr,
   gatewaySetHook,
   gatewayState,
+  partnerCreate,
+  partnerDelete,
   type GatewayCreds,
   ViberError,
   viberSenders,
@@ -110,6 +112,17 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
   // Адрес приложения нужен коду для вставки на чужой сайт: там ссылка
   // обязана быть абсолютной, относительная ведёт в никуда.
   const appUrl = deps.meta?.appUrl || deps.publicUrl || 'https://app.rozmovio.com';
+
+  /*
+   * Партнёрский доступ к шлюзу WhatsApp. Один на весь сервис: инстансы
+   * клиентов живут на нашем счету, поэтому клиент не заводит аккаунт у
+   * поставщика и вообще про него не знает. Нет ключа — остаётся ручной
+   * путь для тех, у кого инстанс свой.
+   */
+  const partner = {
+    token: process.env['GREEN_PARTNER_TOKEN'] ?? '',
+    apiUrl: process.env['GREEN_PARTNER_URL'] ?? '',
+  };
 
   const auth401 = { error: 'unauthorized' } as const;
 
@@ -2216,16 +2229,20 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
   );
 
   /*
-   * ── WhatsApp через шлюз ───────────────────────────────────────────
+   * ── WhatsApp за номером ───────────────────────────────────────────
    *
-   * Подключение в два шага: человек вводит номер инстанса и ключ из
-   * кабинета поставщика, мы проверяем их и сразу настраиваем вебхук на
-   * себя. Адрес вебхука зависит от номера канала, и оставить эту
-   * настройку человеку значит обречь половину подключений на «входящих
-   * нет, а почему — непонятно».
+   * Одна кнопка. Инстанс у поставщика заводим мы, на своём партнёрском
+   * счету, вебхук ставим прямо при создании — клиенту остаётся навести
+   * телефон на QR.
    *
-   * Телефон к этому моменту ещё не подключён: дальше интерфейс
-   * показывает QR и ждёт, пока его отсканируют.
+   * Так не было. Сначала человек шёл регистрироваться у поставщика,
+   * создавал инстанс, копировал оттуда два ключа и вставлял их к нам.
+   * Половина закрывала вкладку на первом же шаге, и правильно делала:
+   * это наша работа, а не его.
+   *
+   * Второй путь остался для тех, у кого инстанс уже есть: они вводят
+   * ключи руками, и тогда мы ничего не создаём и не удаляем — чужое
+   * имущество.
    */
   app.post<{ Body: { idInstance?: string; apiToken?: string; displayName?: string } }>(
     '/settings/channels/gateway',
@@ -2233,50 +2250,78 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       const auth = requireAuth(req);
       if (!auth) return reply.code(401).send(auth401);
 
-      const creds: GatewayCreds = {
-        idInstance: String(req.body?.idInstance ?? '').trim(),
-        apiToken: String(req.body?.apiToken ?? '').trim(),
-      };
-      if (!gatewayCredsOk(creds)) {
-        return reply.code(400).send({ error: 'bad_credentials' });
+      const manual = String(req.body?.idInstance ?? '').trim() !== '';
+      // Ключ вебхука свой у каждого канала: общий означал бы, что чужой
+      // канал того же поставщика может слать нам в чужую переписку.
+      const hookTok = randomBytes(24).toString('hex');
+      const hookUrl = (id: string) => `${appUrl}/webhooks/gateway/${id}`;
+
+      let creds: GatewayCreds;
+      let channelId: string;
+
+      if (manual) {
+        creds = {
+          idInstance: String(req.body?.idInstance ?? '').trim(),
+          apiToken: String(req.body?.apiToken ?? '').trim(),
+        };
+        if (!gatewayCredsOk(creds)) return reply.code(400).send({ error: 'bad_credentials' });
+
+        /*
+         * Номер канала выясняем до настройки вебхука. Иначе при
+         * повторном подключении того же инстанса вебхук уедет на
+         * новый номер, а запись останется на старом — и входящих не
+         * будет, причём молча.
+         */
+        const owner = await withSystem(pool, 'владелец канала шлюза', async (db) => {
+          const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
+            `SELECT channel_id, tenant_id FROM channel_routes
+              WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
+            [WHATSAPP_USER_CHANNEL, creds.idInstance],
+          );
+          return rows[0] ?? null;
+        });
+        if (owner && owner.tenant_id !== auth.tenantId) {
+          return reply.code(409).send({
+            error: 'channel_belongs_to_another_tenant',
+            detail: 'Цей інстанс уже підключений в іншому акаунті.',
+          });
+        }
+        channelId = owner?.channel_id ?? randomUUID();
+
+        try {
+          await gatewaySetHook(creds, hookUrl(channelId), hookTok);
+        } catch (err) {
+          const detail = err instanceof GatewayError ? err.message : 'Не вдалося налаштувати вебхук';
+          return reply.code(400).send({ error: 'hook_failed', detail });
+        }
+      } else {
+        if (!partner.token) {
+          return reply.code(503).send({
+            error: 'partner_not_configured',
+            detail: 'Підключення в один клік ще не увімкнене на сервері.',
+          });
+        }
+        channelId = randomUUID();
+        try {
+          creds = await partnerCreate(partner, {
+            name: `rozmovio ${auth.tenantId.slice(0, 8)}`,
+            hookUrl: hookUrl(channelId),
+            hookToken: hookTok,
+          });
+        } catch (err) {
+          const detail = err instanceof GatewayError ? err.message : 'Шлюз не відповів';
+          return reply.code(400).send({ error: 'create_failed', detail });
+        }
       }
 
-      // Проверяем ключ до записи: канал, который не отвечает, лучше не
-      // заводить вовсе, чем показать его активным и ждать входящих.
+      // У свежесозданного инстанса состояние всегда «ждём QR» — это
+      // нормальный ответ, а не ошибка.
       let state;
       try {
         state = await gatewayState(creds);
       } catch (err) {
         const detail = err instanceof GatewayError ? err.message : 'Шлюз не відповів';
         return reply.code(400).send({ error: 'check_failed', detail });
-      }
-
-      const owner = await withSystem(pool, 'владелец канала шлюза', async (db) => {
-        const { rows } = await db.query<{ channel_id: string; tenant_id: string }>(
-          `SELECT channel_id, tenant_id FROM channel_routes
-            WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
-          [WHATSAPP_USER_CHANNEL, creds.idInstance],
-        );
-        return rows[0] ?? null;
-      });
-
-      if (owner && owner.tenant_id !== auth.tenantId) {
-        return reply.code(409).send({
-          error: 'channel_belongs_to_another_tenant',
-          detail: 'Цей інстанс уже підключений в іншому акаунті.',
-        });
-      }
-
-      const channelId = owner?.channel_id ?? randomUUID();
-      // Ключ вебхука свой у каждого канала: общий означал бы, что чужой
-      // канал того же поставщика может слать нам в чужую переписку.
-      const hookTok = randomBytes(24).toString('hex');
-
-      try {
-        await gatewaySetHook(creds, `${appUrl}/webhooks/gateway/${channelId}`, hookTok);
-      } catch (err) {
-        const detail = err instanceof GatewayError ? err.message : 'Не вдалося налаштувати вебхук';
-        return reply.code(400).send({ error: 'hook_failed', detail });
       }
 
       await withTenant(pool, auth.tenantId, async (db) => {
@@ -2292,15 +2337,17 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
             channelId,
             auth.tenantId,
             WHATSAPP_USER_CHANNEL,
-            req.body?.displayName?.trim() || `WhatsApp ${creds.idInstance}`,
+            req.body?.displayName?.trim() || 'WhatsApp',
             creds.idInstance,
             encryptJson(masterKey, auth.tenantId, { ...creds, hookToken: hookTok }),
-            JSON.stringify({ provider: 'green', state }),
+            // own говорит, удалять ли инстанс при отключении: свой —
+            // удаляем, чужой не трогаем.
+            JSON.stringify({ provider: 'green', state, own: !manual }),
           ],
         );
       });
 
-      app.log.info({ channelId, state }, 'Подключён WhatsApp через шлюз');
+      app.log.info({ channelId, state, own: !manual }, 'Подключён WhatsApp за номером');
       return reply.code(201).send({ id: channelId, state });
     },
   );
@@ -2348,16 +2395,27 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     if (!auth) return reply.code(401).send(auth401);
 
     const row = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query<{ credentials_enc: Buffer | null }>(
-        `SELECT credentials_enc FROM channels WHERE id = $1 AND type = $2`,
+      const { rows } = await db.query<{ credentials_enc: Buffer | null; meta: unknown }>(
+        `SELECT credentials_enc, meta FROM channels WHERE id = $1 AND type = $2`,
         [req.params.id, WHATSAPP_USER_CHANNEL],
       );
       return rows[0] ?? null;
     });
     if (!row?.credentials_enc) return reply.code(404).send({ error: 'not_found' });
 
+    const creds = decryptJson<GatewayCreds>(masterKey, auth.tenantId, row.credentials_enc);
+    const own = Boolean((row.meta as { own?: boolean } | null)?.own);
+
     try {
-      await gatewayDropHook(decryptJson<GatewayCreds>(masterKey, auth.tenantId, row.credentials_enc));
+      if (own && partner.token) {
+        /* Свой инстанс удаляем у поставщика. Отключённый канал
+           продолжает стоить денег каждые сутки: считают по инстансам, а
+           не по сообщениям, и забытый инстанс — это счёт, который
+           растёт сам по себе. */
+        await partnerDelete(partner, creds.idInstance);
+      } else {
+        await gatewayDropHook(creds);
+      }
     } catch {
       // Поставщик не ответил — канал всё равно отключаем: держать его
       // включённым из-за чужой недоступности незачем.
