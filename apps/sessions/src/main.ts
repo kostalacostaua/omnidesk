@@ -7,6 +7,7 @@ import sessions from 'telegram/sessions/index.js';
 import events from 'telegram/events/index.js';
 import uploads from 'telegram/client/uploads.js';
 import type { NewMessageEvent } from 'telegram/events/NewMessage.js';
+import { startWa } from './wa.js';
 import {
   QUEUE_INBOUND,
   QUEUE_MTPROTO_LOGIN,
@@ -762,6 +763,14 @@ const loginWorker = new Worker<MtprotoLoginJob>(
   { connection, concurrency: 5, lockDuration: LOGIN_TIMEOUT_MS + 60_000 },
 );
 
+/*
+ * Номерной WhatsApp живёт в этой же службе: это тот же род работы —
+ * держать живое соединение от имени аккаунта. Отдельный процесс
+ * означал бы второй Dockerfile, вторую выкладку и второй способ
+ * однажды запустить две реплики там, где можно только одну.
+ */
+const wa = startWa({ pool, connection, redis: connection, masterKey, storage, inboundQueue, log });
+
 let timer: NodeJS.Timeout | null = null;
 async function loop(): Promise<void> {
   try {
@@ -777,7 +786,7 @@ log('info', 'Сервис сессий запущен');
 async function shutdown(): Promise<void> {
   log('info', 'Остановка сервиса сессий');
   if (timer) clearTimeout(timer);
-  await Promise.allSettled([sendWorker.close(), loginWorker.close()]);
+  await Promise.allSettled([sendWorker.close(), loginWorker.close(), wa.stop()]);
   for (const id of [...live.keys()]) await stopSession(id);
   await pool.end().catch(() => undefined);
   await connection.quit().catch(() => undefined);

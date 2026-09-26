@@ -8,6 +8,7 @@ import {
   QUEUE_MEDIA,
   QUEUE_CRM_SYNC,
   QUEUE_MTPROTO_LOGIN,
+  QUEUE_WA_LOGIN,
   assertRlsIntegrity,
   canSendFreeform,
   isCommentChannel,
@@ -36,6 +37,7 @@ import {
   type MediaJob,
   type CrmSyncJob,
   type MtprotoLoginJob,
+  type WaLoginJob,
 } from '@omnidesk/core';
 import { INBOX_HTML, UI_BUILD } from './ui.js';
 import { registerSettings } from './settings.js';
@@ -55,7 +57,6 @@ import { registerAi } from './ai.js';
 import { registerNotify } from './notify.js';
 import { registerWebchat } from './webchat.js';
 import { registerSupport } from './support.js';
-import { registerGateway } from './gateway.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
 import { registerAdmin } from './admin.js';
@@ -119,6 +120,12 @@ const crmQueue = new Queue<CrmSyncJob>(QUEUE_CRM_SYNC, {
 });
 
 const mtprotoLoginQueue = new Queue<MtprotoLoginJob>(QUEUE_MTPROTO_LOGIN, {
+  connection: redis,
+  defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
+});
+/* Вход в номерной WhatsApp. Одна попытка, как и у Telegram: повторять
+   вход, на который никто не смотрит, бессмысленно — QR уже протух. */
+const waLoginQueue = new Queue<WaLoginJob>(QUEUE_WA_LOGIN, {
   connection: redis,
   defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
 });
@@ -670,6 +677,7 @@ registerSettings(app, {
   ...(process.env['RESEND_API_ROOT'] ? { resendRoot: process.env['RESEND_API_ROOT'] } : {}),
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
   mtproto: { redis, loginQueue: mtprotoLoginQueue },
+  wa: { redis, loginQueue: waLoginQueue },
   ...(process.env['META_APP_ID'] && process.env['META_APP_SECRET']
     ? {
         meta: {
@@ -740,14 +748,6 @@ registerCustom(app, {
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
 });
 
-/* Приёмник вебхуков шлюза WhatsApp: публичная дверь, вход по ключу
-   канала. Стоит рядом с остальными приёмниками, а не в настройках. */
-registerGateway(app, {
-  pool,
-  inboundQueue,
-  masterKey,
-  log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
-});
 
 registerStatuses(app, {
   pool,

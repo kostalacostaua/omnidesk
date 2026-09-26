@@ -68,10 +68,8 @@ import {
   viberFetch,
   viberSend,
   WHATSAPP_USER_CHANNEL,
-  GatewayError,
-  gatewaySend,
+  QUEUE_WA_OUT,
   normalizeGateway,
-  type GatewayCreds,
   type ViberCreds,
   AiError,
   AI_HISTORY_SQL,
@@ -405,6 +403,7 @@ const mediaQueue = new Queue<MediaJob>(QUEUE_MEDIA, { connection, defaultJobOpti
 
 /** Исходящие номерного Telegram — их отправляет сервис sessions. */
 const mtprotoOutQueue = new Queue<OutboundJob>(QUEUE_MTPROTO_OUT, { connection, defaultJobOptions });
+const waOutQueue = new Queue<OutboundJob>(QUEUE_WA_OUT, { connection, defaultJobOptions });
 
 /** Очередь исходящих: сюда бот кладёт свои автоответы. */
 const outboundQueue = new Queue<OutboundJob>(QUEUE_OUTBOUND, { connection, defaultJobOptions });
@@ -2449,7 +2448,13 @@ async function handleOutbound(job: OutboundJob, worker: Worker): Promise<void> {
 
   if (row.channel_type === VIBER_CHANNEL) return sendViber(job, row, row.peer_id);
 
-  if (row.channel_type === WHATSAPP_USER_CHANNEL) return sendGateway(job, row, row.peer_id);
+  if (row.channel_type === WHATSAPP_USER_CHANNEL) {
+    // Отправить может только процесс, у которого открыта сессия этого
+    // номера. Передаём задачу ему; jobId тот же, повторная передача не
+    // приведёт ко второй отправке.
+    await waOutQueue.add('send', job, { jobId: jobKey('wa', job.messageId) });
+    return;
+  }
 
   if (row.channel_type === 'whatsapp') return sendWhatsApp(job, row, row.peer_id);
 
@@ -2691,50 +2696,6 @@ const META_ATTACHMENT: Record<string, string> = {
  * ссылкой на публичный файл, а у нас хранилище закрытое; поэтому
  * вложения в Instagram пока честно отклоняем.
  */
-/**
- * Отправка через шлюз WhatsApp.
- *
- * Окна здесь нет: на той стороне обычный WhatsApp Web, и он не знает
- * про сутки — это правило официального API. Поэтому единственная
- * проверка — есть ли что отправлять.
- *
- * Вложения пока не уходят. Поставщик забирает файл по ссылке, а ссылка
- * на наше хранилище закрытая; отдать открытую значило бы выложить файл
- * клиента в интернет. Текст уходит, на вложение оператор получает
- * честный отказ, а не тишину.
- */
-async function sendGateway(job: OutboundJob, row: OutboundRow, peerId: string): Promise<void> {
-  const creds = decryptJson<GatewayCreds>(masterKey, job.tenantId, row.credentials_enc);
-
-  const attachment = (row.content?.attachments ?? []).find((a) => a.storageKey);
-  if (attachment && !row.text) {
-    await markFailed(job, { reason: 'attachments_not_supported', channelType: WHATSAPP_USER_CHANNEL });
-    throw new UnrecoverableError('Вложения через шлюз пока не отправляются');
-  }
-
-  try {
-    const externalId = await gatewaySend(creds, peerId, {
-      ...(row.text ? { text: row.text } : {}),
-    });
-
-    await withTenant(pool, job.tenantId, async (db) => {
-      await db.query(
-        `UPDATE messages SET status = 'sent', external_id = $2, sent_at = now() WHERE id = $1`,
-        [job.messageId, externalId],
-      );
-    });
-    log('info', 'Отправлено через шлюз', { messageId: job.messageId, externalId });
-  } catch (err) {
-    const reason = err instanceof GatewayError ? err.code : 'network';
-    const detail = err instanceof Error ? err.message : String(err);
-    await markFailed(job, { reason, detail });
-    // Ключ не подошёл или номер отвалился — повтор не поможет.
-    if (reason === 'bad_key' || reason === 'empty' || reason === 'no_recipient') {
-      throw new UnrecoverableError(detail);
-    }
-    throw err;
-  }
-}
 
 /**
  * Отправка в Viber.

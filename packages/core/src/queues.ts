@@ -17,6 +17,14 @@ export const QUEUE_MTPROTO_OUT = 'mtproto-out';
 /** Вход в номерной Telegram по QR-коду. */
 export const QUEUE_MTPROTO_LOGIN = 'mtproto-login';
 
+/*
+ * Номерной WhatsApp. Устроен так же, как номерной Telegram: живое
+ * соединение от имени аккаунта держит служба сессий, а не вебхук —
+ * поэтому и очереди те же две, вход и отправка.
+ */
+export const QUEUE_WA_LOGIN = 'wa-login';
+export const QUEUE_WA_OUT = 'wa-out';
+
 /**
  * Продолжение сценария после паузы.
  *
@@ -41,6 +49,8 @@ export const QUEUE_NOTIFY = 'notify';
 export const mtprotoLoginKey = (loginId: string): string => `mtp:login:${loginId}`;
 /** Ключ Redis для пароля двухэтапной проверки. Живёт секунды и удаляется после чтения. */
 export const mtprotoPasswordKey = (loginId: string): string => `mtp:pw:${loginId}`;
+/** Ключ Redis для входа в номерной WhatsApp. Живёт минуты, как и сам QR. */
+export const waLoginKey = (loginId: string): string => `wa:login:${loginId}`;
 
 /**
  * Связка контакта с CRM.
@@ -102,6 +112,26 @@ export interface MtprotoLoginState {
  * объект MTProto может только тот, у кого есть сессия, — это sessions.
  * Вложения тоже уже в хранилище: скачать их можно только через ту же сессию.
  */
+export interface WaLoginJob {
+  loginId: string;
+  tenantId: string;
+  displayName?: string;
+}
+
+export interface WaLoginState {
+  tenantId: string;
+  /*
+   * Пароля здесь нет, в отличие от Telegram: WhatsApp подтверждает
+   * вход одним сканированием, второго шага у него не бывает.
+   */
+  state: 'starting' | 'qr' | 'done' | 'error';
+  /** Строка, которую рисуем как QR. Живёт секунд двадцать. */
+  qrUrl?: string;
+  qrExpires?: number;
+  channelId?: string;
+  error?: string;
+}
+
 export interface MtprotoInboundPayload {
   message: Omit<UnifiedMessage, 'sentAt'> & { sentAt: string };
   /** Ключ аватара в хранилище, если удалось скачать. */

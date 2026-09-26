@@ -9,10 +9,11 @@
   },
   "dependencies": {
     "@omnidesk/core": "*",
+    "@whiskeysockets/baileys": "^6.7.24",
+    "big-integer": "^1.6.52",
     "bullmq": "^5.34.4",
     "ioredis": "^5.4.2",
     "pg": "^8.13.1",
-    "telegram": "^2.26.22",
-    "big-integer": "^1.6.52"
+    "telegram": "^2.26.22"
   }
 }

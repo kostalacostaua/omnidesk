@@ -5158,40 +5158,48 @@ var ICON_OF = { telegram_bot:'telegram', telegram_user:'telegram', telegram_busi
 /*
  * Ожидание сканирования QR.
  *
- * Картинка у шлюза живёт секунд двадцать, потом он выдаёт новую, —
- * поэтому спрашиваем раз в пять секунд и перерисовываем. Опрос
- * прекращается сам: номер подключился, страницу сменили или прошло три
- * минуты. Бесконечный опрос в забытой вкладке — это нагрузка на чужой
- * сервис без единого зрителя.
+ * Код живёт секунд двадцать, потом служба выдаёт новый, — поэтому
+ * спрашиваем состояние раз в две секунды и перерисовываем. Опрос
+ * прекращается сам: номер подключился, ушли со страницы или вышло
+ * время. Бесконечный опрос в забытой вкладке — нагрузка без единого
+ * зрителя.
  */
 var GW_T = null;
 
 function gwWatch(id){
   if (!id || !el('gwBox')) return;
-  var until = Date.now() + 180000;
 
   var step = function(){
     if (GW_T) clearTimeout(GW_T);
     if (!el('gwBox')) return;
-    api('/settings/channels/' + id + '/gateway').then(function(d){
+    api('/settings/channels/whatsapp-user/login/' + id).then(function(st){
       var box = el('gwBox');
       if (!box) return;
-      if (d.state === 'authorized'){ toast(L('WhatsApp підключено')); tabChannels(); return }
-      if (d.state === 'blocked'){
-        if (el('gwErr')) el('gwErr').textContent = L('Шлюз заблокував цей номер');
+
+      if (st.state === 'done'){
+        busy(el('gwGo'), false);
+        toast(L('WhatsApp підключено'));
+        tabChannels();
         return;
       }
-      box.innerHTML = d.image
-        ? L('<div class="qrwrap"><div class="qr"><img alt="QR" style="width:100%;display:block" src="') +
-          esc(d.image) + '"></div><ol class="steps">' +
+      if (st.state === 'error'){
+        busy(el('gwGo'), false);
+        box.innerHTML = '';
+        el('gwErr').textContent = st.error || L('Не вдалося підключити');
+        return;
+      }
+
+      box.innerHTML = st.qrSvg
+        ? '<div class="qrwrap"><div class="qr">' + st.qrSvg + '</div><ol class="steps">' +
           L('<li>Відкрийте WhatsApp на телефоні</li>') +
           L('<li><b>Налаштування → Підключені пристрої → Підключити пристрій</b></li>') +
-          L('<li>Наведіть камеру на цей код</li></ol></div>')
-        : L('<div class="hint">Шлюз готує код...</div>');
-      if (Date.now() < until) GW_T = setTimeout(step, 5000);
-      else box.innerHTML = L('<div class="hint">Час вийшов. Натисніть «Підключити» ще раз.</div>');
+          L('<li>Наведіть камеру на цей код</li></ol></div>') +
+          L('<div class="hint">Код оновлюється кожні кілька секунд — це нормально.</div>')
+        : L('<div class="qrwrap"><div class="empty">Готую QR-код...</div></div>');
+
+      GW_T = setTimeout(step, 2000);
     }).catch(function(){
-      if (Date.now() < until) GW_T = setTimeout(step, 8000);
+      GW_T = setTimeout(step, 4000);
     });
   };
   step();
@@ -5382,25 +5390,16 @@ function tabChannels(){
       '<div class="tile"><div class="t1"><div class="chico whatsapp_user">' + chIcon('whatsapp_user') + '</div>' +
       L('<div><div class="ttl">WhatsApp за номером</div><div class="sub">Ваш звичайний номер, вхід по QR</div></div></div>') +
       L('<div class="sub" style="white-space:normal">Для номера, на якому ви вже переписуєтесь роками і ') +
-      L('переносити який нікуди не будете. Натисніть «Підключити», наведіть телефон на QR — і все.</div>') +
+      L('переносити який нікуди не будете. Наведіть телефон на QR — і все.</div>') +
       /* Предупреждение стоит до полей, а не после подключения: это не
          мелкий шрифт под договором, а то, что человек должен знать
          прежде, чем отдаст сюда рабочий номер. */
-      L('<div class="warnbox">Це не офіційний API. Сесію тримає не телефон, а сервер посередника, ') +
+      L('<div class="warnbox">Це не офіційний API. Сесію тримає не телефон, а наш сервер, ') +
       L('і за це WhatsApp може заблокувати номер — назавжди. Для нового бізнесу краще ') +
       L('офіційний канал нижче.</div>') +
-      L('<div class="acts"><button id="gwGo">Підключити</button></div>') +
-      '<div id="gwBox"></div><div class="err" id="gwErr"></div>' +
-      /* Свой инстанс — редкий случай: у кого он есть, тот знает, что
-         ищет. Показывать два поля всем, чтобы их заполнил один из ста,
-         значит сделать сложным подключение для остальных девяноста
-         девяти. */
-      L('<div class="hint" style="margin-top:8px"><a href="#" id="gwOwn">У мене вже є інстанс Green API</a></div>') +
-      '<div id="gwManual" style="display:none">' +
-      '<div class="row2"><input id="gwId" placeholder="idInstance" autocomplete="off">' +
-      '<input id="gwTok" type="password" placeholder="apiTokenInstance" autocomplete="off"></div>' +
-      L('<div class="acts"><button class="ghost mini" id="gwGo2">Підключити свій</button></div></div>') +
-      '</div>' +
+      L('<div class="row2"><input id="gwName" placeholder="Назва, наприклад: Продажі" autocomplete="off">') +
+      L('<button id="gwGo">Показати QR-код</button></div>') +
+      '<div id="gwBox"></div><div class="err" id="gwErr"></div></div>' +
 
       ['viber_user'].map(function(t){
         return '<div class="tile"><div class="t1"><div class="chico soon">' + chIcon(t) + '</div>' +
@@ -5484,34 +5483,20 @@ function tabChannels(){
 
     /* Подключение шлюза: ключи проверяет сервер, дальше человек держит
        телефон над QR, а мы спрашиваем состояние, пока он это делает. */
-    /* Подключение: тело запроса пустое — инстанс заведёт сервер. Вторая
-       кнопка шлёт ключи того, у кого инстанс свой. */
-    var gwConnect = function(btn, body){
+    if (el('gwGo')) el('gwGo').onclick = function(){
       el('gwErr').textContent = '';
-      busy(btn, true);
-      api('/settings/channels/gateway', { method:'POST', body: body || {} })
-        .then(function(d){
-          busy(btn, false);
-          if (d && d.state === 'authorized'){ toast(L('WhatsApp підключено')); tabChannels(); return }
-          gwWatch(d && d.id);
-        })
+      busy(el('gwGo'), true);
+      api('/settings/channels/whatsapp-user/start', { method:'POST', body:{
+        displayName: el('gwName') ? el('gwName').value.trim() : ''
+      }})
+        .then(function(d){ gwWatch(d && d.loginId) })
         .catch(function(e){
-          var p = e.payload || {};
-          el('gwErr').textContent = p.detail || L('Не вдалося підключити');
-          busy(btn, false);
+          busy(el('gwGo'), false);
+          var p = (e && e.payload) || {};
+          el('gwErr').textContent = p.error === 'wa_unavailable'
+            ? L('Номерний WhatsApp ще не увімкнений на сервері.')
+            : L('Не вдалося почати вхід');
         });
-    };
-
-    if (el('gwGo')) el('gwGo').onclick = function(){ gwConnect(el('gwGo')) };
-    if (el('gwGo2')) el('gwGo2').onclick = function(){
-      gwConnect(el('gwGo2'), {
-        idInstance: el('gwId').value.trim(), apiToken: el('gwTok').value.trim()
-      });
-    };
-    if (el('gwOwn')) el('gwOwn').onclick = function(e){
-      e.preventDefault();
-      el('gwManual').style.display = 'block';
-      el('gwOwn').parentNode.style.display = 'none';
     };
 
     if (el('vbGo')) el('vbGo').onclick = function(){
