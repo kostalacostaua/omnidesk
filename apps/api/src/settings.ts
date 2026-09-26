@@ -17,6 +17,7 @@ import {
   decryptJson,
   graphGet,
   mailLang,
+  tenantBlock,
   parseTemplates,
   folderNames,
   groupByFolder,
@@ -131,7 +132,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     const tenant = await withSystem(pool, 'профиль организации', async (db) => {
       const { rows } = await db.query(
         `SELECT id, slug, name, plan, seats_limit, region, created_at, bot_pause_minutes,
-                work_hours, paid_until, kind,
+                work_hours, paid_until, kind, status,
                 -- Реквизиты: без них форма в профиле открывалась пустой,
                 -- хотя в базе они лежали, — человек вписывал их второй
                 -- раз и решал, что сохранение не работает.
@@ -143,6 +144,27 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return rows[0] ?? null;
     });
 
+    /*
+     * Закрыт ли кабинет.
+     *
+     * Отдаём здесь, потому что /me отвечает всегда — даже когда всё
+     * остальное закрыто. Без этого интерфейс узнавал о закрытии только
+     * из первого отказа на рабочей ручке, а до него успевал показать
+     * пустой кабинет: человек видел «ничего нет» вместо «оплатите».
+     */
+    const today = new Date().toISOString().slice(0, 10);
+    const access = {
+      blocked: tenantBlock(
+        {
+          kind: (tenant as { kind?: string } | null)?.kind,
+          status: (tenant as { status?: string } | null)?.status,
+          paidUntil: (tenant as { paid_until?: string } | null)?.paid_until,
+        },
+        today,
+      ),
+      paidUntil: (tenant as { paid_until?: string } | null)?.paid_until ?? null,
+    };
+
     // Отметка последнего визита — по ней потом видно, кто реально работает.
     await withTenant(pool, auth.tenantId, async (db) => {
       await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [auth.userId]);
@@ -152,7 +174,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       ? await deps.platform(req)
       : { owner: false, impersonatedBy: null };
 
-    return { tenant, ...data, platform };
+    return { tenant, access, ...data, platform };
   });
 
   /**

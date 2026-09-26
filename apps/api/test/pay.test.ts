@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { payPage, payTxn } from '../src/pay.js';
+import { payHost, payPage, payTxn } from '../src/pay.js';
 
 /*
  * Страница оплаты на домене-витрине.
@@ -61,5 +61,24 @@ describe('страница оплаты', () => {
   it('без токена честно говорит, что платить пока нечем', () => {
     const off = payPage({ ...DEPS, clientToken: '' });
     expect(off).toContain('Оплата поки недоступна');
+  });
+});
+
+/*
+ * Домен оплаты.
+ *
+ * Логи показали ровно это: оплата заводилась, ссылка вела на короткий
+ * домен, а запроса к /pay не приходило вовсе — переадресация
+ * регистратора привела человека на главную витрины и выбросила путь.
+ */
+describe('домен, с которого открываем оплату', () => {
+  it('из витрин выбирает www, а не короткий домен', () => {
+    expect(payHost(['rozmovio.com', 'www.rozmovio.com'])).toBe('www.rozmovio.com');
+    expect(payHost(['www.rozmovio.com', 'rozmovio.com'])).toBe('www.rozmovio.com');
+  });
+
+  it('без www берёт то, что есть', () => {
+    expect(payHost(['rozmovio.com'])).toBe('rozmovio.com');
+    expect(payHost([])).toBe('');
   });
 });

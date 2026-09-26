@@ -44,7 +44,7 @@ import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
 import { registerBilling } from './billing.js';
-import { registerPay } from './pay.js';
+import { payHost, registerPay } from './pay.js';
 import { mailRenewed } from './mail-notice.js';
 
 import { registerLanding, landingPage } from './landing.js';
@@ -797,8 +797,8 @@ const SITE_HOSTS = (process.env['SITE_HOSTS'] ?? 'rozmovio.com,www.rozmovio.com'
 const PAY_URL =
   process.env['PAY_URL'] !== undefined
     ? process.env['PAY_URL'].replace(/[/]+$/, '')
-    : SITE_HOSTS.length
-      ? `https://${SITE_HOSTS[0]}/pay`
+    : payHost(SITE_HOSTS)
+      ? `https://${payHost(SITE_HOSTS)}/pay`
       : '';
 
 /**

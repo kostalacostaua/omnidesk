@@ -340,6 +340,21 @@ describe('места сверх тарифа', () => {
       expect(seatDeal(4.5, 0)).toEqual({ price: 4.5, individual: true });
     });
 
+    /*
+     * Нижняя граница — часть тарифа, а не совет.
+     *
+     * Без неё три человека на корпоративном давали восемнадцать
+     * долларов — дешевле кабинетного, который идёт с базой: самый
+     * дорогой тариф оказывался самым дешёвым входом.
+     */
+    it('корпоративный тариф не продаётся меньше пятнадцати лицензий', async () => {
+      const { seatFloor, PER_SEAT_MIN } = await import('../src/billing-report.js');
+      expect(PER_SEAT_MIN).toBe(15);
+      expect(seatFloor('custom')).toBe(15);
+      expect(seatFloor('pro')).toBe(1);
+      expect(seatFloor(null)).toBe(1);
+    });
+
     it('валюта сверки та же, в которой тариф заведён в Paddle', async () => {
       const { paddleCurrency } = await import('../src/paddle.js');
       expect(paddleCurrency({ UAH: 250, USD: 6 })).toBe('USD');

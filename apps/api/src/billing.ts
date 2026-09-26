@@ -31,6 +31,7 @@ import {
   moneyWords,
   paddleCurrency,
   seatDeal,
+  seatFloor,
   tenantMoney,
   yearPrice,
   PADDLE_PERIODS,
@@ -126,10 +127,16 @@ function sellPlan(plan: string): string {
   return SELLABLE.includes(plan) ? plan : DEFAULT_PLAN;
 }
 
-/** Число лицензий: целое, от одной до тысячи. */
-function seatsOf(value: unknown, fallback: number): number {
+/**
+ * Число лицензий: целое, от нижней границы тарифа до тысячи.
+ *
+ * Нижняя граница приходит снаружи, а не вписана здесь: у кабинетного
+ * тарифа это одна лицензия, у корпоративного — пятнадцать, и решает
+ * это тариф, а не проверка ввода.
+ */
+function seatsOf(value: unknown, fallback: number, min = 1): number {
   const n = Math.round(Number(value));
-  if (!Number.isFinite(n) || n < 1) return Math.max(1, fallback);
+  if (!Number.isFinite(n) || n < min) return Math.max(min, fallback);
   return Math.min(1000, n);
 }
 
@@ -331,7 +338,10 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
           plan,
           perSeat: per,
           individual,
-          seats,
+          seats: Math.max(seats, seatFloor(plan)),
+          // Нижняя граница едет с тарифом, а не догадывается в браузере:
+          // поменяется условие сделки — поменяется в одном месте.
+          seatsMin: seatFloor(plan),
           month: { price: month, priceId: individual ? null : paddlePriceId(prices, plan, 'month') },
           year: { price: year, priceId: individual ? null : paddlePriceId(prices, plan, 'year') },
         };
@@ -381,7 +391,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     // умножит цену на количество, и сумма в окне оплаты совпадёт с той,
     // что он видел на странице.
     const quantity = isPerSeatPlan(plan)
-      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1))
+      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1), seatFloor(plan))
       : 1;
 
     const made = await paddleFetch(deps, req.log, '/transactions', {
@@ -950,7 +960,7 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
     const period: PaddlePeriod = isPaddlePeriod(req.body?.period) ? req.body.period : 'year';
     const plan = sellPlan(String(req.body?.plan ?? ''));
     const seats = isPerSeatPlan(plan)
-      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1))
+      ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1), seatFloor(plan))
       : Math.max(1, Number(me.seats_limit ?? 1));
     const p = await platform(pool);
     const planPrices = p.plan_prices ?? {};

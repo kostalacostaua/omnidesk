@@ -4443,6 +4443,18 @@ function billSeatMath(p, seats){
   return L('за користувача ') + each + ' ' + one + ' × ' + seats + L(' користувачів');
 }
 
+/* Число лицензий к отправке: не ниже границы тарифа. Из поля уйти
+   можно и нажатием на кнопку, и тогда поправка по blur опаздывает. */
+function billSeats(plan){
+  return Math.max(billMin(plan), Number(BILL_SEATS) || 1);
+}
+
+/* Сколько лицензий тариф не продаётся меньше — берём у сервера. */
+function billMin(plan){
+  var p = (BILL.plans || []).filter(function(x){ return x.plan === plan })[0];
+  return Math.max(1, Number(p && p.seatsMin) || 1);
+}
+
 /* Цена одного места в месяц: для тарифа за пользователя до выбора. */
 function billOne(p){
   var side = BILL_PERIOD === 'year' ? p.year : p.month;
@@ -4582,7 +4594,7 @@ function invMake(btn){
   el('bErr').textContent = '';
   busy(btn, true);
   api('/billing/invoice', { method:'POST',
-    body:{ plan: BILL_PLAN, period: BILL_PERIOD, seats: BILL_SEATS } })
+    body:{ plan: BILL_PLAN, period: BILL_PERIOD, seats: billSeats(BILL_PLAN) } })
     .then(function(){ busy(btn, false); invLoad() })
     .catch(function(e){ busy(btn, false); el('bErr').textContent = billWhy(e) });
 }
@@ -4633,6 +4645,12 @@ function billPaint(){
    */
   if (!BILL_PLAN) BILL_PLAN = BILL.current || 'pro';
   if (!BILL_SEATS) BILL_SEATS = Math.max(1, Number(BILL.seats) || 1);
+  /* Нижняя граница тарифа. Корпоративный — командный, и меньше
+     пятнадцати человек не продаётся: если выбрали его, имея в кабинете
+     трёх, число поднимаем сразу, а не отказываем после нажатия
+     «оплатити». */
+  var lo = billMin(BILL_PLAN);
+  if (BILL_SEATS < lo) BILL_SEATS = lo;
 
   var cards = (BILL.plans || []).map(function(p){
     var side = BILL_PERIOD === 'year' ? p.year : p.month;
@@ -4648,8 +4666,14 @@ function billPaint(){
       '<div class="pv">' + (total ? esc(total) : L('ціну ще не задано')) +
       (p.perSeat && on
         ? '<div class="hint" style="margin-top:2px">' + esc(billSeatMath(p, BILL_SEATS)) + '</div>' +
-          L('<div class="row2" style="margin-top:6px"><input id="bSeats" type="number" min="1" max="1000" ') +
-          'value="' + esc(BILL_SEATS) + L('" style="max-width:110px"><div class="hint" style="align-self:center">ліцензій</div></div>')
+          '<div class="row2" style="margin-top:6px"><input id="bSeats" type="number" min="' +
+          esc(billMin(p.plan)) + '" max="1000" value="' + esc(BILL_SEATS) +
+          '" style="max-width:110px">' +
+          L('<div class="hint" style="align-self:center">ліцензій</div>') + '</div>' +
+          (billMin(p.plan) > 1
+            ? '<div class="hint" style="margin-top:2px">' + L('мінімум ') +
+              esc(billMin(p.plan)) + L(' ліцензій: тариф командний') + '</div>'
+            : '')
         : p.perSeat
           ? L('<div class="hint" style="margin-top:2px">Ціна за одного користувача. Кількість — при виборі тарифу.</div>')
           : '') +
@@ -4735,6 +4759,14 @@ function billPaint(){
   });
 
   if (el('bSeats')) {
+    /* Пока набирают — не поправляем. Нижняя граница у корпоративного
+       пятнадцать, и поправка на каждой цифре превращала бы «2» из
+       «20» в «15»: набрать двадцать было бы нельзя. Поднимаем, когда
+       из поля ушли, и ещё раз на сервере при оплате. */
+    el('bSeats').onchange = function(){
+      var lo = billMin(BILL_PLAN);
+      if (BILL_SEATS < lo){ BILL_SEATS = lo; billPaint() }
+    };
     el('bSeats').oninput = function(){
       var n = Math.max(1, Math.min(1000, Math.round(Number(el('bSeats').value) || 1)));
       BILL_SEATS = n;
@@ -4801,7 +4833,7 @@ function billPay(plan, btn){
   if (err) err.textContent = '';
   busy(btn, true);
   api('/billing/checkout', { method:'POST',
-    body:{ plan: plan, period: BILL_PERIOD, seats: BILL_SEATS } })
+    body:{ plan: plan, period: BILL_PERIOD, seats: billSeats(plan) } })
     .then(function(d){
       /* Окно оплаты открывается там, где Paddle разрешил продавать.
          Домен кабинета он одобряет отдельно от витрины и может не
@@ -9999,6 +10031,11 @@ function start(){
     ME = d;
     ROLE = (d && d.user && d.user.role) || 'agent';
     applyRole();
+    /* Про закрытый доступ узнаём здесь, а не из первого отказа на
+       рабочей ручке: /me отвечает всегда, и стена встаёт сразу при
+       входе, а не после того, как человек обновит страницу. */
+    if (d && d.access && d.access.blocked)
+      payWall({ why: d.access.blocked, paidUntil: d.access.paidUntil });
   }).catch(function(){});
   api('/channels').then(function(d){ CHANNELS = d.channels || []; fillChannelFilter() }).catch(function(){});
   loadTags();
