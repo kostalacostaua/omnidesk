@@ -176,7 +176,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #toast.on{opacity:1;transform:translate(-50%,0)}
 
   /* ─── Список диалогов ──────────────────────────────────────────── */
-  #list{background:var(--panel);border-right:1px solid var(--line);
+  #list{background:var(--glass);border-right:1px solid var(--glass-line);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen-soft);
     display:flex;flex-direction:column;min-height:0}
   .lhead{padding:12px 14px 0;flex:none;border-bottom:1px solid var(--line)}
   .lhead .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
@@ -213,7 +215,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   /* ─── Переписка ────────────────────────────────────────────────── */
   #thread{display:flex;flex-direction:column;min-height:0;min-width:0}
-  .thead{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;
+  .thead{padding:10px 14px;border-bottom:1px solid var(--glass-line);background:var(--glass);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);display:flex;
     justify-content:space-between;align-items:center;gap:12px;flex:none;background:var(--panel)}
   .thead .who{display:flex;gap:10px;align-items:center;min-width:0}
   .thead .nm{font-weight:700;font-size:14px;letter-spacing:-.015em;overflow:hidden;
@@ -228,8 +231,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .mwrap.in{align-self:flex-start;align-items:flex-start}
   .m{max-width:100%;padding:8px 12px;border-radius:9px;font-size:13px;line-height:1.5;
     word-wrap:break-word;white-space:pre-wrap}
-  .m.in{background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:3px}
-  .m.out{background:var(--accent);color:var(--on-accent);border-bottom-right-radius:3px}
+  .m.in{background:var(--glass);border:1px solid var(--glass-line);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen-soft);border-bottom-left-radius:6px}
+  /* Своя реплика — тоже стекло, только подкрашенное: сквозь неё так же
+     видно подложку, и она не выглядит наклейкой поверх экрана. */
+  .m.out{background:var(--accent);color:var(--on-accent);border-bottom-right-radius:6px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 10px 26px -14px var(--glow)}
   .m.bot{background:#4a3f8f;color:#fff}
   .m.failed{background:var(--crit);color:#fff}
   .m .meta{font-size:10px;opacity:.7;margin-top:3px;display:flex;gap:5px;align-items:center;
@@ -267,7 +275,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;
     justify-content:center;z-index:99;cursor:zoom-out;padding:24px}
   .lightbox img{max-width:100%;max-height:100%;border-radius:4px}
-  .composer{border-top:1px solid var(--line);padding:11px 14px;background:var(--panel);flex:none}
+  .composer{border-top:1px solid var(--glass-line);padding:11px 14px;background:var(--glass);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen-soft);flex:none}
   .composer .row{display:flex;gap:8px;align-items:flex-end}
   .composer textarea{min-height:36px;max-height:150px;border-radius:7px}
   .blocked{background:var(--warn-bg);border:1px solid var(--line);border-radius:7px;

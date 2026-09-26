@@ -33,33 +33,43 @@
 
 /** Набор значений тёмной темы. Подставляется в два селектора. */
 const DARK = `color-scheme:dark;
-    --bg:#070a16;--bg2:#0d1226;--panel:rgba(22,29,54,.55);--solid:#141b33;--panel2:rgba(255,255,255,.06);
-    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);--hover:rgba(255,255,255,.07);
-    --t1:#eef0f8;--t2:#a3a9bf;--t3:#7e86a3;
-    --accent:#6d97ff;--accent-h:#8aadff;--on-accent:#0b1022;--link:#8aadff;
-    --accent-soft:rgba(109,151,255,.16);
-    --ring:rgba(109,151,255,.3);
+    --bg:#0a0d18;--bg2:#10142a;--solid:#161b30;
+    /* Стекло — это доля прозрачности, а не серый цвет. Сорок шесть
+       процентов: меньше — текст плывёт на пёстрой подложке, больше —
+       подложки не видно и стекла тоже нет. */
+    --glass:rgba(24,30,50,.46);--panel:rgba(24,30,50,.46);--panel2:rgba(255,255,255,.07);
+    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.17);--hover:rgba(255,255,255,.08);
+    --t1:#f2f5ff;--t2:#a8b2cd;--t3:#7a849e;
+    --accent:#4b8cff;--accent-h:#6ba0ff;--on-accent:#04102a;--link:#7fb0ff;
+    --accent-soft:rgba(75,140,255,.18);
+    --brand1:#4b8cff;--brand2:#a07bff;--ink:#f2f5ff;--navy:#0a0d18;
+    --grad:linear-gradient(120deg,var(--brand1),var(--brand2));
+    --ring:rgba(75,140,255,.34);
     --shadow:0 1px 2px rgba(0,0,0,.4);
-    --lift:0 18px 40px -18px rgba(0,0,0,.7),0 2px 10px -6px rgba(0,0,0,.6);
-    --lift2:0 30px 80px -30px rgba(0,0,0,.85),0 4px 16px -8px rgba(0,0,0,.6);
-    /* Цвета графиков. Отдельно от интерфейсных: у них своя работа —
-       различать ряды, а не выделять кнопку. Шаги подобраны под тёмную
-       подложку и проверены на различимость при дальтонизме. */
+    --lift:0 18px 46px -16px rgba(0,0,0,.72),0 2px 10px -5px rgba(0,0,0,.5);
+    --lift2:0 34px 84px -28px rgba(0,0,0,.86),0 4px 16px -8px rgba(0,0,0,.6);
     --viz1:#3987e5;--viz2:#d95926;--viz3:#199e70;
     --heat0:rgba(255,255,255,.05);--heat1:#16233a;--heat2:#1d3760;
     --heat3:#234f8e;--heat4:#2a6bbf;--heat5:#3987e5;
-    --good:#47cd89;--good-bg:rgba(71,205,137,.12);--warn:#fdb022;--warn-bg:rgba(253,176,34,.12);
-    --crit:#f97066;--crit-bg:rgba(249,112,102,.12);
-    --rail:rgba(18,24,46,.55);--railT:#7e86a3;--railOn:#eef0f8;--railOnBg:rgba(255,255,255,.1);
-    --glass:rgba(22,29,54,.55);--glass-line:rgba(255,255,255,.1);
-    --glow:rgba(122,60,240,.34);
-    /* Блик по верхней кромке и мягкая внутренняя тень снизу — то, из
-       чего и состоит ощущение стекла: свет падает сверху. */
-    --sheen:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -1px 0 rgba(0,0,0,.25);
-    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.1);
-    --mesh:radial-gradient(60vw 48vh at 8% -6%,rgba(47,107,255,.22),transparent 60%),
-      radial-gradient(52vw 46vh at 102% 4%,rgba(122,60,240,.2),transparent 62%),
-      radial-gradient(46vw 44vh at 50% 108%,rgba(47,107,255,.12),transparent 60%);`;
+    --good:#54cf90;--good-bg:rgba(84,207,144,.14);--warn:#e8b13c;--warn-bg:rgba(232,177,60,.14);
+    --crit:#ff7a72;--crit-bg:rgba(255,122,114,.14);
+    --rail:rgba(18,23,40,.5);--railT:#8b94af;--railOn:#fff;--railOnBg:rgba(255,255,255,.12);
+    --glass-line:rgba(255,255,255,.1);
+    --glow:rgba(75,140,255,.4);
+    /* Кромка. Свет падает сверху: верхняя грань светится, боковые
+       чуть слабее, нижняя почти не светится. Три разных значения, а
+       не одно на всю рамку, — иначе поверхность выглядит наклейкой. */
+    --edge:rgba(255,255,255,.3);--edge2:rgba(255,255,255,.08);
+    --sheen:inset 0 1px 0 var(--edge),inset 1px 0 0 var(--edge2),
+      inset -1px 0 0 var(--edge2),inset 0 -1px 0 var(--edge2);
+    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.14);
+    --blur:blur(20px) saturate(170%) brightness(.92);
+    /* Подложка. Без неё стекла не существует: над ровной заливкой
+       нет ни цвета снизу, ни преломления — только мутный прямоугольник. */
+    --mesh:radial-gradient(58vw 56vh at 10% 4%,rgba(24,86,196,.34),transparent 62%),
+      radial-gradient(52vw 50vh at 92% 2%,rgba(104,58,180,.28),transparent 60%),
+      radial-gradient(56vw 54vh at 76% 96%,rgba(14,110,96,.26),transparent 62%),
+      radial-gradient(46vw 46vh at 14% 98%,rgba(120,70,26,.22),transparent 60%);`;
 
 /**
  * Величины. Шкала отступов — шаг 4 пикселя: этого достаточно,
@@ -77,39 +87,50 @@ export const TOKENS_CSS = `
     --font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",
       ui-sans-serif,"Segoe UI",sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --bg:#eef1f8;--bg2:#e6ebf7;--panel:rgba(255,255,255,.62);--solid:#fff;
-    --panel2:rgba(11,16,34,.045);
-    --line:rgba(11,16,34,.07);--line2:rgba(11,16,34,.13);--hover:rgba(11,16,34,.045);
-    --t1:#0b1022;--t2:#5a6178;--t3:#8a90a6;
-    --accent:#2657e0;--accent-h:#1c46c0;--on-accent:#fff;--link:#2657e0;
-    --accent-soft:rgba(38,87,224,.1);
-    --brand1:#2f6bff;--brand2:#7a3cf0;--ink:#0b1022;--navy:#0e1530;
+    --bg:#e9eefb;--bg2:#e2e9f8;--panel:rgba(255,255,255,.44);--solid:#fff;
+    --panel2:rgba(13,20,36,.05);
+    --line:rgba(13,20,36,.08);--line2:rgba(13,20,36,.14);--hover:rgba(13,20,36,.05);
+    --t1:#0d1424;--t2:#455070;--t3:#7b86a4;
+    --accent:#0a64f0;--accent-h:#0a56cf;--on-accent:#fff;--link:#0a64f0;
+    --accent-soft:rgba(10,100,240,.12);
+    --brand1:#0a64f0;--brand2:#8b5cf6;--ink:#0d1424;--navy:#0d1424;
     --grad:linear-gradient(120deg,var(--brand1),var(--brand2));
-    --ring:rgba(38,87,224,.26);
-    --shadow:0 1px 2px rgba(11,16,34,.05);
-    --lift:0 18px 44px -20px rgba(11,16,34,.3),0 2px 8px -4px rgba(11,16,34,.1);
-    --lift2:0 30px 70px -28px rgba(11,16,34,.3),0 4px 14px -8px rgba(11,16,34,.14);
+    --ring:rgba(10,100,240,.3);
+    --shadow:0 1px 2px rgba(13,20,36,.06);
+    --lift:0 10px 34px -12px rgba(13,20,36,.32),0 2px 8px -4px rgba(13,20,36,.2);
+    --lift2:0 30px 72px -26px rgba(13,20,36,.42),0 4px 14px -8px rgba(13,20,36,.2);
     --viz1:#2a78d6;--viz2:#eb6834;--viz3:#1baf7a;
     --heat0:rgba(11,16,34,.05);--heat1:#e8f0fb;--heat2:#c3d9f4;
     --heat3:#8fb8e9;--heat4:#558fdc;--heat5:#2a78d6;
-    --good:#067647;--good-bg:#e9faf1;--warn:#b54708;--warn-bg:#fff6e6;
-    --crit:#d92d20;--crit-bg:#fdeeed;
-    --rail:rgba(255,255,255,.5);--railT:#6b7288;--railOn:#0b1022;--railOnBg:rgba(255,255,255,.75);
-    --glass:rgba(255,255,255,.62);--glass-line:rgba(255,255,255,.75);
-    --glow:rgba(47,107,255,.26);
-    /* Стекло — это не прозрачность, а свет на кромке: блик сверху и
-       тонкая внутренняя тень снизу. Без них поверхность выглядит
-       просто выцветшей. */
-    --sheen:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(11,16,34,.05);
-    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.75);
-    --mesh:radial-gradient(56vw 46vh at 6% -8%,rgba(47,107,255,.2),transparent 60%),
-      radial-gradient(50vw 44vh at 104% 2%,rgba(122,60,240,.16),transparent 62%),
-      radial-gradient(44vw 40vh at 52% 106%,rgba(47,107,255,.1),transparent 60%);
-    --blur:saturate(1.8) blur(22px);
+    --good:#17864f;--good-bg:rgba(23,134,79,.12);--warn:#b4690e;--warn-bg:rgba(180,105,14,.12);
+    --crit:#d0343a;--crit-bg:rgba(208,52,58,.1);
+    --rail:rgba(255,255,255,.4);--railT:#5d6884;--railOn:#0d1424;--railOnBg:rgba(255,255,255,.7);
+    --glass:rgba(255,255,255,.44);--glass-line:rgba(255,255,255,.6);
+    --glow:rgba(10,100,240,.3);
+    /* Кромка. Свет падает сверху: верхняя грань светится ярче всего,
+       боковые слабее, нижняя почти не светится. Три разных значения, а
+       не одно на всю рамку, — иначе поверхность выглядит наклейкой, а
+       не куском стекла с толщиной. */
+    --edge:rgba(255,255,255,.8);--edge2:rgba(255,255,255,.3);
+    --sheen:inset 0 1px 0 var(--edge),inset 1px 0 0 var(--edge2),
+      inset -1px 0 0 var(--edge2),inset 0 -1px 0 var(--edge2);
+    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.7);
+    /* Подложка. Без неё стекла не существует: над ровной заливкой нет
+       ни цвета снизу, ни преломления — только мутный прямоугольник.
+       Поэтому пятна яркие, а не «чтобы было». */
+    --mesh:radial-gradient(58vw 56vh at 10% 4%,rgba(122,184,255,.34),transparent 62%),
+      radial-gradient(52vw 50vh at 92% 2%,rgba(186,150,255,.26),transparent 60%),
+      radial-gradient(56vw 54vh at 76% 96%,rgba(127,232,205,.24),transparent 62%),
+      radial-gradient(46vw 46vh at 14% 98%,rgba(255,206,160,.2),transparent 60%);
+    /* Насыщение важнее размытия: оно и даёт «подобранный снизу цвет».
+       Яркость чуть вверх — стекло светлее того, что под ним. */
+    --blur:blur(18px) saturate(190%) brightness(1.06);
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
-    /* Радиусы крупнее прежних: у стекла край видно, и острый угол на
-       полупрозрачной поверхности выглядит сколом. */
-    --r1:10px;--r2:14px;--r3:18px;--r4:22px;--r5:28px;--rf:999px;
+    /* Радиусы вложенные: радиус внутреннего элемента равен радиусу
+       внешнего минус расстояние между ними. Шаг в четыре точки как раз
+       и есть типичный отступ, поэтому шкала идёт через четыре. Без
+       этого углы «плавают»: внутренний квадратнее внешнего. */
+    --r1:12px;--r2:16px;--r3:20px;--r4:24px;--r5:30px;--rf:999px;
     --fast:.06s;--quick:.13s;--calm:.24s;--slow:.42s;
     --ease:cubic-bezier(.32,.72,0,1);}
   @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
@@ -135,8 +156,13 @@ export const BASE_CSS = `
     -moz-osx-font-smoothing:grayscale;
     letter-spacing:-.006em;font-feature-settings:'cv05' 1,'ss03' 1;
     text-rendering:optimizeLegibility}
+  /* Подложка из двух слоёв: цветные пятна и поверх них зерно. Без
+     зерна большие градиенты идут видимыми полосами — на светлой теме
+     это особенно заметно, а стекло их ещё и подчёркивает. */
   body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:var(--mesh);background-attachment:fixed}
+  body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.2'/></svg>")}
   a{color:var(--link);text-decoration:none}
   a:hover{text-decoration:underline}
   code,kbd,pre{font-family:var(--mono)}
@@ -147,10 +173,10 @@ export const BASE_CSS = `
   .ok{color:var(--good);font-size:12px;margin-top:6px}
 
   textarea,input,select{width:100%;background:var(--glass);color:var(--t1);
-    border:1px solid var(--line2);border-radius:var(--r1);padding:10px 13px;
+    border:1px solid var(--glass-line);border-radius:var(--r1);padding:10px 13px;
     font:inherit;font-size:13.5px;resize:none;
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen-soft);
+    box-shadow:var(--sheen);
     transition:border-color var(--quick) ease,box-shadow var(--quick) ease,
       background-color var(--quick) ease}
   textarea:hover,input:hover,select:hover{border-color:var(--line2);background:var(--solid)}
@@ -193,7 +219,9 @@ export const BASE_CSS = `
     border-radius:var(--rf);padding:9px 16px;font:inherit;font-size:13px;font-weight:600;
     letter-spacing:-.008em;
     cursor:pointer;white-space:nowrap;position:relative;
-    box-shadow:var(--sheen),0 6px 18px -8px var(--glow);
+    /* Блик по верхней кромке плюс свечение под кнопкой: цветная
+       поверхность над стеклом должна светиться, а не лежать пятном. */
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 8px 22px -8px var(--glow);
     transition:background-color var(--quick) ease,border-color var(--quick) ease,
       color var(--quick) ease,box-shadow var(--quick) ease,transform var(--fast) ease,
       opacity var(--quick) ease}
@@ -207,9 +235,10 @@ export const BASE_CSS = `
 
   /* Второстепенная кнопка — то же стекло, что и поверхность под ней:
      она не спорит с основной, но и не выглядит выключенной. */
-  button.ghost{background:var(--glass);color:var(--t2);border-color:var(--line2);font-weight:600;
+  button.ghost{background:var(--glass);color:var(--t1);border-color:var(--glass-line);
+    font-weight:600;
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen-soft)}
+    box-shadow:var(--sheen)}
   button.ghost:hover{background:var(--solid);color:var(--t1);border-color:var(--line2)}
   button.ghost:disabled:hover{background:var(--glass);border-color:var(--line2)}
   button.quiet{background:transparent;color:var(--t2);border-color:transparent;box-shadow:none}
@@ -269,7 +298,7 @@ export const KIT_CSS = `
   .card{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r4);
     padding:var(--s5);
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen),0 10px 30px -18px rgba(11,16,34,.3)}
+    box-shadow:var(--sheen),var(--lift)}
   .card.pad5{padding:var(--s5)}
   .card.flat{background:transparent;border-color:var(--line)}
 
@@ -278,7 +307,7 @@ export const KIT_CSS = `
   .tile{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r4);
     padding:var(--s5);text-align:left;cursor:pointer;color:inherit;
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen),0 10px 30px -18px rgba(11,16,34,.3);
+    box-shadow:var(--sheen),var(--lift);
     font-weight:400;white-space:normal;
     transition:transform var(--quick) var(--ease),box-shadow var(--quick) ease,
       border-color var(--quick) ease,background-color var(--quick) ease}
@@ -343,9 +372,10 @@ export const KIT_CSS = `
   .veil{position:fixed;inset:0;background:rgba(11,16,34,.4);backdrop-filter:blur(6px);
     -webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;
     padding:var(--s4);z-index:90;animation:fade var(--calm) ease}
-  .sheet{background:var(--solid);border:1px solid var(--line);border-radius:var(--r4);
-    box-shadow:var(--lift2);max-width:520px;width:100%;max-height:86vh;overflow-y:auto;
-    padding:var(--s5);animation:pop var(--calm) var(--ease)}
+  .sheet{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r5);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),var(--lift2);max-width:520px;width:100%;max-height:86vh;
+    overflow-y:auto;padding:var(--s5);animation:pop var(--calm) var(--ease)}
   @keyframes fade{from{opacity:0}to{opacity:1}}
   @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
   @media(prefers-reduced-motion:reduce){.veil,.sheet{animation:none}}
@@ -354,7 +384,7 @@ export const KIT_CSS = `
      не перекрывает то, с чем человек работает. */
   .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,12px);opacity:0;
     pointer-events:none;background:var(--accent);color:var(--on-accent);padding:10px 14px;
-    border-radius:var(--r2);font-size:12.5px;font-weight:600;
+    border-radius:var(--rf);font-size:12.5px;font-weight:600;
     max-width:min(520px,calc(100% - 32px));box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:95;
     transition:opacity .18s ease,transform .18s ease}
   .toast.on{opacity:1;transform:translate(-50%,0)}
@@ -393,13 +423,15 @@ export const KIT_CSS = `
  */
 export const GLASS_FALLBACK_CSS = `
   @supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
-    .card,.tile,button.ghost,textarea,input,select,#rail,.emobox,.tplbox{
+    .card,.tile,.sheet,button.ghost,textarea,input,select,#rail,.emobox,.tplbox{
       background:var(--solid)}
-    body::before{opacity:.35}
+    body::before{opacity:.3}
+    body::after{opacity:.25}
   }
   @media(prefers-reduced-transparency:reduce){
-    .card,.tile,button.ghost,textarea,input,select,#rail{background:var(--solid)}
-    body::before{opacity:.25}
+    .card,.tile,.sheet,button.ghost,textarea,input,select,#rail{background:var(--solid)}
+    body::before{opacity:.2}
+    body::after{opacity:0}
   }
 `;
 
