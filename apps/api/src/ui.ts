@@ -463,6 +463,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
   .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
   .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
+  /* Витрина CRM.
+     Карточки со всеми полями сразу давали полотно, в котором поля одной
+     CRM соседствовали с полями другой, а настройки Zoho — с настройками
+     всех. Плитка — это вход: знак, имя, состояние. Настройку открывает
+     своя страница, и на ней видно только её. */
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+  .tile{padding:16px;cursor:pointer;margin-bottom:0;display:flex;flex-direction:column;
+    transition:transform .16s cubic-bezier(.2,.8,.3,1),border-color .16s}
+  .tile:hover{transform:translateY(-2px)}
+  .tile:active{transform:translateY(0)}
+  .tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .tile .chico{width:44px;height:44px;border-radius:14px}
+  .tile-n{margin-top:12px;font-size:14.5px;font-weight:600;letter-spacing:-.015em}
+  .tile-s{margin-top:3px;font-size:12px;color:var(--t3);line-height:1.5}
+  /* Состояние прижато к низу: строки описания разной длины, и без
+     этого точки стоят на разной высоте — взгляд ищет их по очереди
+     вместо того, чтобы пройти по ряду. */
+  .tile-st{margin-top:auto;padding-top:11px;display:flex;align-items:center;gap:6px;
+    font-size:11.5px;color:var(--t3)}
+  .tile-st i{width:6px;height:6px;border-radius:50%;background:var(--t3);flex:none}
+  .tile-st.on{color:var(--good)}
+  .tile-st.on i{background:var(--good)}
+  .tile-st.warn{color:var(--warn)}
+  .tile-st.warn i{background:var(--warn)}
+  .pg-back{margin-bottom:14px}
   /* Полоска «показан один диалог»: состояние списка, в которое можно
      попасть из отчёта, обязано быть видно и сниматься одним щелчком. */
   .drill{display:flex;align-items:center;gap:8px;margin-top:9px;padding:7px 10px;
@@ -1078,6 +1103,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .pg-head{margin-bottom:16px}
     .pg-head h2{font-size:23px}
     .pg-head p{font-size:13px}
+
+    /* Ровно две в ряд. Ширины страницы не хватает на две по порогу, и
+       витрина вытягивалась в столбик — тот самый длинный список, от
+       которого уходили. */
+    .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .tile{padding:13px}
+    .tile .chico{width:38px;height:38px}
 
   }
 
@@ -6220,16 +6252,43 @@ function wireAi(ai){
 /** Адрес панели для карточки Pipedrive. */
 function PANEL_URL(){ return location.origin + '/widget/pipedrive' }
 
+/*
+ * Карточка подключения.
+ *
+ * Знак, имя и состояние CRM теперь стоят в заголовке её страницы —
+ * здесь остаётся только то, что делают: строки подключений, поля и
+ * кнопки. Повторять имя над полями, на которые и так пришли по имени,
+ * незачем.
+ */
 function crmCard(opts){
-  return '<div class="card int">' +
-    '<div class="int-h">' +
-    '<div class="chico ' + opts.icon + '">' + opts.mark + '</div>' +
-    '<div style="min-width:0"><div class="int-t">' + esc(opts.title) + '</div>' +
-    '<div class="int-s">' + esc(opts.sub) + '</div></div>' +
-    '<div class="grow"></div>' + (opts.pill || '') + '</div>' +
-    (opts.body ? '<div class="int-b">' + opts.body + '</div>' : '') +
+  return '<div class="card int">' + (opts.body || '') +
     (opts.acts ? '<div class="int-a">' + opts.acts + '</div>' : '') +
     '</div>';
+}
+
+/** Плитка витрины: знак, имя, состояние. Нажимается вся, не только знак. */
+function crmTile(o){
+  return '<div class="card tile" tabindex="0" role="button" data-crm="' + o.kind + '">' +
+    '<div class="chico ' + o.icon + '">' + o.mark + '</div>' +
+    '<div class="tile-n">' + esc(o.title) + '</div>' +
+    '<div class="tile-s">' + esc(o.sub) + '</div>' +
+    '<div class="tile-st' + (o.st.on ? ' on' : (o.st.warn ? ' warn' : '')) + '">' +
+    '<i></i>' + esc(o.st.text) + '</div></div>';
+}
+
+/*
+ * Какая CRM открыта.
+ *
+ * Не отдельный пункт рейла: CRM — это по-прежнему «Інтеграції», просто
+ * их настройка живёт на своей странице. Переход по рейлу сбрасывает
+ * выбор, иначе человек, нажавший «Інтеграції», снова упирался бы в ту
+ * CRM, которую открывал в прошлый раз.
+ */
+var CRM_OPEN = null;
+
+function crmBack(){
+  return '<div class="pg-back"><button class="ghost mini" id="crmBack">← ' +
+    L('Всі інтеграції') + '</button></div>';
 }
 
 function pageIntegrations(){
@@ -6271,9 +6330,6 @@ function pageIntegrations(){
           L('стільки, щоб знайти клієнта за номером і створити нового.</div>');
 
     var zoho = crmCard({
-      icon:'zoho', mark:'Z', title:'Zoho CRM', sub:L('Листування прямо в картці клієнта'),
-      pill: list.length ? L('<span class="pill good">підключена</span>')
-                        : L('<span class="pill">не підключена</span>'),
       body: zohoBody,
       acts: d.configured
         ? '<button id="zGo">' + (list.length ? L('Підключити ще організацію') : L('Увійти через Zoho')) +
@@ -6301,10 +6357,6 @@ function pageIntegrations(){
       L('а в Бітрікс їде картка клієнта і лід.') + '</div>';
 
     var bitrix = crmCard({
-      icon:'bitrix', mark:'B24', title:L('Бітрікс24'), sub:L('Хмара і коробка'),
-      pill: bx ? (bx.status === 'active' ? L('<span class="pill good">підключений</span>')
-                                         : L('<span class="pill warn">потрібно перепідключити</span>'))
-               : L('<span class="pill">не підключений</span>'),
       body: bxBody + bxSoon,
       acts: '<span class="err" id="bxErr"></span><span class="ok" id="bxOk"></span>'
     });
@@ -6338,23 +6390,92 @@ function pageIntegrations(){
       : '';
 
     var pipedrive = crmCard({
-      icon:'pipedrive', mark:'PD', title:'Pipedrive', sub:L('Клієнт і угода у воронці'),
-      pill: pd ? (pd.status === 'active' ? L('<span class="pill good">підключений</span>')
-                                         : L('<span class="pill warn">потрібно перепідключити</span>'))
-               : L('<span class="pill">не підключений</span>'),
       body: pdBody + pdPanel,
       acts: '<span class="err" id="pdErr"></span><span class="ok" id="pdOk"></span>'
     });
+
+    // Состояние для плитки: точка, слово и ничего больше.
+    var stz = list.length ? { on:1, text:L('підключено') } : { text:L('не підключено') };
+    var stb = bx
+      ? (bx.status === 'active' ? { on:1, text:L('підключено') }
+                                : { warn:1, text:L('потрібно перепідключити') })
+      : { text:L('не підключено') };
+    var stp = pd
+      ? (pd.status === 'active' ? { on:1, text:L('підключено') }
+                                : { warn:1, text:L('потрібно перепідключити') })
+      : { text:L('не підключено') };
+
+    var pill = function(st){
+      return '<span class="pill' + (st.on ? ' good' : (st.warn ? ' warn' : ' soon')) + '">' +
+        esc(st.text) + '</span>';
+    };
+
+    /* Кому какие настройки. Порядок вывода один и тот же: подключение,
+       потом то, что оно умеет. */
+    if (CRM_OPEN === 'zoho'){
+      pageBox().innerHTML = '<div class="pg">' + crmBack() +
+        pageHead('Zoho CRM', L('Листування прямо в картці клієнта.'), pill(stz)) +
+        zoho +
+
+        /* Куда уезжает заказ — умение одной этой связки, и стоит оно
+           там же, где сама связка. */
+        (list.length
+          ? L('<div class="pg-sec"><h3>Замовлення з розмови</h3><div class="card">') +
+            '<div id="osBox"></div></div></div>'
+          : '') +
+
+        (list.length
+          ? L('<div class="pg-sec"><h3>Віджет у картці клієнта</h3><div class="card">') +
+            L('<div class="int-s" style="white-space:normal;line-height:1.7">Zoho створює віджети ') +
+            L('тільки зі своїх налаштувань — програмно їх створити не можна. Це робиться один раз і ') +
+            L('займає хвилину.</div>') +
+            '<ol class="steps" style="margin-top:10px">' +
+            L('<li>У Zoho CRM: <b>Налаштування</b> (шестерня) → <b>Developer Space</b> → ') +
+            '<b>Widgets</b> → <b>Create Widget</b>.</li>' +
+            L('<li>Імʼя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>') +
+            L('<li>Base URL — ось ця адреса: <code id="wurl">') + esc(WIDGET_URL()) + '</code> ' +
+            L('<button class="ghost mini" id="wcopy">Скопіювати</button></li>') +
+            L('<li>Зберегти. Потім <b>Налаштування → Модулі і поля → Контакти → Звʼязані списки</b> ') +
+            L('і додати <b>Rozmovio</b>. Те саме для модуля <b>Ліди</b>.</li>') +
+            '</ol></div></div>'
+          : '') +
+        '</div>';
+      wireCrm();
+      return;
+    }
+
+    if (CRM_OPEN === 'bitrix24'){
+      pageBox().innerHTML = '<div class="pg">' + crmBack() +
+        pageHead(L('Бітрікс24'), L('Хмара і коробка на своєму сервері.'), pill(stb)) +
+        bitrix + '</div>';
+      wireCrm();
+      return;
+    }
+
+    if (CRM_OPEN === 'pipedrive'){
+      pageBox().innerHTML = '<div class="pg">' + crmBack() +
+        pageHead('Pipedrive', L('Клієнт і угода у воронці.'), pill(stp)) +
+        pipedrive + '</div>';
+      wireCrm();
+      return;
+    }
 
     pageBox().innerHTML = '<div class="pg">' +
       pageHead(L('Інтеграції'), L('Rozmovio живе поряд з вашою CRM: листування видно в картці ') +
         L('клієнта, а нові звернення перетворюються на ліди.')) +
 
-      '<div class="pg-sec"><h3>CRM</h3>' + zoho + bitrix + pipedrive + '</div>' +
+      '<div class="pg-sec"><h3>CRM</h3><div class="tiles">' +
+      crmTile({ kind:'zoho', icon:'zoho', mark:'Z', title:'Zoho CRM',
+        sub:L('Листування в картці клієнта'), st:stz }) +
+      crmTile({ kind:'bitrix24', icon:'bitrix', mark:'B24', title:L('Бітрікс24'),
+        sub:L('Хмара і коробка'), st:stb }) +
+      crmTile({ kind:'pipedrive', icon:'pipedrive', mark:'PD', title:'Pipedrive',
+        sub:L('Клієнт і угода у воронці'), st:stp }) +
+      '</div></div>' +
 
-      /* Поведение связки. Стоит под самими подключениями, а не в
-         настройках: решение принимают, когда видят, куда именно
-         поедут карточки. */
+      /* Поведение связки. Общее для всех CRM, поэтому стоит под
+         витриной, а не на странице одной из них: решение принимают,
+         когда видят, куда именно поедут карточки. */
       L('<div class="pg-sec"><h3>Що робити з новим клієнтом</h3><div class="card">') +
       '<div class="acts" style="margin-top:0">' +
       '<select id="crmAs" style="max-width:260px">' +
@@ -6372,32 +6493,18 @@ function pageIntegrations(){
       L('Немає співробітника з такою поштою — нічого не змінюємо і нікого не заводимо.</div>') +
       '<div class="err" id="crmSetErr"></div></div></div>' +
 
-      /* Куда уезжает заказ. Стоит рядом с «что делать с новым
-         клиентом»: это второе решение про ту же связку, и принимают
-         их в один заход. */
-      (list.length
-        ? L('<div class="pg-sec"><h3>Замовлення з розмови</h3><div class="card">') +
-          '<div id="osBox"></div></div></div>'
-        : '') +
-
-      (list.length
-        ? L('<div class="pg-sec"><h3>Віджет у картці клієнта</h3><div class="card">') +
-          L('<div class="int-s" style="white-space:normal;line-height:1.7">Zoho створює віджети ') +
-          L('тільки зі своїх налаштувань — програмно їх створити не можна. Це робиться один раз і ') +
-          L('займає хвилину.</div>') +
-          '<ol class="steps" style="margin-top:10px">' +
-          L('<li>У Zoho CRM: <b>Налаштування</b> (шестерня) → <b>Developer Space</b> → ') +
-          '<b>Widgets</b> → <b>Create Widget</b>.</li>' +
-          L('<li>Імʼя — <b>Rozmovio</b>, тип — <b>Related List</b>, хостинг — <b>External</b>.</li>') +
-          L('<li>Base URL — ось ця адреса: <code id="wurl">') + esc(WIDGET_URL()) + '</code> ' +
-          L('<button class="ghost mini" id="wcopy">Скопіювати</button></li>') +
-          L('<li>Зберегти. Потім <b>Налаштування → Модулі і поля → Контакти → Звʼязані списки</b> ') +
-          L('і додати <b>Rozmovio</b>. Те саме для модуля <b>Ліди</b>.</li>') +
-          '</ol></div></div>'
-        : '') +
-
       aiSection(ai) +
       '</div>';
+
+    // Плитка открывается вся: попадать в маленький знак пальцем на
+    // телефоне — работа, которой человек не просил.
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-crm]'), function(t){
+      var go = function(){ CRM_OPEN = t.dataset.crm; pageIntegrations() };
+      t.onclick = go;
+      t.onkeydown = function(e){
+        if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); go() }
+      };
+    });
 
     el('crmSave').onclick = function(){
       el('crmSetErr').textContent = '';
@@ -6413,20 +6520,35 @@ function pageIntegrations(){
     };
 
     wireAi(ai);
+  }).catch(sErr);
+}
 
-    if (list.length) osLoad().catch(function(e){
+/*
+ * Живые части страницы CRM.
+ *
+ * Одна на все три: кнопки проверки и отключения у них общие, а то, чего
+ * на странице нет, просто не находится — проверка на наличие дешевле,
+ * чем три почти одинаковых куска.
+ */
+function wireCrm(){
+  if (el('crmBack')) el('crmBack').onclick = function(){ CRM_OPEN = null; pageIntegrations() };
+
+  // Строка ответа своя у каждой CRM, и на чужой странице её нет.
+  var say = function(id, text){ if (el(id)) el(id).textContent = text };
+
+  if (el('osBox')) osLoad().catch(function(e){
       if (el('osBox')) el('osBox').innerHTML = '<div class="err">' + esc(ordWhy(e)) + '</div>';
     });
 
-    if (S.zohoNote){ el('zOk').textContent = S.zohoNote; S.zohoNote = null }
-    if (S.zohoError){ el('zErr').textContent = S.zohoError; S.zohoError = null }
+    if (S.zohoNote){ say('zOk', S.zohoNote); S.zohoNote = null }
+    if (S.zohoError){ say('zErr', S.zohoError); S.zohoError = null }
 
     if (el('zGo')) el('zGo').onclick = function(){
       busy(el('zGo'), true);
       api('/settings/zoho/start').then(function(r){ location.href = r.url })
         .catch(function(){
           busy(el('zGo'), false);
-          el('zErr').textContent = L('Не вдалося почати підключення');
+          say('zErr', L('Не вдалося почати підключення'));
         });
     };
 
@@ -6437,17 +6559,17 @@ function pageIntegrations(){
     Array.prototype.forEach.call(pageBox().querySelectorAll('[data-zcheck]'), function(b){
       b.onclick = function(){
         busy(b, true);
-        el('zErr').textContent = ''; el('zOk').textContent = '';
+        say('zErr', ''); say('zOk', '');
         api('/settings/zoho/' + b.dataset.zcheck + '/check', { method:'POST' })
           .then(function(r){
-            el('zOk').textContent = L('Звʼязок є') + (r.user ? L(', увійшли як ') + r.user : '');
+            say('zOk', L('Звʼязок є') + (r.user ? L(', увійшли як ') + r.user : ''));
             pageIntegrations();
           })
           .catch(function(e){
             var p = e.payload || {};
-            el('zErr').textContent = p.error === 'token_rejected'
+            say('zErr', p.error === 'token_rejected'
               ? L('Zoho більше не приймає доступ: ') + (p.detail || '') + L('. Підключіть заново.')
-              : L('Не вдалося перевірити');
+              : L('Не вдалося перевірити'));
             busy(b, false);
           });
       };
@@ -6515,7 +6637,6 @@ function pageIntegrations(){
     armDelete(pageBox().querySelectorAll('[data-crmdel]'), function(b){
       return api('/settings/crm/' + b.dataset.crmdel, { method:'DELETE' }).then(pageIntegrations);
     });
-  }).catch(sErr);
 }
 
 /** Копирование с запасным способом: буфер недоступен без https. */
@@ -6557,6 +6678,10 @@ function readPipedriveHash(){
   var err = h.indexOf('pipedrive-error=') >= 0;
   if (!ok && !err) return;
   history.replaceState(null, '', location.pathname + location.search);
+
+  // Возвращаемся на страницу той CRM, из которой уходили: человек ушёл
+  // с неё и ждёт ответа именно о ней.
+  CRM_OPEN = 'pipedrive';
 
   if (err){ S.zohoError = L('Pipedrive не підтвердив встановлення'); setView('integrations'); return }
 
@@ -6602,6 +6727,7 @@ function readMetaHash(){
     S.zohoNote = zok ? L('Організація Zoho підключена.') : null;
     S.zohoError = zerr ? (ZOHO_ERRORS[zerr[1]] || L('Не вдалося підключити Zoho')) : null;
     history.replaceState(null, '', location.pathname);
+    CRM_OPEN = 'zoho';
     setView('integrations');
     return true;
   }
@@ -10587,7 +10713,9 @@ function logout(){
 /* ── Обработчики ─────────────────────────────────────────────────── */
 
 Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
-  b.onclick = function(){ setView(b.dataset.view) };
+  // Переход по рейлу — это «покажи раздел», а не «верни, где я был»:
+  // открытая CRM сбрасывается, иначе «Інтеграції» ведут не на список.
+  b.onclick = function(){ CRM_OPEN = null; setView(b.dataset.view) };
 });
 el('logo').onclick = function(){ setView('chats') };
 el('supBtn').onclick = supToggle;
