@@ -43,14 +43,31 @@ const ICON_WC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const ICON_ZH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h10M4 12h16M4 16.5h10"/><circle cx="18.5" cy="7.5" r="2"/><circle cx="18.5" cy="16.5" r="2"/></svg>`;
 
 /** Разметка одной карточки канала. */
-function chCard(icon: string, key: string, soon?: boolean): string {
-  return `<div class="ch${soon ? ' soon' : ''}">
+/*
+ * Карточка канала и его состояние.
+ *
+ * Три состояния, не два: «работает», «скоро» и «закрытый тест». Третье
+ * появилось не для красоты — каналы Meta работают, но подключить их
+ * пока может не каждый, и зелёная точка напротив них была бы обещанием,
+ * которого мы не сдержим в первый же день.
+ */
+type ChState = 'ready' | 'soon' | 'beta';
+
+function chCard(icon: string, key: string, state: ChState = 'ready'): string {
+  const pill =
+    state === 'soon'
+      ? '<span class="pill flat" data-t="soon"></span>'
+      : state === 'beta'
+        ? '<span class="pill warn" data-t="beta"></span>'
+        : '<span class="pill good" data-t="ready"></span>';
+
+  return `<div class="ch${state === 'soon' ? ' soon' : ''}">
     <div class="ci">${icon}</div>
     <div class="grow">
       <div class="h4" data-t="${key}.t"></div>
       <div class="cs" data-t="${key}.s"></div>
     </div>
-    ${soon ? '<span class="pill flat" data-t="soon"></span>' : '<span class="pill good" data-t="ready"></span>'}
+    ${pill}
   </div>`;
 }
 
@@ -390,12 +407,13 @@ export const LANDING_HTML = `<!DOCTYPE html>
       ${chCard(ICON_WC, 'ch.wc')}
       ${chCard(ICON_TG, 'ch.tgbot')}
       ${chCard(ICON_PH, 'ch.tgph')}
-      ${chCard(ICON_IG, 'ch.ig')}
-      ${chCard(ICON_MS, 'ch.ms')}
-      ${chCard(ICON_WA, 'ch.wa')}
+      ${chCard(ICON_IG, 'ch.ig', 'beta')}
+      ${chCard(ICON_MS, 'ch.ms', 'beta')}
+      ${chCard(ICON_WA, 'ch.wa', 'beta')}
       ${chCard(ICON_VB, 'ch.vb')}
-      ${chCard(ICON_VB, 'ch.vbn', true)}
+      ${chCard(ICON_VB, 'ch.vbn', 'soon')}
     </div>
+    <p class="note rise" data-t="ch.beta"></p>
   </div>
 </section>
 
@@ -577,7 +595,8 @@ var T = {
     'ch.wa.t':'WhatsApp Business','ch.wa.s':'Номер компанії через Cloud API. Поза вікном 24 годин — погоджені шаблони.',
     'ch.vb.t':'Viber для бізнесу','ch.vb.s':'Клієнти пишуть на назву компанії. Підключення через офіційного партнера.',
     'ch.vbn.t':'Viber номерний','ch.vbn.s':'У роботі.',
-    'ready':'працює','soon':'скоро',
+    'ready':'працює','soon':'скоро','beta':'закритий тест',
+    'ch.beta':'Instagram, Messenger і WhatsApp Business зараз у закритому тесті: застосунок проходить перевірку Meta, і до її завершення підключити ці канали можуть лише запрошені акаунти. Напишіть нам — додамо вас у тестувальники. Решта каналів працює без обмежень.',
     'how.h':'Три кроки до першого повідомлення','how.lead':'Нічого встановлювати не треба: сервіс працює у браузері та всередині Zoho CRM.',
     'how.s1t':'Реєстрація','how.s1p':'Вводите робочу пошту й код із листа. Пароль вигадувати не потрібно.',
     'how.s2t':'Підключення каналів','how.s2p':'Токен бота, вхід по QR для номера, вхід через Facebook для Instagram і Messenger.',
@@ -636,7 +655,8 @@ var T = {
     'ch.wa.t':'WhatsApp Business','ch.wa.s':'Your company number via Cloud API. Outside the 24-hour window — approved templates.',
     'ch.vb.t':'Viber for Business','ch.vb.s':'Customers write to your company name. Connected through an official partner.',
     'ch.vbn.t':'Viber by number','ch.vbn.s':'In progress.',
-    'ready':'live','soon':'soon',
+    'ready':'live','soon':'soon','beta':'closed beta',
+    'ch.beta':'Instagram, Messenger and WhatsApp Business are in closed beta: the app is under review by Meta, and until that is done only invited accounts can connect these channels. Write to us and we will add you as a tester. Every other channel works without limits.',
     'how.h':'Three steps to the first message','how.lead':'Nothing to install: it runs in the browser and inside Zoho CRM.',
     'how.s1t':'Sign up','how.s1p':'Enter your work email and the code from the letter. No password to invent.',
     'how.s2t':'Connect channels','how.s2p':'Bot token, QR sign-in for a phone number, Facebook login for Instagram and Messenger.',

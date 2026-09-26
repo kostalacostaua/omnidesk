@@ -5509,6 +5509,18 @@ function gwWatch(id){
   step();
 }
 
+/*
+ * Каналы Meta работают, но подключить их пока может не каждый:
+ * приложение проходит проверку, и до её конца Facebook пускает только
+ * тех, у кого есть роль в нём. Сказать об этом надо до того, как
+ * человек нажмёт «увійти» и получит отказ без объяснения.
+ */
+function metaBeta(){
+  return L('<div class="warnbox">Канал у закритому тесті: застосунок проходить перевірку Meta. ') +
+    L('До її завершення підключити можуть лише запрошені акаунти — напишіть нам, додамо вас ') +
+    L('у тестувальники.</div>');
+}
+
 function chIcon(type){
   var g = ICON_SVG[ICON_OF[type] || ''] || ICON_SVG.custom;
   return '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + g + '</svg>';
@@ -5636,7 +5648,8 @@ function tabChannels(){
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">' + chIcon('instagram') + '</div>' +
       L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +
-      L('<div id="metaBody"><div class="sub" style="white-space:normal">Увійдіть під акаунтом, який керує ') +
+      '<div id="metaBody">' + metaBeta() +
+      L('<div class="sub" style="white-space:normal">Увійдіть під акаунтом, який керує ') +
       L('сторінкою. Instagram має бути професійним акаунтом і привʼязаний до цієї сторінки.</div>') +
       L('<div class="acts"><button id="metaGo">Увійти через Facebook</button></div>') +
       '<div class="err" id="metaErr"></div></div></div>' +
@@ -5668,6 +5681,7 @@ function tabChannels(){
 
       '<div class="tile"><div class="t1"><div class="chico whatsapp">' + chIcon('whatsapp') + '</div>' +
       L('<div><div class="ttl">WhatsApp Business</div><div class="sub">Номер компанії через Cloud API</div></div></div>') +
+      metaBeta() +
       L('<div class="sub" style="white-space:normal">Потрібні токен і <b>Phone number ID</b> з кабінету ') +
       L('Meta for Developers: розділ WhatsApp → API Setup. Там же вкажіть адресу вебхука ') +
       L('(вона у розділі «Інтеграції»).</div>') +
