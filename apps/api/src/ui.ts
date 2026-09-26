@@ -111,13 +111,27 @@ export const INBOX_HTML = `<!DOCTYPE html>
        Кнопка, которая ничего не делает, хуже отсутствующей — и место
        в шапке списка тут дороже всего. */
     #cardBtn{display:none}
+    /* Прокрутка внутри выехавшей карточки.
+       На телефоне страница закреплена целиком, и карточка — тоже
+       закреплённый слой поверх неё. Safari такому слою прокрутку
+       пальцем сам не даёт: ему нужно сказать, что здесь прокрутка
+       своя и наружу она не передаётся. Без этого карточка длиннее
+       экрана просто обрывается, и до нижней половины не добраться. */
     #app.card-open #card{display:block;position:fixed;top:0;right:0;bottom:0;
       width:min(390px,100%);z-index:88;background:var(--solid);
       border-left:1px solid var(--line);box-shadow:var(--lift2);
-      animation:cardIn var(--calm) var(--ease)}
+      animation:cardIn var(--calm) var(--ease);
+      overflow-y:auto;-webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;touch-action:pan-y;
+      /* Полоса статуса сверху и черта жеста снизу: в приложении на
+         домашнем экране они не нулевые, и без отступа первая строка
+         уходит под «остров», а последняя — под черту. */
+      padding-top:calc(13px + env(safe-area-inset-top));
+      padding-bottom:calc(26px + env(safe-area-inset-bottom))}
     #app.card-open #cardVeil{display:block;position:fixed;inset:0;z-index:87;
       background:rgba(11,16,34,.4);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
-    #app.card-open #cardX{display:flex;position:fixed;top:10px;right:10px;z-index:89;
+    #app.card-open #cardX{display:flex;position:fixed;
+      top:calc(10px + env(safe-area-inset-top));right:10px;z-index:89;
       width:32px;height:32px;align-items:center;justify-content:center;font-size:20px;
       line-height:1;padding:0;border-radius:var(--rf);background:var(--panel2);
       border:1px solid var(--line);color:var(--t2)}
@@ -2842,6 +2856,15 @@ function renderCard(){
             L('<div class="hint" style="margin-top:6px">Перша кнопка конвертує ліда в Zoho ') +
             L('звідси. Друга — якщо його вже сконвертували там.</div>') +
             '<div class="err" id="oErr"></div>')
+      /* Связь есть, а CRM, в которую она ведёт, больше не подключена.
+         Кнопка «надіслати в CRM» здесь бесполезна: связь липкая, и
+         сервер ответит «уже привязан». Нужна ровно одна кнопка — та,
+         что эту связь рвёт. */
+      : ct.crm_record_id
+      ? L('<div class="hint">Клієнта заведено в CRM, якої зараз немає серед підключених. ') +
+        L('Відвʼяжіть — і його можна буде надіслати в ту, що підключена зараз.</div>') +
+        L('<button class="ghost mini" id="cUnlink" style="margin-top:8px">Відвʼязати від CRM</button>') +
+        '<div class="err" id="cCrmErr"></div>'
       : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в CRM</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
