@@ -97,17 +97,10 @@ export const LANDING_HTML = `<!DOCTYPE html>
   .wrap{max-width:1140px;margin:0 auto;padding:0 20px}
   section{position:relative}
 
-  /* Свечение на фоне. Два размытых пятна бренд-цветами: они дают
-     ощущение глубины, не мешая читать, и стоят дешевле картинки. */
-  .aura{position:fixed;inset:0;pointer-events:none;z-index:-1;overflow:hidden}
-  .aura i{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5}
-  .aura i:nth-child(1){width:620px;height:620px;top:-260px;left:-120px;
-    background:radial-gradient(circle,var(--brand1),transparent 70%)}
-  .aura i:nth-child(2){width:560px;height:560px;top:-180px;right:-160px;
-    background:radial-gradient(circle,var(--brand2),transparent 70%)}
-  .aura i:nth-child(3){width:700px;height:700px;bottom:-380px;left:30%;
-    background:radial-gradient(circle,var(--brand1),transparent 72%);opacity:.3}
-  @media(prefers-color-scheme:dark){.aura i{opacity:.34}}
+  /* Фон здесь общий с рабочим местом — он приходит темой. Раньше
+     страница рисовала поверх него три своих пятна: получалось две
+     подложки в одном экране, и стекло, которому нечего подхватывать,
+     потому что подхватывало оно чужое размытие. */
 
   /* ─── Шапка ────────────────────────────────────────────────────
      Липкая и полупрозрачная: на длинной странице кнопка «спробувати»
@@ -206,7 +199,11 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* ─── Обычная секция ───────────────────────────────────────────── */
   .sec{padding:clamp(44px,6vw,80px) 0}
-  .sec.tint{background:var(--bg2)}
+  /* Чередование секций держится на краях, а не на заливке: сплошной
+     цвет поверх обоев гасит их ровно на треть страницы. */
+  .sec.tint{background:linear-gradient(180deg,transparent,var(--panel2) 12%,
+    var(--panel2) 88%,transparent);
+    border-top:1px solid var(--edge2);border-bottom:1px solid var(--edge2)}
   .shd{max-width:640px;margin-bottom:clamp(24px,3vw,40px)}
   .shd .h2{margin-bottom:var(--s3)}
   .grid{display:grid;gap:var(--s3)}
@@ -217,11 +214,18 @@ export const LANDING_HTML = `<!DOCTYPE html>
   /* Канал. Иконка, название, одна строка про то, что именно работает,
      и честный статус: «працює» или «скоро». Обещать то, чего нет,
      дороже, чем не обещать. */
+  /* Карточка канала — то же стекло, что в кабинете: подсвеченный
+     край, подложка, взятая из-под себя, и вложенный радиус у знака.
+     Плоская заливка рядом с настоящим стеклом читается как ошибка
+     сборки, а не как другой блок. */
   .ch{display:flex;align-items:center;gap:var(--s3);padding:var(--s4);
-    background:var(--panel);border:1px solid var(--line);border-radius:var(--r3);
+    background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r3);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),var(--lift);
     transition:transform var(--quick) var(--ease),box-shadow var(--quick) ease,
       border-color var(--quick) ease}
-  .ch:hover{transform:translateY(-2px);box-shadow:var(--lift);border-color:var(--line2)}
+  .ch:hover{transform:translateY(-2px);box-shadow:var(--sheen),var(--lift2);
+    border-color:var(--edge)}
   .ch.soon{opacity:.62}
   .ch .ci{width:40px;height:40px;border-radius:var(--r2);flex:none;display:flex;
     align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)}
@@ -230,8 +234,10 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* Шаг. Номер крупный и бледный: он помогает считать, но не должен
      перетягивать внимание с текста. */
-  .step{padding:var(--s4);background:var(--panel);border:1px solid var(--line);
-    border-radius:var(--r3);position:relative;overflow:hidden}
+  .step{padding:var(--s4);background:var(--glass);border:1px solid var(--glass-line);
+    border-radius:var(--r3);position:relative;overflow:hidden;
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),var(--lift)}
   .step .n{font-family:var(--font-display);font-size:46px;font-weight:800;line-height:1;
     letter-spacing:-.04em;background:var(--grad);-webkit-background-clip:text;
     background-clip:text;color:transparent;opacity:.5;margin-bottom:var(--s2)}
@@ -240,8 +246,10 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* Возможности: плотная сетка коротких фактов. Длинный список
      продающих обещаний никто не читает, короткие факты — читают. */
-  .feat{padding:var(--s4);background:var(--panel);border:1px solid var(--line);
-    border-radius:var(--r3)}
+  .feat{padding:var(--s4);background:var(--glass);border:1px solid var(--glass-line);
+    border-radius:var(--r3);
+    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+    box-shadow:var(--sheen),var(--lift)}
   .feat .h4{margin-bottom:6px}
   .feat p{margin:0;font-size:12.5px;line-height:1.6;color:var(--t2)}
 
@@ -333,7 +341,6 @@ export const LANDING_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="aura" aria-hidden="true"><i></i><i></i><i></i></div>
 
 <header>
   <div class="wrap in">
