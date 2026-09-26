@@ -1418,6 +1418,11 @@ function payWall(info){
         ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') + '.' +
         L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>')) +
     '<div id="bill" class="card">' + L('<div class="hint">Завантажую...</div>') + '</div>' +
+    /* Реквизиты плательщика прямо здесь. Счёт без них не выставить, а
+       карточка организации закрыта этой же стеной: человек упирался в
+       «виставити рахунок» и шёл за реквизитами в место, куда его не
+       пускают. */
+    '<div id="wreq"></div>' +
     L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallOut">Вийти</button></div>') +
     '</div>';
   document.body.appendChild(w);
@@ -1426,6 +1431,20 @@ function payWall(info){
      кабинета: вторая кнопка с тем же действием на одном экране
      заставляет выбирать там, где выбора нет. */
   billLoad();
+
+  /* Данные организации спрашиваем заново, а не берём из ME: стена
+     встаёт и по отказу на рабочей ручке, когда профиль ещё не
+     загружен, и реквизиты в этом случае оказались бы пустыми. Ручка
+     /me открыта и при закрытом доступе. */
+  api('/me').then(function(d){
+    ME = d;
+    var role = (d && d.user && d.user.role) || 'agent';
+    // Оператор не платит за компанию, и реквизиты ему не показываем.
+    if (role !== 'owner' && role !== 'admin') return;
+    if (!el('wreq')) return;
+    el('wreq').innerHTML = reqCard(d.tenant || {});
+    wireReq();
+  }).catch(function(){});
 }
 
 /**
@@ -4037,6 +4056,82 @@ function setNav(cur){
   }).join('') + '</div>';
 }
 
+/*
+ * Реквизиты плательщика.
+ *
+ * Отдельной функцией, потому что нужны в двух местах, и места эти
+ * далеки друг от друга: в карточке организации их вписывают заранее, а
+ * на стене оплаты — в тот момент, когда счёт понадобился впервые.
+ *
+ * Второе важнее. Без реквизитов счёт не выставить, а карточка
+ * организации закрыта той самой стеной: человек упирался в «виставити
+ * рахунок», шёл за реквизитами и не мог до них дойти.
+ */
+function reqCard(t){
+  t = t || {};
+  return L('<div class="pg-sec"><h3>Реквізити для рахунків</h3><div class="card">') +
+    L('<div class="hint">Їх бачить ваша бухгалтерія у рахунку. Без коду та адреси ') +
+    L('рахунок не проведуть.</div>') +
+    '<div class="row2" style="margin-top:8px">' +
+      L('<input id="rqName" placeholder="повна назва, напр. ТОВ «Ромашка»" value="') +
+        esc(t.legal_name || t.name || '') + '">' +
+      L('<input id="rqTax" placeholder="ЄДРПОУ або РНОКПП" value="') +
+        esc(t.tax_id || '') + '">' +
+    '</div>' +
+    '<div class="row2" style="margin-top:8px">' +
+      L('<input id="rqVat" placeholder="ІПН (якщо платник ПДВ)" value="') +
+        esc(t.vat_id || '') + '">' +
+      L('<input id="rqAddr" placeholder="юридична адреса" value="') +
+        esc(t.legal_address || '') + '">' +
+    '</div>' +
+    '<div class="row2" style="margin-top:8px">' +
+      L('<input id="rqIban" placeholder="IBAN" value="') + esc(t.iban || '') + '">' +
+      L('<input id="rqBank" placeholder="банк" value="') + esc(t.bank_name || '') + '">' +
+      L('<input id="rqMfo" placeholder="МФО" style="max-width:120px" value="') +
+        esc(t.bank_code || '') + '">' +
+    '</div>' +
+    '<div class="row2" style="margin-top:8px">' +
+      L('<input id="rqSign" placeholder="хто підписує, напр. директор Іваненко І. І." value="') +
+        esc(t.signer || '') + '">' +
+      '<label class="ochk" style="align-self:center"><input type="checkbox" id="rqVatp"' +
+        (t.vat_payer ? ' checked' : '') + '> ' + L('платник ПДВ') + '</label>' +
+    '</div>' +
+    L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="rqSave">Зберегти</button></div>') +
+    '<span class="ok" id="rqOk"></span><div class="err" id="rqErr"></div>' +
+    '</div></div>';
+}
+
+/* Реквизиты сохраняются целиком, одной кнопкой: это один документ, а
+   не девять настроек, и вписывают их за один подход. */
+function wireReq(){
+  if (!el('rqSave')) return;
+  el('rqSave').onclick = function(){
+    var b = el('rqSave');
+    el('rqErr').textContent = '';
+    el('rqOk').textContent = '';
+    busy(b, true);
+    api('/tenant/requisites', { method:'PATCH', body:{
+      legalName: el('rqName').value,
+      taxId: el('rqTax').value,
+      vatId: el('rqVat').value,
+      legalAddress: el('rqAddr').value,
+      bankName: el('rqBank').value,
+      iban: el('rqIban').value,
+      bankCode: el('rqMfo').value,
+      vatPayer: el('rqVatp').checked,
+      signer: el('rqSign').value
+    }}).then(function(){
+      el('rqOk').textContent = L('збережено');
+      // Счета читают реквизиты при печати, поэтому список перечитываем:
+      // иначе только что исправленный код уедет в старом виде.
+      INV = null;
+      if (el('invs')) invLoad();
+    }).catch(function(e){
+      el('rqErr').textContent = ((e && e.payload) || {}).error || L('Не вдалося зберегти');
+    }).then(function(){ busy(b, false) });
+  };
+}
+
 function pageBox(){ return el('page') }
 
 function sErr(e){
@@ -4129,38 +4224,7 @@ function tabProfile(){
       /* Реквизиты для счетов. Только администратору и только рядом с
          подпиской: их вписывают один раз, в тот день, когда впервые
          понадобился счёт, — и больше не вспоминают. */
-      (admin
-        ? L('<div class="pg-sec"><h3>Реквізити для рахунків</h3><div class="card">') +
-          L('<div class="hint">Їх бачить ваша бухгалтерія у рахунку. Без коду та адреси ') +
-          L('рахунок не проведуть.</div>') +
-          '<div class="row2" style="margin-top:8px">' +
-            L('<input id="rqName" placeholder="повна назва, напр. ТОВ «Ромашка»" value="') +
-              esc(t.legal_name || t.name || '') + '">' +
-            L('<input id="rqTax" placeholder="ЄДРПОУ або РНОКПП" value="') +
-              esc(t.tax_id || '') + '">' +
-          '</div>' +
-          '<div class="row2" style="margin-top:8px">' +
-            L('<input id="rqVat" placeholder="ІПН (якщо платник ПДВ)" value="') +
-              esc(t.vat_id || '') + '">' +
-            L('<input id="rqAddr" placeholder="юридична адреса" value="') +
-              esc(t.legal_address || '') + '">' +
-          '</div>' +
-          '<div class="row2" style="margin-top:8px">' +
-            L('<input id="rqIban" placeholder="IBAN" value="') + esc(t.iban || '') + '">' +
-            L('<input id="rqBank" placeholder="банк" value="') + esc(t.bank_name || '') + '">' +
-            L('<input id="rqMfo" placeholder="МФО" style="max-width:120px" value="') +
-              esc(t.bank_code || '') + '">' +
-          '</div>' +
-          '<div class="row2" style="margin-top:8px">' +
-            L('<input id="rqSign" placeholder="хто підписує, напр. директор Іваненко І. І." value="') +
-              esc(t.signer || '') + '">' +
-            '<label class="ochk" style="align-self:center"><input type="checkbox" id="rqVatp"' +
-              (t.vat_payer ? ' checked' : '') + '> ' + L('платник ПДВ') + '</label>' +
-          '</div>' +
-          L('<div class="row2" style="margin-top:8px"><button class="ghost mini" id="rqSave">Зберегти</button></div>') +
-          '<span class="ok" id="rqOk"></span><div class="err" id="rqErr"></div>' +
-          '</div></div>'
-        : '') +
+      (admin ? reqCard(t) : '') +
 
       /* Подписка. Только администратору: оператор не решает, чем платит
          компания, и кнопка оплаты у него была бы тупиком. */
@@ -4180,33 +4244,7 @@ function tabProfile(){
     wireWh();
     if (el('bill')) billLoad();
 
-    /* Реквизиты сохраняются целиком, одной кнопкой: это один документ,
-       а не девять настроек, и вписывают их за один подход. */
-    if (el('rqSave')) el('rqSave').onclick = function(){
-      var b = el('rqSave');
-      el('rqErr').textContent = '';
-      el('rqOk').textContent = '';
-      busy(b, true);
-      api('/tenant/requisites', { method:'PATCH', body:{
-        legalName: el('rqName').value,
-        taxId: el('rqTax').value,
-        vatId: el('rqVat').value,
-        legalAddress: el('rqAddr').value,
-        bankName: el('rqBank').value,
-        iban: el('rqIban').value,
-        bankCode: el('rqMfo').value,
-        vatPayer: el('rqVatp').checked,
-        signer: el('rqSign').value
-      }}).then(function(){
-        el('rqOk').textContent = L('збережено');
-        // Счета читают реквизиты при печати, поэтому список перечитываем:
-        // иначе только что исправленный код уедет в старом виде.
-        INV = null;
-        if (el('invs')) invLoad();
-      }).catch(function(e){
-        el('rqErr').textContent = ((e && e.payload) || {}).error || L('Не вдалося зберегти');
-      }).then(function(){ busy(b, false) });
-    };
+    wireReq();
 
     if (el('pfFree')) el('pfFree').onclick = function(){
       var b = el('pfFree');
@@ -6922,10 +6960,20 @@ function ntAdd(){
   var pushTile = '<div class="tile"><div class="t1"><div class="chico soon">!</div>' +
     L('<div><div class="ttl">Пуш у браузер</div><div class="sub">Приходить, навіть коли вкладку закрито</div></div></div>') +
     (push.ready
-      ? L('<div class="sub" style="white-space:normal">Дозвольте сповіщення у браузері — на цьому пристрої. ') +
-        L('Кожен співробітник вмикає їх собі сам.</div>') +
-        L('<div class="acts"><button id="ntPushOn">Дозволити сповіщення</button>') +
-        L('<button class="ghost mini" id="ntAddPush">Додати адресата</button></div>')
+      ? L('<div class="sub" style="white-space:normal">Кожен співробітник вмикає сповіщення собі сам ') +
+        L('і на кожному пристрої окремо.</div>') +
+        (Number(push.subscriptions || 0)
+          ? '<div class="sub" style="margin-top:4px">' + L('Пристроїв підписано: ') +
+            esc(push.subscriptions) + '</div>'
+          : '') +
+        /* На iPhone пуш приходит только в приложение с домашнего
+           экрана: во вкладке Safari его нет вовсе, и кнопка «дозволити»
+           там честно отвечает отказом. Лучше сказать это до нажатия. */
+        (iosTab()
+          ? L('<div class="sub" style="white-space:normal;margin-top:6px">На iPhone сповіщення працюють ') +
+            L('лише з додатка на екрані «Додому»: меню «Поділитися» → «На екран Додому», ') +
+            L('відкрийте звідти і увімкніть.</div>')
+          : L('<div class="acts"><button id="ntPushOn">Дозволити сповіщення</button></div>'))
       : L('<div class="sub" style="white-space:normal">Пуш не налаштований на сервері: немає ключів VAPID. ') +
         L('Їх видає команда npx web-push generate-vapid-keys, далі вони йдуть у змінні ') +
         L('VAPID_PUBLIC_KEY і VAPID_PRIVATE_KEY.</div>')) +
@@ -7016,9 +7064,6 @@ function wireNotify(){
   };
   if (el('ntAddMail')) el('ntAddMail').onclick = function(){
     ntCreate('email', { to: el('ntMail').value.trim() }, 'ntMailErr');
-  };
-  if (el('ntAddPush')) el('ntAddPush').onclick = function(){
-    ntCreate('push', {}, 'ntPushErr');
   };
   if (el('ntPushOn')) el('ntPushOn').onclick = ntPushSubscribe;
 }
@@ -7124,6 +7169,15 @@ function ntPushSubscribe(){
     busy(el('ntPushOn'), false);
     box.textContent = (e && e.message) || L('Не вдалося увімкнути пуш');
   });
+}
+
+/* iPhone во вкладке браузера. Пуш там не поддерживается вообще — он
+   работает только в приложении, добавленном на домашний экран. */
+function iosTab(){
+  var ios = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+  var app = navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  return ios && !app;
 }
 
 /* Ключ приходит в виде base64url, а подписка ждёт байты. */

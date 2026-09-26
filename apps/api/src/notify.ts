@@ -590,6 +590,30 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
           String(req.headers['user-agent'] ?? '').slice(0, 200),
         ],
       );
+
+      /*
+       * Адресат заводится сам.
+       *
+       * Раньше разрешить сповіщення и завести адресата были двумя
+       * разными кнопками, и человек нажимал одну. Подписка лежала,
+       * адресата не было, пуш не уходил никуда — и это выглядело как
+       * «уведомления не работают», потому что это они и были.
+       *
+       * Заводим один раз на организацию: подписок много, по одной на
+       * устройство, а адресат для них общий. Если он уже есть — не
+       * трогаем: человек мог сам отключить в нём часть событий.
+       */
+      const { rowCount } = await db.query(
+        `SELECT 1 FROM notify_targets WHERE tenant_id = $1 AND kind = 'push' LIMIT 1`,
+        [auth.tenantId],
+      );
+      if (!rowCount) {
+        await db.query(
+          `INSERT INTO notify_targets (tenant_id, kind, title, config, events)
+           VALUES ($1, 'push', $2, '{}'::jsonb, $3::text[])`,
+          [auth.tenantId, 'Пуш у браузер', [...NOTIFY_EVENTS]],
+        );
+      }
     });
     return { ok: true };
   });
@@ -664,11 +688,21 @@ self.addEventListener('push', function(event){
   var data = {};
   try { data = event.data ? event.data.json() : {} } catch (e) { data = {} }
   var title = data.title || 'Rozmovio';
+  /* Метка — по диалогу, а не по сообщению: десять сообщений одного
+     клиента показываются одной карточкой, а не забивают шторку.
+
+     Но renotify обязателен. Без него браузер тихо подменяет карточку
+     с той же меткой: первое сообщение звонит, второе и все следующие
+     приходят беззвучно. Со стороны это выглядит ровно как «пуш не
+     работает», и выглядело. */
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || '',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
     tag: data.link || title,
+    renotify: true,
+    vibrate: [90, 50, 90],
+    timestamp: Date.now(),
     data: { link: data.link || '/' }
   }));
 });
