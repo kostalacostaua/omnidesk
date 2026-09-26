@@ -132,15 +132,21 @@ export const INBOX_HTML = `<!DOCTYPE html>
     #app.thread-open #list{display:none}
     #app:not(.thread-open) #thread{display:none}}
 
-  /* ─── Панель разделов ──────────────────────────────────────────── */
+  /* ─── Панель разделов ──────────────────────────────────────────────
+     Прокручивается. У владельца разделов на два больше, и на телефоне
+     нижние — «Профіль» и «Вийти» — уезжали за край экрана: выйти из
+     кабинета было нечем. Полоса прокрутки скрыта: она тут шириной в
+     палец и закрывала бы подписи. */
   #rail{background:var(--rail);border-right:1px solid var(--glass-line);display:flex;
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    flex-direction:column;align-items:center;padding:12px 0;gap:2px}
+    flex-direction:column;align-items:center;padding:12px 0;gap:2px;
+    overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  #rail::-webkit-scrollbar{display:none}
   #rail .logo{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
     margin-bottom:14px}
   #rail .logo svg{width:28px;height:28px;display:block}
   .rbtn{background:transparent;border:0;color:var(--railT);width:54px;padding:9px 0;
-    border-radius:var(--r2);
+    flex:none;border-radius:var(--r2);
     border-radius:6px;font-size:10px;font-weight:600;display:flex;flex-direction:column;
     align-items:center;gap:5px;cursor:pointer;line-height:1.2;position:relative}
   .rbtn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6;
@@ -154,7 +160,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .rbtn .cnt{position:absolute;top:3px;right:6px;min-width:16px;height:16px;border-radius:8px;
     background:var(--crit);color:#fff;font-size:9.5px;font-weight:700;display:flex;
     align-items:center;justify-content:center;padding:0 4px;font-variant-numeric:tabular-nums}
-  #rail .grow{flex:1}
+  /* Распорка прижимает нижние кнопки к низу, пока место есть. Когда
+     места нет, она исчезает, а не съедает кнопки. */
+  #rail .grow{flex:1 1 0;min-height:0}
 
   /* Кнопка «назад» нужна только там, где список и переписка
      не помещаются рядом. На широком экране она лишняя. */
@@ -1061,10 +1069,29 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .pg-head h2{font-size:23px}
     .pg-head p{font-size:13px}
 
-    /* На телефоне окно поддержки — весь экран: панель в 360 точек на
-       экране в 390 это и есть весь экран, только с щелями по краям. */
-    #sup{left:0;right:0;bottom:0;top:0;width:auto;height:auto;border-radius:0}
   }
+
+  /* ── Кнопка поддержки ───────────────────────────────────────────
+     Круглая кнопка в углу — та же, что наш виджет ставит на сайтах
+     клиентов. Она узнаётся без подписи: человек видел её на сотне
+     чужих сайтов и знает, что под ней живой человек.
+
+     В разделе переписки на телефоне её нет: там внизу поле ответа,
+     и кнопка легла бы прямо на него. */
+  #supBtn{position:fixed;right:18px;bottom:18px;width:50px;height:50px;border-radius:50%;
+    background:var(--accent);color:var(--on-accent);border:0;padding:0;z-index:94;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    box-shadow:var(--sheen),0 12px 28px -10px var(--glow);
+    transition:transform var(--quick) var(--ease),background-color var(--quick) ease}
+  #supBtn svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round}
+  #supBtn:hover{background:var(--accent-h);transform:translateY(-2px)}
+  #supBtn:active{transform:translateY(0)}
+  #supBtn.off{display:none}
+  #supBtn .cnt{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;
+    border-radius:9px;background:var(--crit);color:#fff;font-size:10px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;padding:0 5px;
+    box-shadow:0 0 0 2px var(--bg)}
 
   /* ── Поддержка ──────────────────────────────────────────────────
      Переписка с нами живёт поверх кабинета, а не отдельной страницей:
@@ -1082,7 +1109,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
     border-bottom:1px solid var(--line);flex:none}
   #sup .sh b{font-size:13.5px;letter-spacing:-.012em}
   #sup .sh .s{font-size:11.5px;color:var(--t3);display:block;font-weight:400}
-  #sup .sh .x{margin-left:auto}
+  /* Крестик размером с палец: 12 точек символа — это цель, в которую
+     на телефоне не попадают, и окно кажется незакрываемым. */
+  /* Закрытие подписано словом, а не крестиком в двенадцать точек:
+     в крестик на телефоне не попадают, и окно кажется незакрываемым. */
+  #sup .sh .x{margin-left:auto;flex:none;min-height:36px}
   #sup .sb{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:7px}
   /* Свои сообщения справа, наши слева — так же, как в самой скриньке:
      человек уже знает эту раскладку, ей незачем быть другой. */
@@ -1096,6 +1127,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #sup .sf{flex:none;border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:7px;
     align-items:flex-end}
   #sup .sf textarea{min-height:40px;max-height:120px}
+
+  /* Телефон. Правила идут после основных намеренно: при одинаковой
+     силе побеждает то, что ниже, и стоявшие выше они не применялись
+     вовсе — окно оставалось шириной в 368 точек на экране в 390,
+     и крестик наполовину уезжал за правый край.
+
+     Рейл остаётся на виду: это второй выход, тем же значком, которым
+     открыли. Верхний отступ — полоса статуса: в приложении с
+     домашнего экрана она накрывает первые сорок точек, и крестик
+     оказывался физически под часами. Закрыть окно было нечем, только
+     перезапустить приложение.
+
+     16 точек в поле ввода — по той же причине, что и в поле ответа:
+     при меньшем размере Safari увеличивает страницу при фокусе и
+     обратно её не уменьшает. */
+  @media(max-width:820px){
+    /* Поле ответа занимает низ экрана — кнопке там не место. Знак
+       соседства, а не вложенности: кнопка лежит рядом с кабинетом, а
+       не внутри него. */
+    #app.thread-open ~ #supBtn{display:none}
+    #sup{left:0;right:0;top:0;bottom:0;width:auto;height:auto;border-radius:0;
+      padding-top:env(safe-area-inset-top)}
+    #sup .sf{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    #sup .sf textarea{font-size:16px}
+  }
 </style>
 </head>
 <body>
@@ -1190,7 +1246,6 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
-    <button class="rbtn" id="sup0" data-icon="help" data-t>Підтримка</button>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
     <button class="rbtn" data-view="profile" data-icon="gear" data-t>Профіль</button>
@@ -1232,6 +1287,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   <main id="page"></main>
 </div>
+
+<!-- Виджет поддержки. Лежит в теле страницы, а не внутри кабинета:
+     внутри он попадал в слой кабинета и оказывался под стеной оплаты,
+     то есть пропадал на том единственном экране, где он нужен больше
+     всего. До входа скрыт. -->
+<button id="supBtn" class="off" data-icon="chat" data-tt title="Підтримка"></button>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
@@ -1345,14 +1406,13 @@ function payWall(info){
         ((info && info.paidUntil) ? ' ' + esc(fmtDate(info.paidUntil)) : '') + '.' +
         L(' Дані на місці й нікуди не дінуться — щоб продовжити роботу, оберіть тариф.</p>')) +
     '<div id="bill" class="card">' + L('<div class="hint">Завантажую...</div>') + '</div>' +
-    L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallSup">Написати нам</button>') +
-    L('<button class="ghost mini" id="wallOut">Вийти</button></div>') +
+    L('<div class="row2" style="margin-top:10px"><button class="ghost mini" id="wallOut">Вийти</button></div>') +
     '</div>';
   document.body.appendChild(w);
   el('wallOut').onclick = logout;
-  /* Закрытый доступ — первая причина нам написать, и кнопка должна
-     быть здесь же: искать её в закрытом кабинете человек не станет. */
-  el('wallSup').onclick = supOpen;
+  /* Написать нам со стены можно тем же кружком в углу, что и из
+     кабинета: вторая кнопка с тем же действием на одном экране
+     заставляет выбирать там, где выбора нет. */
   billLoad();
 }
 
@@ -10088,12 +10148,16 @@ function supBox(){
   d.innerHTML =
     '<div class="sh"><div class="grow"><b>' + L('Підтримка') + '</b>' +
       '<span class="s">' + L('Зазвичай відповідаємо протягом години') + '</span></div>' +
-      '<button class="quiet mini x" id="supX" title="' + L('Закрити') + '">&#215;</button></div>' +
+      '<button class="ghost mini x" id="supX">' + L('Закрити') + '</button></div>' +
     '<div class="sb" id="supList"></div>' +
     '<div class="sf"><textarea id="supT" rows="1" placeholder="' + L('Що сталося?') + '"></textarea>' +
       '<button class="mini" id="supGo">' + L('Надіслати') + '</button></div>';
   document.body.appendChild(d);
   el('supX').onclick = supClose;
+  /* Escape закрывает — привычка любого окна поверх страницы. */
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && supOn()) supClose();
+  });
   el('supGo').onclick = supSend;
   el('supT').oninput = function(){
     this.style.height = 'auto';
@@ -10109,6 +10173,7 @@ function supBox(){
 
 function supOpen(){
   supBox().classList.add('on');
+  if (el('supBtn')) el('supBtn').classList.add('off');
   supPaint();
   if (!SUP) api('/support')
     .then(function(d){ SUP = d || { ready:false }; supPaint(); supTick() })
@@ -10121,6 +10186,7 @@ function supOpen(){
 
 function supClose(){
   if (el('sup')) el('sup').classList.remove('on');
+  if (el('supBtn') && TOKEN) el('supBtn').classList.remove('off');
   if (SUP_MSGS.length) supSeen(SUP_MSGS[SUP_MSGS.length - 1].cursor || '');
   supBell();
   supTick();
@@ -10160,7 +10226,7 @@ function supFetch(){
 
 /* Точка на кнопке: пришёл ответ, которого человек не видел. */
 function supBell(){
-  var b = el('sup0');
+  var b = el('supBtn');
   if (!b) return;
   var last = SUP_MSGS.length ? SUP_MSGS[SUP_MSGS.length - 1] : null;
   var fresh = Boolean(last && !last.mine && (last.cursor || '') !== supSeen());
@@ -10236,6 +10302,7 @@ function start(){
   el('cardX').onclick = function(){ cardDrawer(false) };
   el('gate').style.display = 'none';
   el('app').style.display = 'grid';
+  el('supBtn').classList.remove('off');
   fitHeight();
   paintIcons();
   paintBell();
@@ -10302,6 +10369,7 @@ function logout(){
   if (SUP_T) clearTimeout(SUP_T);
   SUP = null; SUP_MSGS = []; SUP_PEND = []; SUP_AT = null; SUP_T = null;
   if (el('sup')) el('sup').remove();
+  el('supBtn').classList.add('off');
   api('/auth/session', { method:'DELETE' }).catch(function(){});
   TOKEN = ''; current = null; convs = [];
   tokenWrite('');
@@ -10316,7 +10384,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), func
   b.onclick = function(){ setView(b.dataset.view) };
 });
 el('logo').onclick = function(){ setView('chats') };
-el('sup0').onclick = supToggle;
+el('supBtn').onclick = supToggle;
 
 Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
   b.onclick = function(){
