@@ -2806,6 +2806,7 @@ function renderCard(){
     (d.crmUrl && d.crmKind === 'bitrix24'
       ? L('<div class="kv2"><div class="k">Картка</div>') +
         '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Бітріксі</a></div></div>') +
+        L('<button class="ghost mini" id="cUnlink" style="margin-top:6px">Відвʼязати від CRM</button>') +
         L('<h4>Замовлення</h4>') +
         L('<button class="ghost mini" id="oOpen">Зібрати замовлення</button>') +
         '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
@@ -2814,6 +2815,7 @@ function renderCard(){
       : d.crmUrl
       ? L('<div class="kv2"><div class="k">Картка</div>') +
         '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Zoho</a></div></div>') +
+        L('<button class="ghost mini" id="cUnlink" style="margin-top:6px">Відвʼязати від CRM</button>') +
         /* Компания. Стоит здесь, а не в «Контакті»: это поле не наше,
            оно живёт в CRM, и меняется там же. Показываем последнее, что
            отправляли, — переименование в CRM сюда не приедет. */
@@ -2840,7 +2842,7 @@ function renderCard(){
             L('<div class="hint" style="margin-top:6px">Перша кнопка конвертує ліда в Zoho ') +
             L('звідси. Друга — якщо його вже сконвертували там.</div>') +
             '<div class="err" id="oErr"></div>')
-      : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в Zoho</button></div>') +
+      : L('<div class="row2"><button class="ghost mini" id="cCrm">Надіслати в CRM</button></div>') +
         L('<div class="hint" style="margin-top:6px">Знайдемо за номером і привʼяжемо картку, ') +
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
         '<div class="err" id="cCrmErr"></div>') +
@@ -2925,6 +2927,16 @@ function renderCard(){
       setTimeout(function(){ if (el('cOk')) el('cOk').textContent = '' }, 2000);
       refresh();
     }).catch(showErr).then(function(){ busy(el('cSave'), false) });
+  };
+
+  /* Отвязка нужна, когда сменили CRM: связь липкая и сама не
+     перезаводится, а прежние клиенты остались бы в старой навсегда. */
+  if (el('cUnlink')) el('cUnlink').onclick = function(){
+    var b = el('cUnlink');
+    busy(b, true);
+    api('/contacts/' + ct.id + '/crm', { method:'DELETE' })
+      .then(function(){ toast(L('Відвʼязано')); loadCard() })
+      .catch(function(){ busy(b, false); toast(L('Не вдалося відвʼязати')) });
   };
 
   if (el('cCrm')) el('cCrm').onclick = function(){

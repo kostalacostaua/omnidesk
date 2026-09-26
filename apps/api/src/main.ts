@@ -1399,6 +1399,36 @@ app.get<{ Params: { contactId: string } }>('/avatars/:contactId', async (req, re
 });
 
 /**
+ * Отвязать контакт от CRM.
+ *
+ * Связь одна на контакт, и она липкая: заведённая карточка больше не
+ * перезаводится — иначе каждое сообщение плодило бы дубли. Но CRM
+ * меняют: подключили другую, а все прежние клиенты так и ссылаются на
+ * старую и в новой не появятся никогда.
+ *
+ * Карточку в самой CRM не трогаем: она там могла обрасти историей, и
+ * удалять чужое по кнопке «отвязать» мы не вправе. Здесь рвётся только
+ * наша связь.
+ */
+app.delete<{ Params: { id: string } }>('/contacts/:id/crm', async (req, reply) => {
+  const auth = requireAuth(req as never);
+  if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+  const ok = await withTenant(pool, auth.tenantId, async (db) => {
+    const { rowCount } = await db.query(
+      `UPDATE contacts SET crm_kind = NULL, crm_module = NULL, crm_record_id = NULL
+        WHERE id = $1`,
+      [req.params.id],
+    );
+    return (rowCount ?? 0) > 0;
+  });
+
+  if (!ok) return reply.code(404).send({ error: 'not_found' });
+  app.log.info({ tenantId: auth.tenantId, contactId: req.params.id }, 'Связь с CRM разорвана');
+  return { ok: true };
+});
+
+/**
  * Отправить контакт в CRM руками.
  *
  * Автоматика срабатывает на первое сообщение, но случаи бывают разные:
@@ -1437,11 +1467,23 @@ app.post<{ Params: { id: string } }>('/contacts/:id/crm', async (req, reply) => 
   if (!info) return reply.code(404).send({ error: 'not_found' });
   if (info.crm_record_id) return reply.code(409).send({ error: 'already_linked' });
 
-  const zoho = await withTenant(pool, auth.tenantId, async (db) => {
-    const { rows } = await db.query(`SELECT 1 FROM zoho_installations WHERE status = 'active' LIMIT 1`);
+  /*
+   * Любая подключённая CRM, а не только Zoho.
+   *
+   * Раньше кнопка проверяла Zoho и отвечала «CRM не подключена» тому, у
+   * кого подключён Битрикс: сама отправка давно умеет обе, а проверка
+   * осталась от времени, когда CRM была одна.
+   */
+  const anyCrm = await withTenant(pool, auth.tenantId, async (db) => {
+    const { rows } = await db.query(
+      `SELECT 1 FROM zoho_installations WHERE status = 'active'
+        UNION ALL
+       SELECT 1 FROM crm_connections WHERE status = 'active'
+       LIMIT 1`,
+    );
     return rows.length > 0;
   });
-  if (!zoho) return reply.code(409).send({ error: 'crm_not_connected' });
+  if (!anyCrm) return reply.code(409).send({ error: 'crm_not_connected' });
 
   // Ключ с отметкой времени: ручной повтор должен выполняться, а не
   // считаться дубликатом уже сделанной задачи.
