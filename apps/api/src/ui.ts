@@ -1071,6 +1071,21 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   }
 
+  /* Переключатель страниц настроек. Подчёркивание, а не кнопки:
+     это навигация внутри раздела, и спорить с заголовком страницы ей
+     незачем. На телефоне прокручивается вбок — четыре слова в 390
+     точек не помещаются, а перенос забрал бы вторую строку. */
+  .setnav{display:flex;gap:18px;margin-bottom:14px;border-bottom:1px solid var(--line);
+    overflow-x:auto;scrollbar-width:none}
+  .setnav::-webkit-scrollbar{display:none}
+  .snav{background:transparent;border:0;border-bottom:2px solid transparent;box-shadow:none;
+    color:var(--t3);font-size:13px;font-weight:600;padding:0 0 10px;border-radius:0;
+    white-space:nowrap;flex:none;letter-spacing:-.008em;
+    transition:color var(--quick) ease,border-color var(--quick) ease}
+  .snav:hover{background:transparent;color:var(--t1);border-color:var(--line2)}
+  .snav:active{transform:none}
+  .snav.on{color:var(--t1);border-color:var(--accent)}
+
   /* ── Кнопка поддержки ───────────────────────────────────────────
      Круглая кнопка в углу — та же, что наш виджет ставит на сайтах
      клиентов. Она узнаётся без подписи: человек видел её на сотне
@@ -1238,17 +1253,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1" data-t>Канали</button>
     <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1" data-t>Сценарії</button>
     <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
-    <button class="rbtn" data-view="statuses" data-icon="tag" data-admin="1" data-t>Статуси</button>
     <button class="rbtn" data-view="reports" data-icon="chart" data-admin="1" data-t>Звіти</button>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
-    <button class="rbtn" data-view="users" data-icon="team" data-admin="1" data-t>Команда</button>
-    <button class="rbtn" data-view="notify" data-icon="bell" data-admin="1" data-t>Сповіщення</button>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
     <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
     <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
-    <button class="rbtn" data-view="profile" data-icon="gear" data-t>Профіль</button>
+    <button class="rbtn" data-view="profile" data-icon="gear" data-t>Налаштування</button>
     <button class="rbtn" id="out" data-icon="exit" data-t>Вийти</button>
   </nav>
 
@@ -3987,6 +3999,44 @@ function pageHead(title, sub, right){
     (sub ? '<p>' + sub + '</p>' : '') + '</div>' + (right || '') + '</div>';
 }
 
+/*
+ * Настройки — это раздел, а не четыре соседних пункта в рейле.
+ *
+ * Команда, статусы и оповещения стояли там же, где чаты и отчёты:
+ * между работой и настройкой работы не было границы, а сам рейл вырос
+ * до одиннадцати пунктов и у владельца перестал помещаться в экран
+ * телефона. Настройка — дело редкое, и ей место в одном месте со
+ * своим переключателем страниц.
+ *
+ * Порядок здесь не случайный: сначала своё, потом люди, потом правила
+ * работы. Так его и ищут.
+ */
+var SET_PAGES = [
+  { v:'profile',  t:'Профіль',    admin:false },
+  { v:'users',    t:'Команда',    admin:true  },
+  { v:'statuses', t:'Статуси',    admin:true  },
+  { v:'notify',   t:'Сповіщення', admin:true  }
+];
+
+/** Есть ли такая страница в настройках. По ней подсвечивается рейл. */
+function isSetView(view){
+  return SET_PAGES.some(function(p){ return p.v === view });
+}
+
+/*
+ * Оператору видна одна страница из четырёх, и переключатель из одной
+ * кнопки — это не переключатель, а украшение. Поэтому для него его
+ * просто нет.
+ */
+function setNav(cur){
+  var mine = SET_PAGES.filter(function(p){ return isAdmin() || !p.admin });
+  if (mine.length < 2) return '';
+  return '<div class="setnav">' + mine.map(function(p){
+    return '<button class="snav' + (p.v === cur ? ' on' : '') + '" data-set="' +
+      p.v + '">' + esc(L(p.t)) + '</button>';
+  }).join('') + '</div>';
+}
+
 function pageBox(){ return el('page') }
 
 function sErr(e){
@@ -4016,7 +4066,7 @@ function tabProfile(){
     var t = d.tenant || {}, u = d.user || {}, c = d.counts || {};
     var admin = isAdmin();
 
-    pageBox().innerHTML = '<div class="pg">' +
+    pageBox().innerHTML = '<div class="pg">' + setNav('profile') +
       pageHead(L('Профіль'), L('Ваші дані і дані організації.')) +
 
       '<div class="prof">' +
@@ -6607,7 +6657,7 @@ function tabUsers(){
     var opts = Object.keys(ROLES).filter(function(r){ return r !== 'owner' })
       .map(function(r){ return '<option value="' + r + '">' + ROLES[r] + '</option>' }).join('');
 
-    pageBox().innerHTML = '<div class="pg">' +
+    pageBox().innerHTML = '<div class="pg">' + setNav('users') +
       pageHead(L('Команда'), L('Оператори відповідають клієнтам, спостерігачі тільки читають, ') +
         L('адміністратори змінюють канали і склад команди.')) +
       L('<div class="card"><h3>Запросити співробітника</h3>') +
@@ -6890,7 +6940,7 @@ function tabNotify(){
     NT.data = d;
     var list = (d.targets || []).map(ntCard).join('');
 
-    pageBox().innerHTML = '<div class="pg">' +
+    pageBox().innerHTML = '<div class="pg">' + setNav('notify') +
       pageHead(L('Сповіщення'),
         L('Куди повідомляти про те, що відбувається в інбоксі, коли на нього ніхто не дивиться.')) +
       ntWaitRow() +
@@ -7834,7 +7884,7 @@ function tabStatuses(){
     fillStatusFilter();
     lastList = null;
 
-    pageBox().innerHTML = '<div class="pg">' +
+    pageBox().innerHTML = '<div class="pg">' + setNav('statuses') +
       pageHead(L('Статуси діалогів'),
         L('Системних станів чотири, і вони про механіку: чат відкритий або закритий. ') +
         L('Статуси — про вашу роботу: <b>«Чекаємо оплату»</b>, <b>«Передано на склад»</b>, ') +
@@ -10075,7 +10125,11 @@ function setView(view){
   el('app').dataset.view = view;
   if (view === 'chats') { backToList(); }
   Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
-    b.classList.toggle('on', b.dataset.view === view);
+    /* Страницы настроек прячутся за одной кнопкой рейла — и она горит
+       на любой из них, иначе человек на «Команді» видит рейл, где не
+       выбрано ничего, и не понимает, где он. */
+    b.classList.toggle('on', b.dataset.view === view ||
+      (b.dataset.view === 'profile' && isSetView(view)));
   });
   if (view !== 'chats') {
     S.view = view;
@@ -10385,6 +10439,14 @@ Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), func
 });
 el('logo').onclick = function(){ setView('chats') };
 el('supBtn').onclick = supToggle;
+
+/* Переключатель страниц настроек. Слушаем раздел целиком, а не кнопки:
+   страницы перерисовываются, и привязка к кнопкам терялась бы вместе
+   с ними. */
+el('page').addEventListener('click', function(e){
+  var b = e.target && e.target.closest ? e.target.closest('[data-set]') : null;
+  if (b) setView(b.dataset.set);
+});
 
 Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
   b.onclick = function(){
