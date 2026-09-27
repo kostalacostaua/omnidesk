@@ -384,7 +384,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .mvsel{padding:4px 7px;font-size:12px;border-radius:7px;max-width:150px;
     background:var(--panel);border:1px solid var(--line);color:var(--t1)}
   .tplbox .qfdl{padding:6px 11px 3px;font-size:11px;font-weight:600;
-    color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+    color:var(--t3)}
   .tplbox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;
     max-height:180px;overflow-y:auto;background:var(--panel)}
   .tplbox .qr{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12.5px}
@@ -401,8 +401,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   /* ─── Карточка клиента ─────────────────────────────────────────── */
   #card{border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:13px 14px}
-  #card h4{margin:16px 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
-    color:var(--t3);font-weight:700}
+  /* Заголовок раздела в карточке: капсом и вразрядку он читается как
+     чужой шаблон, а не как наш. Отличать его от текста хватает цвета
+     и веса. */
+  #card h4{margin:16px 0 8px;font-size:12px;color:var(--t3);font-weight:700}
   #card h4:first-child{margin-top:0}
   #card .fld{margin-bottom:7px}
   #card .fld label{font-size:10.5px;color:var(--t3);display:block;margin-bottom:3px}
@@ -434,11 +436,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .item:last-child{border-bottom:0;padding-bottom:0}
   .item .t{font-weight:600;font-size:13px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
   .item .s{font-size:11.5px;color:var(--t3);margin-top:3px;line-height:1.5}
-  .pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;
-    background:var(--good-bg);color:var(--good)}
-  .pill.warn{background:var(--warn-bg);color:var(--warn)}
-  .pill.crit{background:var(--crit-bg);color:var(--crit)}
-  .pill.soon{background:var(--panel2);color:var(--t3)}
+  /* Спокойное состояние — слово и цвет, без подложки: цветная плашка
+     напротив «працює» ничего не сообщает, а взгляд забирает. Подложка
+     осталась у того, что требует действия. */
+  .pill{font-size:11px;font-weight:600;padding:2px 0;color:var(--good)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn);padding:2px 8px;border-radius:var(--rf)}
+  .pill.crit{background:var(--crit-bg);color:var(--crit);padding:2px 8px;border-radius:var(--rf)}
+  .pill.soon{background:transparent;color:var(--t3);padding:2px 0}
   .hint{font-size:11.5px;color:var(--t3);line-height:1.55;margin-top:8px}
 
   /* ─── Настройки ────────────────────────────────────────────────── */
@@ -494,13 +498,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Состояние прижато к низу: строки описания разной длины, и без
      этого точки стоят на разной высоте — взгляд ищет их по очереди
      вместо того, чтобы пройти по ряду. */
-  .tile-st{margin-top:auto;padding-top:11px;display:flex;align-items:center;gap:6px;
-    font-size:11.5px;color:var(--t3)}
-  .tile-st i{width:6px;height:6px;border-radius:50%;background:var(--t3);flex:none}
+  /* Состояние — словом и цветом. Точка перед словом «підключено»
+     ничего к нему не добавляет. */
+  .tile-st{margin-top:auto;padding-top:11px;font-size:11.5px;color:var(--t3)}
   .tile-st.on{color:var(--good)}
-  .tile-st.on i{background:var(--good)}
   .tile-st.warn{color:var(--warn)}
-  .tile-st.warn i{background:var(--warn)}
   .pg-back{margin-bottom:14px}
   /* Ссылка, открывающая спрятанный кусок настройки: не кнопка — за ней
      не действие, а «покажи остальное». */
@@ -839,7 +841,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .pg-sec{margin-top:30px}
   /* Подпись раздела, а не ещё один заголовок: капслок мелким кеглем
      отделяет разделы, не перебивая название страницы. */
-  .pg-sec h3{margin:0 0 12px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+  .pg-sec h3{margin:0 0 12px;font-size:12.5px;
     color:var(--t3);font-weight:600}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
   .tile{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;
@@ -1038,11 +1040,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .ntev{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);cursor:pointer}
   .ntev input{width:auto;margin:0}
   .chico.soon{background:var(--panel2);color:var(--t3)}
-  .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;
-    background:var(--panel2);color:var(--t2);white-space:nowrap}
-  .pill.ok{background:var(--good-bg);color:var(--good)}
-  .pill.warn{background:var(--warn-bg);color:var(--warn)}
-  .pill.crit{background:var(--crit-bg);color:var(--crit)}
+  .pill{font-size:11px;font-weight:600;padding:3px 0;
+    background:transparent;color:var(--t3);white-space:nowrap}
+  .pill.ok,.pill.good{background:transparent;color:var(--good);padding:3px 0}
+  .pill.warn{background:var(--warn-bg);color:var(--warn);padding:3px 9px;border-radius:999px}
+  .pill.crit{background:var(--crit-bg);color:var(--crit);padding:3px 9px;border-radius:999px}
   .back-link{background:transparent;border:0;color:var(--t3);font-weight:600;font-size:12.5px;
     padding:0;box-shadow:none;margin-bottom:10px}
   .back-link:hover{background:transparent;color:var(--t1);box-shadow:none}
@@ -6576,7 +6578,7 @@ function crmTile(o){
     '<div class="tile-n">' + esc(o.title) + '</div>' +
     '<div class="tile-s">' + esc(o.sub) + '</div>' +
     '<div class="tile-st' + (o.st.on ? ' on' : (o.st.warn ? ' warn' : '')) + '">' +
-    '<i></i>' + esc(o.st.text) + '</div></div>';
+    esc(o.st.text) + '</div></div>';
 }
 
 /*

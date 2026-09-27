@@ -317,16 +317,20 @@ export const KIT_CSS = `
 
   /* Статус. Цвет здесь несёт смысл, поэтому набор закрыт: четыре
      состояния и ничего больше. Иначе через месяц статусов девять
-     и человек перестаёт их различать. */
+     и человек перестаёт их различать.
+     
+     Ни точки, ни подложки у спокойных состояний. Точка перед словом
+     «працює» не добавляет к слову ничего — она была украшением, по
+     которому чужой интерфейс узнают с первого взгляда. Подложка
+     осталась там, где состояние требует действия: беда и предупреждение
+     должны цеплять глаз, «всё хорошо» — нет. */
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
-    padding:3px 9px;border-radius:var(--rf);background:var(--panel2);color:var(--t2);
-    white-space:nowrap}
-  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;
-    flex:none}
-  .pill.good{background:var(--good-bg);color:var(--good)}
-  .pill.warn{background:var(--warn-bg);color:var(--warn)}
-  .pill.crit{background:var(--crit-bg);color:var(--crit)}
-  .pill.flat::before{display:none}
+    padding:3px 0;color:var(--t3);white-space:nowrap}
+  .pill.good{color:var(--good)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn);padding:3px 9px;
+    border-radius:var(--rf)}
+  .pill.crit{background:var(--crit-bg);color:var(--crit);padding:3px 9px;
+    border-radius:var(--rf)}
   .chip{font-size:10px;padding:2px 6px;border-radius:var(--r1);background:var(--panel2);
     color:var(--t2);font-weight:600}
   .badge{background:var(--crit);color:#fff;border-radius:var(--rf);padding:1px 6px;
@@ -335,7 +339,7 @@ export const KIT_CSS = `
   /* Таблица. Тонкие линии только между строками: сетка из рамок
      превращает данные в шахматную доску и мешает их читать. */
   .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-  .tbl th{text-align:left;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;
+  .tbl th{text-align:left;font-size:11.5px;
     color:var(--t3);font-weight:700;padding:0 10px 8px;border-bottom:1px solid var(--line)}
   .tbl td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
   .tbl tr:last-child td{border-bottom:0}
@@ -539,7 +543,7 @@ export const EMOJI_CSS = `
      вместе с началом переписки. Теперь прокручивается внутри. */
   .emobox{border:1px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--panel);
     max-height:min(212px,40vh);overflow-y:auto;overscroll-behavior:contain;padding:4px 8px 8px}
-  .emobox .gt{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);
+  .emobox .gt{font-size:11px;color:var(--t3);
     font-weight:700;margin:8px 0 4px}
   .emobox .gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:2px}
   .emobox button{background:transparent;border:0;box-shadow:none;font-size:19px;line-height:1;

@@ -56,7 +56,7 @@ type ChState = 'ready' | 'soon' | 'beta';
 function chCard(icon: string, key: string, state: ChState = 'ready'): string {
   const pill =
     state === 'soon'
-      ? '<span class="pill flat" data-t="soon"></span>'
+      ? '<span class="pill" data-t="soon"></span>'
       : state === 'beta'
         ? '<span class="pill warn" data-t="beta"></span>'
         : '<span class="pill good" data-t="ready"></span>';
@@ -135,10 +135,11 @@ export const LANDING_HTML = `<!DOCTYPE html>
     gap:clamp(28px,5vw,64px);align-items:center}
   @media(max-width:980px){.hero .in{grid-template-columns:minmax(0,1fr)}}
   .tagb svg{width:14px;height:14px;flex:none}
-  .tagb{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;
-    letter-spacing:.02em;text-transform:uppercase;color:var(--accent);
-    background:var(--accent-soft);padding:5px 11px;border-radius:var(--rf);
-    margin-bottom:var(--s4)}
+  /* Строка над заголовком. Была капсом вразрядку, в цветной пилюле и
+     акцентным цветом — четыре приметы чужого шаблона в одном элементе
+     размером в полстроки. Теперь это просто строка. */
+  .tagb{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;
+    color:var(--t3);margin-bottom:var(--s4)}
   .hero .h1{margin-bottom:var(--s4)}
   .hero .lead{max-width:34em;margin-bottom:var(--s5)}
   .cta{display:flex;gap:var(--s2);max-width:460px}
