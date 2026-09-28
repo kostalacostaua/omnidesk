@@ -44,4 +44,16 @@ describe('отказ почтового сервера', () => {
     expect(e).toContain('IPv6');
     expect(mailboxWhy(new Error('connect EHOSTUNREACH'))).toContain('немає мережі');
   });
+
+  // Шифрование с первого байта на порту, где его включают командой:
+  // библиотека читает обычный текст как запись TLS. Про пароль тут
+  // сказать нечего, а про порт — есть.
+  it('TLS не на том порту назван портом', () => {
+    const e = mailboxWhy(
+      new Error('error:0A00010B:SSL routines:tls_validate_record_header:wrong version number'),
+    );
+    expect(e).toContain('993');
+    expect(e).toContain('465');
+    expect(e).not.toContain('пароль');
+  });
 });

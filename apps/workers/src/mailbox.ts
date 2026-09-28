@@ -23,7 +23,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { createTransport } from 'nodemailer';
-import { mailAddress, type MailboxCreds, type ParsedMail } from '@omnidesk/core';
+import { mailReach, type MailboxCreds, type ParsedMail } from '@omnidesk/core';
 
 /** Сколько писем берём за один обход: остальные приедут следующим. */
 export const MAIL_BATCH = 20;
@@ -43,20 +43,31 @@ export interface FetchedMail {
   files: Array<{ filename: string; contentType: string; body: Buffer }>;
 }
 
+/**
+ * Открытое соединение с ящиком.
+ *
+ * Адрес сервера выбираем сами: система в контейнере отдаёт сначала
+ * IPv6, а наружу по нему хода нет. Имя уходит отдельно, в servername.
+ * Адресов у имени бывает несколько — обходим их по очереди, пока отказ
+ * похож на сетевой, и возвращаем тот, который ответил.
+ */
 async function client(creds: MailboxCreds): Promise<ImapFlow> {
-  // Адрес сервера выбираем сами: система в контейнере отдаёт сначала
-  // IPv6, а наружу по нему хода нет. Имя уходит отдельно, в servername.
-  const ia = await mailAddress(creds.imap.host);
-  return new ImapFlow({
-    host: ia.host,
-    port: creds.imap.port,
-    secure: creds.imap.secure,
-    ...(ia.servername ? { tls: { servername: ia.servername } } : {}),
-    auth: { user: creds.user, pass: creds.pass },
-    // Журнал IMAP многословен до неприличия: каждая команда протокола
-    // отдельной строкой. Нам нужны отказы, и их мы пишем сами.
-    logger: false,
-    socketTimeout: 60_000,
+  return mailReach(creds.imap.host, async (peer) => {
+    const imap = new ImapFlow({
+      host: peer.host,
+      port: creds.imap.port,
+      secure: creds.imap.secure,
+      ...(peer.servername ? { tls: { servername: peer.servername } } : {}),
+      auth: { user: creds.user, pass: creds.pass },
+      // Журнал IMAP многословен до неприличия: каждая команда протокола
+      // отдельной строкой. Нам нужны отказы, и их мы пишем сами.
+      logger: false,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 60_000,
+    });
+    await imap.connect();
+    return imap;
   });
 }
 
@@ -69,27 +80,28 @@ async function client(creds: MailboxCreds): Promise<ImapFlow> {
  */
 export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
   const imap = await client(creds);
-  await imap.connect();
   try {
     await imap.mailboxOpen('INBOX', { readOnly: true });
   } finally {
     await imap.logout().catch(() => undefined);
   }
 
-  const sa = await mailAddress(creds.smtp.host);
-  const smtp = createTransport({
-    host: sa.host,
-    port: creds.smtp.port,
-    secure: creds.smtp.secure,
-    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
-    auth: { user: creds.user, pass: creds.pass },
-    connectionTimeout: 20_000,
+  await mailReach(creds.smtp.host, async (peer) => {
+    const smtp = createTransport({
+      host: peer.host,
+      port: creds.smtp.port,
+      secure: creds.smtp.secure,
+      ...(peer.servername ? { tls: { servername: peer.servername } } : {}),
+      auth: { user: creds.user, pass: creds.pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+    });
+    try {
+      await smtp.verify();
+    } finally {
+      smtp.close();
+    }
   });
-  try {
-    await smtp.verify();
-  } finally {
-    smtp.close();
-  }
 }
 
 /**
@@ -104,7 +116,6 @@ export async function fetchMail(
   state: MailboxState | null,
 ): Promise<{ mails: FetchedMail[]; state: MailboxState }> {
   const imap = await client(creds);
-  await imap.connect();
 
   try {
     const box = await imap.mailboxOpen('INBOX');
@@ -170,37 +181,39 @@ export interface OutgoingMail {
 
 /** Отправка ответа из того же ящика. Возвращает Message-ID письма. */
 export async function smtpSend(creds: MailboxCreds, mail: OutgoingMail): Promise<string> {
-  const sa = await mailAddress(creds.smtp.host);
-  const smtp = createTransport({
-    host: sa.host,
-    port: creds.smtp.port,
-    secure: creds.smtp.secure,
-    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
-    auth: { user: creds.user, pass: creds.pass },
-    connectionTimeout: 20_000,
-  });
-
-  try {
-    const sent = await smtp.sendMail({
-      from: mail.from,
-      to: mail.to,
-      subject: mail.subject,
-      ...(mail.text ? { text: mail.text } : {}),
-      ...(mail.headers ? { headers: mail.headers } : {}),
-      ...(mail.attachments?.length
-        ? {
-            attachments: mail.attachments.map((a) => ({
-              filename: a.filename,
-              content: a.content,
-              ...(a.contentType ? { contentType: a.contentType } : {}),
-            })),
-          }
-        : {}),
+  return mailReach(creds.smtp.host, async (peer) => {
+    const smtp = createTransport({
+      host: peer.host,
+      port: creds.smtp.port,
+      secure: creds.smtp.secure,
+      ...(peer.servername ? { tls: { servername: peer.servername } } : {}),
+      auth: { user: creds.user, pass: creds.pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
     });
-    return String(sent.messageId ?? '');
-  } finally {
-    smtp.close();
-  }
+
+    try {
+      const sent = await smtp.sendMail({
+        from: mail.from,
+        to: mail.to,
+        subject: mail.subject,
+        ...(mail.text ? { text: mail.text } : {}),
+        ...(mail.headers ? { headers: mail.headers } : {}),
+        ...(mail.attachments?.length
+          ? {
+              attachments: mail.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { contentType: a.contentType } : {}),
+              })),
+            }
+          : {}),
+      });
+      return String(sent.messageId ?? '');
+    } finally {
+      smtp.close();
+    }
+  });
 }
 
 /**

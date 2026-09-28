@@ -1057,11 +1057,20 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       try {
         await verifyMailbox(creds);
       } catch (err) {
-        const e = (err ?? {}) as { message?: unknown; responseText?: unknown; code?: unknown };
+        const e = (err ?? {}) as {
+          message?: unknown;
+          responseText?: unknown;
+          code?: unknown;
+          mailTried?: unknown;
+        };
         app.log.warn(
           {
             address: creds.address,
             imap: `${creds.imap.host}:${creds.imap.port}`,
+            smtp: `${creds.smtp.host}:${creds.smtp.port}`,
+            // Какие адреса имени пробовали: без этого в журнале видно
+            // «не ответил», но не видно, кто именно не ответил.
+            tried: Array.isArray(e.mailTried) ? e.mailTried.join(' ') : undefined,
             said: typeof e.responseText === 'string' ? e.responseText : undefined,
             err: typeof e.message === 'string' ? e.message : String(err),
             code: e.code,

@@ -48,6 +48,13 @@ describe('настройки ящика', () => {
     expect('creds' in start && start.creds.smtp.secure).toBe(false);
   });
 
+  it('в справках хостингов есть и 2525, и 25 — там тоже STARTTLS', () => {
+    for (const port of [25, 2525]) {
+      const got = parseMailbox({ address: 'a@b.com', pass: 'x', smtp: { host: 'smtp.b.com', port } });
+      expect('creds' in got && got.creds.smtp.secure).toBe(false);
+    }
+  });
+
   it('сервер с мусором вместо имени не принимаем', () => {
     expect(parseMailbox({ address: 'a@b.com', pass: 'x', imap: { host: 'ftp://ой', port: 993 } }))
       .toEqual({ error: 'bad_imap' });
@@ -124,5 +131,49 @@ describe('адрес почтового сервера', () => {
   it('без A-записи возвращаем имя как было: пусть решает система', async () => {
     const { mailAddress } = await import('../src/mailbox.js');
     expect(await mailAddress('imap.firma.invalid')).toEqual({ host: 'imap.firma.invalid' });
+  });
+
+  it('у имени берём все адреса, а не первый по кругу', async () => {
+    const { mailAddresses } = await import('../src/mailbox.js');
+    const got = await mailAddresses('mail.adm.tools');
+    // У этого имени их два, и обслуживает письма не каждый.
+    expect(got.length).toBeGreaterThan(1);
+    expect(new Set(got.map((p) => p.host)).size).toBe(got.length);
+    for (const peer of got) expect(peer.servername).toBe('mail.adm.tools');
+  });
+});
+
+describe('обход адресов', () => {
+  it('сетевой отказ — идём на соседний адрес', async () => {
+    const { mailReach } = await import('../src/mailbox.js');
+    const tried: string[] = [];
+    const got = await mailReach('mail.adm.tools', async (peer) => {
+      tried.push(peer.host);
+      if (tried.length === 1) throw Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' });
+      return 'открыто';
+    });
+    expect(got).toBe('открыто');
+    expect(tried.length).toBe(2);
+  });
+
+  it('неверный пароль — второй адрес не трогаем: за это блокируют IP', async () => {
+    const { mailReach } = await import('../src/mailbox.js');
+    const tried: string[] = [];
+    await expect(
+      mailReach('mail.adm.tools', async (peer) => {
+        tried.push(peer.host);
+        throw new Error('Invalid credentials (Failure)');
+      }),
+    ).rejects.toThrow('Invalid credentials');
+    expect(tried.length).toBe(1);
+  });
+
+  it('когда не ответил никто — в отказе видно, кого спрашивали', async () => {
+    const { mailReach } = await import('../src/mailbox.js');
+    const err = await mailReach('mail.adm.tools', async () => {
+      throw Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' });
+    }).catch((e: { mailTried?: string[] }) => e);
+    expect(err.mailTried?.length).toBe(2);
+    expect(err.mailTried?.[0]).toMatch(/^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/);
   });
 });

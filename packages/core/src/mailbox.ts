@@ -19,6 +19,12 @@
 import { lookup } from 'node:dns/promises';
 import type { ReceivedEmail } from './email.js';
 
+/** Куда именно подключаемся: адрес и имя для сертификата. */
+export interface MailPeer {
+  host: string;
+  servername?: string;
+}
+
 /**
  * Адрес почтового сервера, до которого мы действительно доедем.
  *
@@ -36,13 +42,70 @@ import type { ReceivedEmail } from './email.js';
  * было. Пусть решает система: отказ в этом случае честный, и мы о нём
  * скажем словами.
  */
-export async function mailAddress(host: string): Promise<{ host: string; servername?: string }> {
+export async function mailAddress(host: string): Promise<MailPeer> {
+  return (await mailAddresses(host))[0]!;
+}
+
+/**
+ * Все адреса сервера, а не первый попавшийся.
+ *
+ * У почты на хостинге имя сервера часто стоит на нескольких машинах:
+ * mail.adm.tools — это и 185.104.44.16, и 185.104.44.19. Система
+ * отдаёт их по кругу, и если письма обслуживает не каждая, подключение
+ * работает через раз: тот же логин и тот же порт то проходят, то
+ * «сервер не відповідає». Человек в этот момент правит пароль и порты,
+ * хотя править нечего.
+ *
+ * Поэтому спрашиваем весь список — и дальше пробуем адреса по очереди.
+ */
+export async function mailAddresses(host: string): Promise<MailPeer[]> {
   try {
-    const found = await lookup(host, { family: 4 });
-    return { host: found.address, servername: host };
+    const found = await lookup(host, { family: 4, all: true });
+    const peers = found.map((a) => ({ host: a.address, servername: host }));
+    return peers.length > 0 ? peers : [{ host }];
   } catch {
-    return { host };
+    return [{ host }];
   }
+}
+
+/**
+ * Отказ, после которого стоит попробовать соседний адрес.
+ *
+ * Разница принципиальная. «Не доехали» — это про адрес: у имени их
+ * несколько, и другой может ответить. «Не тот пароль» — про ящик, и
+ * ходить с ним по второму адресу нельзя: у хостингов стоит защита от
+ * перебора, и вторая попытка тем же паролем закрывает нам весь IP.
+ */
+export function mailUnreachable(err: unknown): boolean {
+  const e = (err ?? {}) as { message?: unknown; code?: unknown };
+  const text = [typeof e.message === 'string' ? e.message : String(err), String(e.code ?? '')].join(' ');
+  return /etimedout|econnrefused|econnreset|enetunreach|ehostunreach|enetdown|timeout|esocket|epipe/i.test(text);
+}
+
+/**
+ * Первый адрес имени, который ответил.
+ *
+ * Адреса пробуются по очереди, пока отказ выглядит сетевым; на первом
+ * содержательном отказе — пароль, сертификат, выключенный IMAP —
+ * останавливаемся сразу и отдаём его как есть. К отказу прикладывается
+ * список адресов: без него в журнале видно «не ответил», но не видно,
+ * кто именно не ответил.
+ */
+export async function mailReach<T>(host: string, open: (peer: MailPeer) => Promise<T>): Promise<T> {
+  const peers = await mailAddresses(host);
+  let last: unknown = new Error('no address for ' + host);
+  for (const peer of peers) {
+    try {
+      return await open(peer);
+    } catch (err) {
+      last = err;
+      if (!mailUnreachable(err)) break;
+    }
+  }
+  if (last !== null && typeof last === 'object') {
+    (last as { mailTried?: string[] }).mailTried = peers.map((peer) => peer.host);
+  }
+  throw last;
 }
 
 export interface MailHost {
@@ -166,8 +229,17 @@ function host(raw: unknown, fallback: MailHost): MailHost | null {
   if (!HOST.test(name)) return null;
   const port = Math.round(Number(v.port ?? fallback.port));
   if (!Number.isFinite(port) || port < 1 || port > 65535) return null;
-  return { host: name, port, secure: v.secure === undefined ? port !== 143 && port !== 587 : v.secure === true };
+  return { host: name, port, secure: v.secure === undefined ? !PLAIN_PORTS.has(port) : v.secure === true };
 }
+
+/*
+ * Порты, на которых разговор начинается в открытую, а шифрование
+ * включается командой STARTTLS. Пришли на такой порт с TLS с первого
+ * байта — получили «wrong version number», и человеку сказали бы, что
+ * не подошёл пароль, хотя дело в порте. Список нужен целиком: в
+ * справках хостингов стоят и 2525, и 25.
+ */
+const PLAIN_PORTS = new Set([25, 110, 143, 587, 2525]);
 
 /**
  * Настройки из формы.

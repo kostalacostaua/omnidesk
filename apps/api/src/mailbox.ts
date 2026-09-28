@@ -13,41 +13,51 @@
 
 import { ImapFlow } from 'imapflow';
 import { createTransport } from 'nodemailer';
-import { mailAddress, type MailboxCreds } from '@omnidesk/core';
+import { mailReach, type MailboxCreds } from '@omnidesk/core';
 
 export async function verifyMailbox(creds: MailboxCreds): Promise<void> {
-  const ia = await mailAddress(creds.imap.host);
-  const imap = new ImapFlow({
-    host: ia.host,
-    port: creds.imap.port,
-    secure: creds.imap.secure,
-    ...(ia.servername ? { tls: { servername: ia.servername } } : {}),
-    auth: { user: creds.user, pass: creds.pass },
-    logger: false,
-    socketTimeout: 30_000,
+  /*
+   * Ожидание на каждый адрес отдельное и короткое: адресов у имени
+   * может быть несколько, а человек стоит у кнопки. Десять секунд на
+   * адрес — это отказ, который успеваешь дочитать; тридцать на один
+   * адрес — это страница, которая, кажется, сломалась.
+   */
+  await mailReach(creds.imap.host, async (peer) => {
+    const imap = new ImapFlow({
+      host: peer.host,
+      port: creds.imap.port,
+      secure: creds.imap.secure,
+      ...(peer.servername ? { tls: { servername: peer.servername } } : {}),
+      auth: { user: creds.user, pass: creds.pass },
+      logger: false,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
+    });
+    await imap.connect();
+    try {
+      await imap.mailboxOpen('INBOX', { readOnly: true });
+    } finally {
+      await imap.logout().catch(() => undefined);
+    }
   });
 
-  await imap.connect();
-  try {
-    await imap.mailboxOpen('INBOX', { readOnly: true });
-  } finally {
-    await imap.logout().catch(() => undefined);
-  }
-
-  const sa = await mailAddress(creds.smtp.host);
-  const smtp = createTransport({
-    host: sa.host,
-    port: creds.smtp.port,
-    secure: creds.smtp.secure,
-    ...(sa.servername ? { tls: { servername: sa.servername } } : {}),
-    auth: { user: creds.user, pass: creds.pass },
-    connectionTimeout: 20_000,
+  await mailReach(creds.smtp.host, async (peer) => {
+    const smtp = createTransport({
+      host: peer.host,
+      port: creds.smtp.port,
+      secure: creds.smtp.secure,
+      ...(peer.servername ? { tls: { servername: peer.servername } } : {}),
+      auth: { user: creds.user, pass: creds.pass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+    });
+    try {
+      await smtp.verify();
+    } finally {
+      smtp.close();
+    }
   });
-  try {
-    await smtp.verify();
-  } finally {
-    smtp.close();
-  }
 }
 
 /**
@@ -86,8 +96,14 @@ export function mailboxWhy(err: unknown): string {
   if (/enetunreach|ehostunreach|enetdown/i.test(text)) {
     return 'До цього сервера немає мережі — схоже, він доступний лише по IPv6. Спробуйте іншу адресу сервера.';
   }
+  // TLS с первого байта на порту, где ждут открытого начала разговора.
+  // Сервер отвечает текстом, а мы читаем его как запись TLS — и видим
+  // «wrong version number». Это не пароль и не сертификат, это порт.
+  if (/wrong version number|packet length too long|record layer failure/i.test(text)) {
+    return 'На цьому порту сервер не чекає шифрування з першого байта. Для IMAP це 993, для SMTP — 465; на 143 і 587 шифрування вмикається вже під час зʼєднання.';
+  }
   if (/timeout|etimedout|econnrefused|econnreset/i.test(text)) {
-    return 'Сервер не відповідає на цьому порту — перевірте порт або зачекайте хвилину.';
+    return 'Сервер не відповідає на цьому порту. Перевірте порт, а якщо він правильний — запитайте свій хостинг пошти, чи відкриті IMAP і SMTP для зʼєднань з інших країн.';
   }
   if (/certificate|self signed|altname/i.test(text)) return 'Сертифікат сервера не підходить — перевірте назву сервера.';
   // Незнакомый отказ отдаём словами сервера, а не библиотеки: чужое
