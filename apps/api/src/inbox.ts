@@ -180,8 +180,11 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
                 ch.id AS channel_id, ch.type AS channel_type,
                 ch.display_name AS channel_name,
                 u.full_name AS assignee_name, u.email AS assignee_email,
+                -- Заметка для команды в строке списка выглядела бы как
+                -- слова клиента: она стоит последней в ленте, но
+                -- разговора не двигает.
                 (SELECT m.content->>'text' FROM messages m
-                  WHERE m.conversation_id = c.id
+                  WHERE m.conversation_id = c.id AND m.kind <> 'note'
                   ORDER BY m.sent_at DESC LIMIT 1) AS preview
            FROM conversations c
            JOIN contacts ct ON ct.id = c.contact_id

@@ -1363,13 +1363,15 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
       // Цитата подтягивается тем же запросом. Отдельный поход за
       // каждым процитированным сообщением превратил бы открытие диалога
       // в двадцать запросов вместо одного.
-      `SELECT m.id, m.direction, m.sender_type, m.content, m.status,
+      `SELECT m.id, m.direction, m.sender_type, m.content, m.status, m.kind,
               m.sent_at, m.failure, m.reactions, m.external_id,
+              u.full_name         AS author_name,
               q.id                AS reply_to_id,
               q.content->>'text'  AS reply_to_text,
               q.direction         AS reply_to_direction
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
+         LEFT JOIN users u ON u.id = m.sender_user_id
          LEFT JOIN messages q
                 ON q.channel_id  = m.channel_id
                AND q.external_id = m.content->>'replyToExternalId'
@@ -1384,6 +1386,52 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
 
   return { messages: rows };
 });
+
+/**
+ * Заметка для команды.
+ *
+ * Отдельная ручка, а не признак у отправки сообщения. Причина не в
+ * красоте: путь отправки кладёт сообщение в очередь и отдаёт его
+ * каналу, и любая ошибка в одном условии внутри него означает заметку,
+ * улетевшую клиенту. Здесь очереди нет вовсе — запись ложится в ленту
+ * и на этом всё, и «случайно уйти» ей физически нечем.
+ *
+ * Стоит в ленте по времени, а не отдельным списком: «обіцяв знижку»
+ * имеет смысл ровно между тем сообщением, после которого обещали, и
+ * тем, которое пришло следом.
+ */
+app.post<{ Params: { id: string }; Body: { text?: string } }>(
+  '/conversations/:id/notes',
+  async (req, reply) => {
+    const auth = requireAuth(req as never);
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const text = (req.body?.text ?? '').trim();
+    if (!text) return reply.code(400).send({ error: 'empty_text' });
+    if (text.length > 4096) return reply.code(400).send({ error: 'text_too_long', limit: 4096 });
+
+    const row = await withTenant(pool, auth.tenantId, async (db) => {
+      // channel_id берём из самого диалога: заметка живёт в его ленте,
+      // и свой канал ей неоткуда взять, кроме как оттуда.
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO messages
+           (tenant_id, conversation_id, channel_id, direction, sender_type,
+            sender_user_id, content, status, kind)
+         SELECT c.tenant_id, c.id, c.channel_id, 'out', 'agent', $2,
+                jsonb_build_object('text', $3::text), 'note', 'note'
+           FROM conversations c
+          WHERE c.id = $1
+            AND ${channelScope('c.channel_id', '$2')}
+         RETURNING id`,
+        [req.params.id, auth.userId, text],
+      );
+      return rows[0] ?? null;
+    });
+
+    if (!row) return reply.code(404).send({ error: 'conversation_not_found' });
+    return { id: row.id };
+  },
+);
 
 /**
  * Аватар контакта.

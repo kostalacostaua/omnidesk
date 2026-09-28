@@ -290,11 +290,51 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;
     justify-content:center;z-index:99;cursor:zoom-out;padding:24px}
   .lightbox img{max-width:100%;max-height:100%;border-radius:4px}
-  .composer{border-top:1px solid var(--glass-line);padding:11px 14px;background:var(--glass);
-    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen-soft);flex:none}
-  .composer .row{display:flex;gap:8px;align-items:flex-end}
-  .composer textarea{min-height:36px;max-height:150px;border-radius:7px}
+  /* Поле ответа — карточка поверх ленты, а не полоса под ней. Тень у
+     него единственная в рабочей области: это то, что лежит сверху и
+     принадлежит рукам, а не чтению. */
+  .composer{border-top:0;background:transparent;box-shadow:none;padding:0 24px 20px;flex:none}
+  .cbox{background:var(--solid);border:1px solid var(--line2);border-radius:16px;
+    box-shadow:var(--lift)}
+  .cbox.note-on{background:var(--note-bg);border-color:var(--note-line)}
+  .cchips{display:flex;gap:6px;padding:10px 12px 0;flex-wrap:wrap}
+  .cchip{height:28px;padding:0 10px;border:0;border-radius:8px;background:var(--panel2);
+    color:var(--t2);font-size:12px;font-weight:500;box-shadow:none;max-width:210px;
+    display:inline-flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap}
+  .cchip span{overflow:hidden;text-overflow:ellipsis}
+  .cchip:hover{background:var(--hover);color:var(--t1)}
+  /* Фиолетовый только у ШИ — по нему видно, что ответ сочинён, а не
+     взят из шаблона. */
+  .cchip.ai{background:var(--ai-soft);color:var(--ai);font-weight:600}
+  .cchip svg{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-width:1.75;
+    stroke-linecap:round;stroke-linejoin:round}
+  .composer textarea,.composer textarea:hover,.composer textarea:focus{display:block;width:100%;
+    box-sizing:border-box;min-height:64px;max-height:180px;border:0;background:transparent;
+    box-shadow:none;border-radius:0;padding:12px 16px;font-size:14px;line-height:1.5;resize:none}
+  .crow{display:flex;align-items:center;gap:2px;padding:0 10px 10px}
+  /* Значки в нижнем ряду — без рамок: рамка вокруг каждого делала из
+     ряда пять одинаковых кнопок, среди которых не видно синей. */
+  .crow .icob{width:34px;height:34px;border:0;background:transparent;color:var(--t2);
+    border-radius:8px;box-shadow:none}
+  .crow .icob:hover{background:var(--hover);color:var(--t1)}
+  .crow .icob svg{width:18px;height:18px}
+  .crow .vr{width:1px;height:18px;background:var(--line2);margin:0 6px;flex:none}
+  .crow .grow{flex:1 1 0}
+  .chint{font-size:12px;color:var(--t3);margin-right:10px;white-space:nowrap}
+  .csend{height:36px;padding:0 16px;border-radius:10px;font-size:14px;font-weight:600;
+    display:inline-flex;align-items:center;gap:8px;flex:none}
+  .csend svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75;
+    stroke-linecap:round;stroke-linejoin:round}
+  .cnote{height:30px;padding:0 10px;border:0;border-radius:8px;background:transparent;
+    color:var(--t2);font-size:12px;font-weight:500;box-shadow:none;
+    display:inline-flex;align-items:center;gap:6px;flex:none}
+  .cnote svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.75;
+    stroke-linecap:round;stroke-linejoin:round}
+  .cnote:hover{background:var(--hover);color:var(--t1)}
+  .cnote.on{background:var(--note-line);color:#7A5A00}
+  @media(max-width:820px){
+    .composer{padding:0 10px 10px}
+    .chint{display:none}}
   .blocked{background:var(--warn-bg);border:1px solid var(--line);border-radius:7px;
     padding:10px 12px;font-size:12.5px;color:var(--t2);line-height:1.5}
   .icob{width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;
@@ -866,6 +906,18 @@ export const INBOX_HTML = `<!DOCTYPE html>
      невидимыми. Из-за этого сообщения подряд стояли так же далеко, как
      сообщения через час, и очередь реплик не читалась очередью.
      Теперь кнопки лежат сбоку от пузыря и места в ленте не занимают. */
+  /* Заметка команды — не реплика: она не слева и не справа, потому что
+     ни одна из сторон её не говорила. Жёлтый — тот же, что у заметок в
+     карточке клиента: одна бумажка на весь кабинет. */
+  .note{align-self:center;width:100%;max-width:520px;background:var(--note-bg);
+    border:1px solid var(--note-line);border-radius:12px;padding:10px 14px;
+    font-size:13.5px;line-height:1.5;color:var(--t1);white-space:pre-wrap;
+    word-wrap:break-word}
+  .note .nh{display:flex;gap:6px;align-items:center;font-size:11px;font-weight:600;
+    color:var(--t3);margin-bottom:4px}
+  .note .nh svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round}
+
   .mwrap{position:relative}
   .mtools{position:absolute;top:6px;margin:0;gap:4px;white-space:nowrap}
   .mwrap.out .mtools{right:100%;margin-right:8px}
@@ -1636,6 +1688,7 @@ var F = { status:'open', statusId:[], assignee:[], channelId:[], tag:[], q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
 var pendingFile = null; // выбранный, но ещё не отправленный файл
+var noteMode = false;   // поле пишет заметку для своих, а не ответ клиенту
 var el = function(id){ return document.getElementById(id) };
 
 function api(path, opts){
@@ -2020,6 +2073,7 @@ function openConv(id, fromHistory){
   threadFirst = true;
   replyTo = null;
   pendingFile = null;
+  noteMode = false;
   el('app').classList.add('thread-open');
   // Открытый диалог — это шаг в истории браузера. Без него жест «назад»
   // на телефоне уводит с сайта целиком, хотя человек ждал возврата к
@@ -2382,6 +2436,17 @@ function loadThread(){
           '</div>'
         : '';
 
+      /* Заметка стоит в ленте по времени, но не притворяется репликой:
+         ни пузыря, ни стороны, ни статуса доставки — доставлять её
+         некому. Имя автора обязательно: через неделю «обіцяв знижку»
+         без подписи — это неизвестно чьё обещание. */
+      if (m.kind === 'note') {
+        return day + '<div class="note" data-mid="' + m.id + '"><div class="nh">' +
+          icon('pen') + L('<span>Нотатка для команди</span><span>· </span>') +
+          esc(m.author_name || L('співробітник')) + '<span>· </span>' +
+          esc(clockTime(m.sent_at)) + '</div>' + esc(c.text || '') + '</div>';
+      }
+
       var body = subj + ig + cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
 
       return day + '<div class="mwrap ' + (isOut ? 'out' : 'in') + (tail ? ' tail' : '') +
@@ -2533,7 +2598,7 @@ function renderComposer(force){
   var cmt = isComments(c && c.channel_type);
   var mode = (w.open ? 'open' : 'blocked') + ':' + current + ':' + QR.length +
     ':' + (replyTo ? replyTo.id : '') + ':' + (pendingFile ? (pendingFile.name || '') : '') +
-    ':' + (cmt ? 'c' : '');
+    ':' + (cmt ? 'c' : '') + ':' + (noteMode ? 'n' : '') + ':' + (AI.ready ? 'a' : '');
   if (!force && box.dataset.mode === mode) return;
 
   // Набранный текст переживает перерисовку — его теряют только вместе
@@ -2557,7 +2622,15 @@ function renderComposer(force){
     return;
   }
 
-  box.innerHTML =
+  /* Три самых ходовых шаблона стоят прямо над полем. Остальные — за
+     кнопкой: список из двадцати штук поверх поля ответа закрывает
+     переписку, ради которой его и открыли. */
+  var quick = QR.slice(0, 3).map(function(q){
+    return '<button class="cchip" data-qr="' + esc(q.id) + '"><span>/' +
+      esc(q.shortcut || q.title || '') + '</span></button>';
+  }).join('');
+
+  box.innerHTML = '<div class="cbox' + (noteMode ? ' note-on' : '') + '">' +
     (replyTo
       ? L('<div class="replybar"><div class="t"><b>Відповідь ') +
         (replyTo.mine ? L('на своє повідомлення') : L('клієнту')) + ':</b> ' +
@@ -2577,21 +2650,41 @@ function renderComposer(force){
         L('<span class="dim" style="margin-left:8px;font-size:11.5px">одне повідомлення, ') +
         L('сім днів від коментаря</span></div>')
       : '') +
-    '<div class="row">' +
+    /* Верхний ряд: то, чем начинают ответ. Кнопка черновика появляется,
+       только когда ИИ подключён: пустая кнопка, которая на нажатие
+       отвечает «не настроено», — это обещание, которого интерфейс не
+       держит. В режиме заметки ряда нет вовсе: ни шаблон, ни ШИ в
+       заметке для своих не нужны. */
+    (!noteMode && (AI.ready || quick)
+      ? '<div class="cchips">' +
+        (AI.ready ? L('<button class="cchip ai" id="ai">') + icon('spark') +
+          L('<span>Запропонувати відповідь</span></button>') : '') + quick + '</div>'
+      : '') +
     '<input type="file" id="file" style="display:none">' +
-    (cmt ? '' : L('<button class="icob" id="clip" title="Прикріпити файл">') + icon('clip') + '</button>') +
-    L('<button class="icob" id="emo" title="Смайли">') + icon('smile') + '</button>' +
-    L('<button class="icob" id="tpl" title="Шаблони відповідей">') + icon('bolt') + '</button>' +
-    // Кнопка черновика появляется, только когда ИИ подключён: пустая
-    // кнопка, которая на нажатие отвечает «не настроено», — это
-    // обещание, которого интерфейс не держит.
-    (AI.ready ? L('<button class="icob" id="ai" title="Чернетка відповіді від ШІ">✨</button>') : '') +
-    (cmt
+    (noteMode
+      ? L('<textarea id="txt" rows="1" placeholder="Нотатка для команди. Клієнт її не побачить"></textarea>')
+      : cmt
       ? L('<textarea id="txt" rows="1" placeholder="Відповідь під постом — її побачать усі"></textarea>')
-      : narrow()
-      ? L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту"></textarea>')
-      : L('<textarea id="txt" rows="1" placeholder="Відповідь клієнту. Enter — надіслати, Shift+Enter — перенос"></textarea>')) +
-    L('<button id="send">Надіслати</button></div><div class="err" id="sendErr"></div>');
+      : L('<textarea id="txt" rows="1" placeholder="Напишіть відповідь… / — шаблони"></textarea>')) +
+    '<div class="crow">' +
+    (cmt || noteMode ? '' : L('<button class="icob" id="clip" title="Прикріпити файл">') + icon('clip') + '</button>') +
+    (noteMode ? '' : L('<button class="icob" id="emo" title="Смайли">') + icon('smile') + '</button>') +
+    (noteMode ? '' : L('<button class="icob" id="tpl" title="Шаблони відповідей">') + icon('bolt') + '</button>') +
+    (noteMode ? '' : '<span class="vr"></span>') +
+    /* Заметка для команды. Своя ручка на сервере и своя кнопка здесь:
+       одно поле с переключателем «кому» — это ровно та ошибка, после
+       которой «клієнт бреше» уезжает клиенту. */
+    '<button class="cnote' + (noteMode ? ' on' : '') + '" id="noteBtn">' + icon('pen') +
+      (noteMode ? L('<span>Пишемо нотатку</span>') : L('<span>Нотатка для команди</span>')) +
+    '</button>' +
+    '<span class="grow"></span>' +
+    (narrow() ? '' : (noteMode
+      ? L('<span class="chint">Enter — зберегти</span>')
+      : L('<span class="chint">Enter — надіслати</span>'))) +
+    '<button class="csend" id="send">' +
+      (noteMode ? L('<span>Зберегти</span>') : L('<span>Надіслати</span>') + icon('arrow')) +
+    '</button>' +
+    '</div><div class="err" id="sendErr" style="padding:0 16px 10px"></div></div>';
 
   var ta = el('txt');
   if (keep) ta.value = keep;
@@ -2620,10 +2713,47 @@ function renderComposer(force){
     }
   };
   el('send').onclick = send;
-  el('emo').onclick = toggleEmoji;
-  el('tpl').onclick = toggleTemplates;
+  if (el('emo')) el('emo').onclick = toggleEmoji;
+  if (el('tpl')) el('tpl').onclick = toggleTemplates;
   if (el('ai')) el('ai').onclick = aiDraft;
+  el('noteBtn').onclick = function(){ noteMode = !noteMode; renderComposer(true) };
+  Array.prototype.forEach.call(box.querySelectorAll('[data-qr]'), function(b){
+    b.onclick = function(){
+      var q = QR.filter(function(x){ return x.id === b.dataset.qr })[0];
+      if (q) useTemplate(q);
+    };
+  });
   ta.focus();
+}
+
+/**
+ * Заметка для команды.
+ *
+ * Уходит своей ручкой, а не отправкой с признаком: путь отправки кладёт
+ * сообщение в очередь и отдаёт каналу, и одно неверное условие в нём
+ * означало бы «клієнт бреше», уехавшее клиенту. Здесь очереди нет.
+ *
+ * После сохранения режим выключается сам: заметка — это отступление, а
+ * не разговор, и следующее, что человек напишет, почти всегда адресовано
+ * клиенту.
+ */
+function saveNote(text){
+  if (!text || !current) return;
+  busy(el('send'), true);
+  el('sendErr').textContent = '';
+  api('/conversations/' + current + '/notes', { method:'POST', body:{ text: text } })
+    .then(function(){
+      noteMode = false;
+      el('txt').value = '';
+      renderComposer(true);
+      lastThread = null;
+      loadThread();
+    })
+    .catch(function(e){
+      el('sendErr').textContent = (e.payload && e.payload.detail) ||
+        L('Не вдалося зберегти нотатку');
+    })
+    .then(function(){ if (el('send')) busy(el('send'), false) });
 }
 
 /**
@@ -3017,6 +3147,7 @@ function readAsBase64(file){
 
 function send(){
   var ta = el('txt'), text = ta.value.trim();
+  if (noteMode) return saveNote(text);
   if (!text && !pendingFile) return;
   busy(el('send'), true);
   el('sendErr').textContent = '';
@@ -9820,6 +9951,9 @@ var ICONS = {
   side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
+  spark:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+  pen:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
   flow:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a3 3 0 0 0 3 3H14"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',

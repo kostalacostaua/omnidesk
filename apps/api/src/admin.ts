@@ -364,6 +364,8 @@ export function registerAdmin(app: FastifyInstance, deps: AdminDeps): void {
                 count(*) FILTER (WHERE direction = 'out') AS msg_out
            FROM messages
           WHERE sent_at >= date_trunc('month', now()) - interval '5 months'
+            -- Заметки команды не переписка: в счёт объёма они не идут.
+            AND kind <> 'note'
           GROUP BY 1 ORDER BY 1`,
       );
       const { rows: rawInvoices } = await db.query(
