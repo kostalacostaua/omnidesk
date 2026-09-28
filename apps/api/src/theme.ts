@@ -33,48 +33,31 @@
 
 /** Набор значений тёмной темы. Подставляется в два селектора. */
 const DARK = `color-scheme:dark;
-    --bg:#0a0d18;--bg2:#10142a;--solid:#161b30;
-    /* Стекло — это доля прозрачности, а не серый цвет. Сорок шесть
-       процентов: меньше — текст плывёт на пёстрой подложке, больше —
-       подложки не видно и стекла тоже нет. */
-    --glass:rgba(24,30,50,.46);--panel:rgba(24,30,50,.46);--panel2:rgba(255,255,255,.07);
-    /* Окно поверх страницы — плотнее прочего стекла. Оно перекрывает
-       работу, и сквозь него не должно быть видно ни списка диалогов,
-       ни карточки: пёстрая подложка под мелким текстом читается как
-       грязь, а само окно теряется на фоне того, что закрывает. */
-    --sheet:rgba(22,27,48,.93);
-    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.17);--hover:rgba(255,255,255,.08);
-    --t1:#f2f5ff;--t2:#a8b2cd;--t3:#7a849e;
-    --accent:#4b8cff;--accent-h:#6ba0ff;--on-accent:#04102a;--link:#7fb0ff;
-    --accent-soft:rgba(75,140,255,.18);
-    --brand1:#4b8cff;--brand2:#a07bff;--ink:#f2f5ff;--navy:#0a0d18;
+    --bg:#111522;--bg2:#111522;--solid:#171C2C;--panel:#171C2C;
+    --sheet:#1A2032;--panel2:#1E2436;--panel3:#1B2133;
+    --line:#252B3D;--line2:#303750;--hover:#1E2436;
+    --t1:#EEF1F8;--t2:#A9B1C8;--t3:#8A92AA;
+    --accent:#6F8FFF;--accent-h:#87A2FF;--on-accent:#0A1024;--link:#8FA8FF;
+    --accent-soft:rgba(111,143,255,.16);--selected:rgba(111,143,255,.12);
+    --ai:#B9A2FF;--ai-soft:rgba(147,112,246,.18);--attention:#FF7A45;
+    --brand1:#6F8FFF;--brand2:#B9A2FF;--ink:#EEF1F8;--navy:#0B0F1C;
     --grad:linear-gradient(120deg,var(--brand1),var(--brand2));
-    --ring:rgba(75,140,255,.34);
+    --ring:rgba(111,143,255,.4);
     --shadow:0 1px 2px rgba(0,0,0,.4);
-    --lift:0 18px 46px -16px rgba(0,0,0,.72),0 2px 10px -5px rgba(0,0,0,.5);
-    --lift2:0 34px 84px -28px rgba(0,0,0,.86),0 4px 16px -8px rgba(0,0,0,.6);
-    --viz1:#3987e5;--viz2:#d95926;--viz3:#199e70;
-    --heat0:rgba(255,255,255,.05);--heat1:#16233a;--heat2:#1d3760;
-    --heat3:#234f8e;--heat4:#2a6bbf;--heat5:#3987e5;
-    --good:#54cf90;--good-bg:rgba(84,207,144,.14);--warn:#e8b13c;--warn-bg:rgba(232,177,60,.14);
-    --crit:#ff7a72;--crit-bg:rgba(255,122,114,.14);
-    --rail:rgba(18,23,40,.5);--railT:#8b94af;--railOn:#fff;--railOnBg:rgba(255,255,255,.12);
-    --glass-line:rgba(255,255,255,.1);
-    --glow:rgba(75,140,255,.4);
-    /* Кромка. Свет падает сверху: верхняя грань светится, боковые
-       чуть слабее, нижняя почти не светится. Три разных значения, а
-       не одно на всю рамку, — иначе поверхность выглядит наклейкой. */
-    --edge:rgba(255,255,255,.3);--edge2:rgba(255,255,255,.08);
-    --sheen:inset 0 1px 0 var(--edge),inset 1px 0 0 var(--edge2),
-      inset -1px 0 0 var(--edge2),inset 0 -1px 0 var(--edge2);
-    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.14);
-    --blur:blur(20px) saturate(170%) brightness(.92);
-    /* Подложка. Без неё стекла не существует: над ровной заливкой
-       нет ни цвета снизу, ни преломления — только мутный прямоугольник. */
-    --mesh:radial-gradient(58vw 56vh at 10% 4%,rgba(24,86,196,.34),transparent 62%),
-      radial-gradient(52vw 50vh at 92% 2%,rgba(104,58,180,.28),transparent 60%),
-      radial-gradient(56vw 54vh at 76% 96%,rgba(14,110,96,.26),transparent 62%),
-      radial-gradient(46vw 46vh at 14% 98%,rgba(120,70,26,.22),transparent 60%);`;
+    --lift:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+    --lift2:0 24px 60px -24px rgba(0,0,0,.85);
+    --viz1:#6F8FFF;--viz2:#F0A24A;--viz3:#3ECF8E;
+    --heat0:rgba(255,255,255,.05);--heat1:#1C2440;--heat2:#26325A;
+    --heat3:#324278;--heat4:#45589C;--heat5:#6F8FFF;
+    --good:#4FD08A;--good-dot:#3ECF8E;--good-bg:rgba(62,207,142,.14);
+    --warn:#F0B45A;--warn-dot:#F0A24A;--warn-bg:rgba(240,162,74,.14);
+    --crit:#FF8A82;--crit-bg:rgba(255,138,130,.14);
+    --note-bg:rgba(240,200,90,.1);--note-line:rgba(240,200,90,.28);
+    --rail:#0B0F1C;--railT:#8A92AA;--railOn:#FFFFFF;--railOnBg:rgba(255,255,255,.1);
+    --glass:#171C2C;--glass-line:#252B3D;
+    --glow:rgba(111,143,255,.4);
+    --edge:transparent;--edge2:transparent;
+    --sheen:none;--sheen-soft:none;--mesh:none;--blur:none;`;
 
 /**
  * Величины. Шкала отступов — шаг 4 пикселя: этого достаточно,
@@ -83,60 +66,53 @@ const DARK = `color-scheme:dark;
  */
 export const TOKENS_CSS = `
   :root{color-scheme:light;
-    /* Шрифт. На технике Apple -apple-system отдаёт системный SF — тот
-       самый, за который любят их интерфейсы. Лицензия SF не позволяет
-       раздавать его веб-шрифтом, поэтому везде остальном берётся Inter:
-       он построен на тех же принципах и рядом с SF не спорит. */
-    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",ui-sans-serif,
+    /* Шрифт. Onest, а не системный: системный на каждой платформе
+       свой, и продукт выглядит то как Mac, то как Windows, но нигде —
+       собой. Моноширинный отдельно: номера, ключи и горячие клавиши
+       должны стоять в колонку, а не плыть. */
+    --font:"Onest",-apple-system,BlinkMacSystemFont,ui-sans-serif,
       "Segoe UI",Roboto,sans-serif;
-    --font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",
-      ui-sans-serif,"Segoe UI",sans-serif;
-    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --bg:#e9eefb;--bg2:#e2e9f8;--panel:rgba(255,255,255,.44);--solid:#fff;
-    --sheet:rgba(255,255,255,.95);
-    --panel2:rgba(13,20,36,.05);
-    --line:rgba(13,20,36,.08);--line2:rgba(13,20,36,.14);--hover:rgba(13,20,36,.05);
-    --t1:#0d1424;--t2:#455070;--t3:#7b86a4;
-    --accent:#0a64f0;--accent-h:#0a56cf;--on-accent:#fff;--link:#0a64f0;
-    --accent-soft:rgba(10,100,240,.12);
-    --brand1:#0a64f0;--brand2:#8b5cf6;--ink:#0d1424;--navy:#0d1424;
+    --font-display:"Onest",-apple-system,BlinkMacSystemFont,ui-sans-serif,
+      "Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    /* Рабочая область — не белая: на белом фоне белая карточка
+       перестаёт быть карточкой, и лист сливается в одно пятно. */
+    --bg:#F6F7FB;--bg2:#F6F7FB;--solid:#FFFFFF;--panel:#FFFFFF;
+    --sheet:#FFFFFF;--panel2:#F4F5F9;--panel3:#F7F8FB;
+    --line:#E8EBF2;--line2:#E1E5F0;--hover:#F4F5F9;
+    --t1:#0E1530;--t2:#525A70;--t3:#6B7185;
+    --accent:#2451E6;--accent-h:#1A3FBF;--on-accent:#FFFFFF;--link:#2451E6;
+    --accent-soft:#EEF2FF;--selected:#F0F4FF;
+    /* Фиолетовый — только ШИ. Оранжевый — только «ждёт ответа» и
+       счётчик в навигации. Больше нигде: иначе они перестают что-либо
+       означать. */
+    --ai:#5B2BC4;--ai-soft:#F1ECFE;--attention:#FF7A45;
+    --brand1:#2451E6;--brand2:#5B2BC4;--ink:#0E1530;--navy:#0E1530;
     --grad:linear-gradient(120deg,var(--brand1),var(--brand2));
-    --ring:rgba(10,100,240,.3);
-    --shadow:0 1px 2px rgba(13,20,36,.06);
-    --lift:0 10px 34px -12px rgba(13,20,36,.32),0 2px 8px -4px rgba(13,20,36,.2);
-    --lift2:0 30px 72px -26px rgba(13,20,36,.42),0 4px 14px -8px rgba(13,20,36,.2);
-    --viz1:#2a78d6;--viz2:#eb6834;--viz3:#1baf7a;
-    --heat0:rgba(11,16,34,.05);--heat1:#e8f0fb;--heat2:#c3d9f4;
-    --heat3:#8fb8e9;--heat4:#558fdc;--heat5:#2a78d6;
-    --good:#17864f;--good-bg:rgba(23,134,79,.12);--warn:#b4690e;--warn-bg:rgba(180,105,14,.12);
-    --crit:#d0343a;--crit-bg:rgba(208,52,58,.1);
-    --rail:rgba(255,255,255,.4);--railT:#5d6884;--railOn:#0d1424;--railOnBg:rgba(255,255,255,.7);
-    --glass:rgba(255,255,255,.44);--glass-line:rgba(255,255,255,.6);
-    --glow:rgba(10,100,240,.3);
-    /* Кромка. Свет падает сверху: верхняя грань светится ярче всего,
-       боковые слабее, нижняя почти не светится. Три разных значения, а
-       не одно на всю рамку, — иначе поверхность выглядит наклейкой, а
-       не куском стекла с толщиной. */
-    --edge:rgba(255,255,255,.8);--edge2:rgba(255,255,255,.3);
-    --sheen:inset 0 1px 0 var(--edge),inset 1px 0 0 var(--edge2),
-      inset -1px 0 0 var(--edge2),inset 0 -1px 0 var(--edge2);
-    --sheen-soft:inset 0 1px 0 rgba(255,255,255,.7);
-    /* Подложка. Без неё стекла не существует: над ровной заливкой нет
-       ни цвета снизу, ни преломления — только мутный прямоугольник.
-       Поэтому пятна яркие, а не «чтобы было». */
-    --mesh:radial-gradient(58vw 56vh at 10% 4%,rgba(122,184,255,.34),transparent 62%),
-      radial-gradient(52vw 50vh at 92% 2%,rgba(186,150,255,.26),transparent 60%),
-      radial-gradient(56vw 54vh at 76% 96%,rgba(127,232,205,.24),transparent 62%),
-      radial-gradient(46vw 46vh at 14% 98%,rgba(255,206,160,.2),transparent 60%);
-    /* Насыщение важнее размытия: оно и даёт «подобранный снизу цвет».
-       Яркость чуть вверх — стекло светлее того, что под ним. */
-    --blur:blur(18px) saturate(190%) brightness(1.06);
+    --ring:rgba(36,81,230,.34);
+    --shadow:0 1px 2px rgba(14,21,48,.08);
+    --lift:0 1px 2px rgba(14,21,48,.04),0 8px 24px -12px rgba(14,21,48,.12);
+    --lift2:0 20px 40px -12px rgba(14,21,48,.25);
+    --viz1:#2451E6;--viz2:#F08A24;--viz3:#1FA463;
+    --heat0:#F4F5F9;--heat1:#E7ECFD;--heat2:#C6D2FA;
+    --heat3:#9CB1F5;--heat4:#6F8FEF;--heat5:#2451E6;
+    --good:#13794A;--good-dot:#1FA463;--good-bg:#E7F6EE;
+    --warn:#A64B00;--warn-dot:#F08A24;--warn-bg:#FFF1E6;
+    --crit:#B3261E;--crit-bg:#FDECEA;
+    --note-bg:#FFFBEB;--note-line:#FBEBC0;
+    --rail:#0E1530;--railT:#A3ABC8;--railOn:#FFFFFF;--railOnBg:rgba(255,255,255,.12);
+    --glass:#FFFFFF;--glass-line:#E8EBF2;
+    --glow:rgba(36,81,230,.3);
+    --edge:transparent;--edge2:transparent;
+    --sheen:none;--sheen-soft:none;--mesh:none;--blur:none;
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
     /* Радиусы вложенные: радиус внутреннего элемента равен радиусу
        внешнего минус расстояние между ними. Шаг в четыре точки как раз
        и есть типичный отступ, поэтому шкала идёт через четыре. Без
        этого углы «плавают»: внутренний квадратнее внешнего. */
-    --r1:12px;--r2:16px;--r3:20px;--r4:24px;--r5:30px;--rf:999px;
+    /* Радиусы стали меньше и перестали расти к краям: крупное
+       скругление — это про мягкость, а не про работу. */
+    --r1:9px;--r2:12px;--r3:12px;--r4:16px;--r5:16px;--rf:999px;
     --fast:.06s;--quick:.13s;--calm:.24s;--slow:.42s;
     --ease:cubic-bezier(.32,.72,0,1);}
   @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
@@ -150,25 +126,19 @@ export const TOKENS_CSS = `
  */
 export const BASE_CSS = `
   *{box-sizing:border-box}
-  /* Под стеклом должно что-то быть: на ровной заливке размытие не
-     видно вовсе. Пятна неяркие и неподвижные — это подложка, а не
-     украшение, и читаемость текста она не трогает. */
-  /* Кегль и трекинг подогнаны под системный шрифт Apple: у SF в
-     мелких кеглях буквы шире, а в крупных — плотнее, и Inter повторяет
-     это своими оптическими размерами. Отсюда отрицательный трекинг на
-     заголовках и почти нулевой в тексте. */
+  /* Трекинг отрицательный только на заголовках: у Onest широкая
+     посадка, и в крупном кегле строка без поджатия рассыпается. В
+     тексте он нулевой — там поджимать нечего.
+     Числа моноширинные везде: столбец сумм, который «пляшет», не
+     столбец. */
   body{margin:0;background:var(--bg);color:var(--t1);
     font:13.5px/1.55 var(--font);-webkit-font-smoothing:antialiased;
     -moz-osx-font-smoothing:grayscale;
-    letter-spacing:-.006em;font-feature-settings:'cv05' 1,'ss03' 1;
+    font-variant-numeric:tabular-nums;
     text-rendering:optimizeLegibility}
-  /* Подложка из двух слоёв: цветные пятна и поверх них зерно. Без
-     зерна большие градиенты идут видимыми полосами — на светлой теме
-     это особенно заметно, а стекло их ещё и подчёркивает. */
-  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background:var(--mesh);background-attachment:fixed}
-  body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
-    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.2'/></svg>")}
+  /* Подложки больше нет. Цветные пятна и зерно были фоном под
+     стеклом: без стекла это просто шум под текстом, который сам же
+     его и мешает читать. */
   a{color:var(--link);text-decoration:none}
   a:hover{text-decoration:underline}
   code,kbd,pre{font-family:var(--mono)}

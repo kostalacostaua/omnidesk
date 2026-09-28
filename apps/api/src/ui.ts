@@ -49,7 +49,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <title>Rozmovio</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script data-theme-boot>${THEME_JS}${EMOJI_JS}${I18N_JS}</script>
@@ -699,18 +699,22 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .sdot{display:inline-block;width:9px;height:9px;border-radius:3px;flex:none}
 
   /* ─── Переписка ────────────────────────────────────────────────── */
-  #thread{background:transparent}
-  .thead{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;
-    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+  /* Лента — на фоне рабочей области, а список и карточка на белом:
+     так видно, где читают, а где работают руками. */
+  #thread{background:var(--bg)}
+  .thead{background:var(--solid);border-bottom:1px solid var(--line);padding:12px 16px}
   .thead .nm{font-size:15px;font-weight:600;letter-spacing:-.018em}
   #msgs{padding:22px 18px;gap:9px}
-  .m{border-radius:18px;padding:10px 14px;font-size:13.5px;line-height:1.52;
-    box-shadow:var(--shadow)}
-  .m.in{background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:7px;
-    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
-  .m.out{background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff;
-    border:0;border-bottom-right-radius:7px}
-  .m.bot{background:linear-gradient(135deg,#5b4bd6,#7a3cf0);color:#fff}
+  /* Пузырь: угол к отправителю поджат. Это единственное, чем
+     сообщение показывает направление, — цвет тут второй признак, а не
+     первый: на чёрно-белом экране лента обязана читаться так же. */
+  .m{border-radius:18px;padding:10px 14px;font-size:13.5px;line-height:1.52;box-shadow:none}
+  .m.in{background:var(--solid);border:1px solid var(--line);border-bottom-left-radius:6px}
+  .m.out{background:var(--accent);color:var(--on-accent);border:0;border-bottom-right-radius:6px}
+  /* Бот — тот же исходящий, только бледнее: это наш ответ, просто не
+     от человека. Отдельный фиолетовый делал из него третью сторону
+     разговора, которой в разговоре нет. */
+  .m.bot{background:var(--accent);color:var(--on-accent);opacity:.88}
   .m.failed{background:var(--crit);color:#fff}
   /* ─── Движение ─────────────────────────────────────────────────── */
   /* Правило одно: движется то, что изменилось, и ровно настолько,

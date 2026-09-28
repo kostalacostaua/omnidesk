@@ -1,0 +1,69 @@
+/* Rozmovio — design tokens. Підключити першим, до всіх інших стилів. */
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+:root {
+  /* Бренд */
+  --rz-navy: #0E1530;          /* ліва навігація, темні блоки, основний текст */
+  --rz-primary: #2451E6;       /* primary-кнопки, вихідні повідомлення, активні стани, посилання */
+  --rz-primary-hover: #1A3FBF;
+  --rz-primary-soft: #EEF2FF;  /* підсвітка, бейджі */
+  --rz-selected: #F0F4FF;      /* вибраний рядок у списку */
+  --rz-violet: #5B2BC4;        /* ТІЛЬКИ ШІ-функції (текст/іконки) */
+  --rz-violet-soft: #F1ECFE;   /* фон ШІ-елементів */
+  --rz-attention: #FF7A45;     /* лічильник на навігації (текст на ньому — navy) */
+
+  /* Текст */
+  --rz-text: #0E1530;
+  --rz-text-2: #525A70;        /* другорядний */
+  --rz-text-3: #6B7185;        /* мета, час, підписи (мін. для тексту) */
+  --rz-text-on-dark: #FFFFFF;
+  --rz-text-on-dark-2: #B8BFDB;
+  --rz-nav-icon: #A3ABC8;      /* неактивні пункти на navy */
+
+  /* Поверхні й лінії */
+  --rz-bg: #F6F7FB;            /* фон робочої області кабінету */
+  --rz-surface: #FFFFFF;
+  --rz-surface-2: #F4F5F9;     /* поле пошуку, сегмент-трек, чипи */
+  --rz-surface-3: #F7F8FB;     /* вкладені блоки */
+  --rz-border: #E8EBF2;        /* рамки карток */
+  --rz-border-strong: #E1E5F0; /* рамки кнопок/полів */
+  --rz-divider: #F1F2F6;       /* роздільники рядків */
+
+  /* Статуси (завжди зі словом) */
+  --rz-success: #13794A;  --rz-success-dot: #1FA463;  --rz-success-soft: #E7F6EE;
+  --rz-warning: #A64B00;  --rz-warning-dot: #F08A24;  --rz-warning-soft: #FFF1E6;
+  --rz-note-bg: #FFFBEB;  --rz-note-border: #FBEBC0;
+
+  /* Канали — лише в іконці-мітці */
+  --rz-ch-telegram: #229ED9;
+  --rz-ch-whatsapp: #179A55;
+  --rz-ch-instagram: #D6246E;
+  --rz-ch-messenger: #0866FF;
+  --rz-ch-site: #0E1530;
+
+  /* Типографіка */
+  --rz-font: 'Onest', system-ui, sans-serif;
+  --rz-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Радіуси */
+  --rz-r-xs: 7px;    /* сегмент усередині */
+  --rz-r-sm: 9px;    /* кнопки 32–36px, поля */
+  --rz-r-md: 12px;   /* плитки іконок, кнопки 44–52px */
+  --rz-r-lg: 16px;   /* картки кабінету, composer */
+  --rz-r-xl: 24px;   /* картки сайту */
+  --rz-r-2xl: 32px;  /* великі секції сайту */
+  --rz-r-bubble: 18px; /* повідомлення; кут до відправника — 6px */
+  --rz-r-pill: 999px;
+
+  /* Тіні */
+  --rz-shadow-sm: 0 1px 2px rgba(14,21,48,0.08);
+  --rz-shadow-card: 0 1px 2px rgba(14,21,48,0.04), 0 8px 24px -12px rgba(14,21,48,0.12);
+  --rz-shadow-pop: 0 20px 40px -12px rgba(14,21,48,0.25);
+  --rz-shadow-primary: 0 6px 16px -6px rgba(36,81,230,0.6);
+
+  /* Розміри каркаса кабінету */
+  --rz-nav-w: 76px;
+  --rz-list-w: 348px;
+  --rz-aside-w: 320px;
+  --rz-header-h: 72px;
+}
