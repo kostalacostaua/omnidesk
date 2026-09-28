@@ -38,6 +38,11 @@ const DARK = `color-scheme:dark;
        процентов: меньше — текст плывёт на пёстрой подложке, больше —
        подложки не видно и стекла тоже нет. */
     --glass:rgba(24,30,50,.46);--panel:rgba(24,30,50,.46);--panel2:rgba(255,255,255,.07);
+    /* Окно поверх страницы — плотнее прочего стекла. Оно перекрывает
+       работу, и сквозь него не должно быть видно ни списка диалогов,
+       ни карточки: пёстрая подложка под мелким текстом читается как
+       грязь, а само окно теряется на фоне того, что закрывает. */
+    --sheet:rgba(22,27,48,.93);
     --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.17);--hover:rgba(255,255,255,.08);
     --t1:#f2f5ff;--t2:#a8b2cd;--t3:#7a849e;
     --accent:#4b8cff;--accent-h:#6ba0ff;--on-accent:#04102a;--link:#7fb0ff;
@@ -88,6 +93,7 @@ export const TOKENS_CSS = `
       ui-sans-serif,"Segoe UI",sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
     --bg:#e9eefb;--bg2:#e2e9f8;--panel:rgba(255,255,255,.44);--solid:#fff;
+    --sheet:rgba(255,255,255,.95);
     --panel2:rgba(13,20,36,.05);
     --line:rgba(13,20,36,.08);--line2:rgba(13,20,36,.14);--hover:rgba(13,20,36,.05);
     --t1:#0d1424;--t2:#455070;--t3:#7b86a4;
@@ -379,10 +385,10 @@ export const KIT_CSS = `
 
   /* Окно поверх страницы. Подложка не чёрная, а размытая: под ней
      остаётся видно, откуда человек пришёл. */
-  .veil{position:fixed;inset:0;background:rgba(11,16,34,.4);backdrop-filter:blur(6px);
-    -webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;
+  .veil{position:fixed;inset:0;background:rgba(11,16,34,.52);backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;
     padding:var(--s4);z-index:90;animation:fade var(--calm) ease}
-  .sheet{background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r5);
+  .sheet{background:var(--sheet);border:1px solid var(--glass-line);border-radius:var(--r5);
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
     box-shadow:var(--sheen),var(--lift2);max-width:520px;width:100%;max-height:86vh;
     overflow-y:auto;padding:var(--s5);animation:pop var(--calm) var(--ease)}
