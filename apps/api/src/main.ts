@@ -749,6 +749,11 @@ registerSettings(app, {
   }),
   telegramApiRoot: TELEGRAM_API_ROOT,
   publicUrl: PUBLIC_URL,
+  // Приглашение в команду — письмо. Тот же отправитель, что у кодов
+  // входа: второго почтового канала у нас нет и быть не должно.
+  mailer: createMailer(process.env, (line) => app.log.info(line)),
+  appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+  appName: process.env['APP_NAME'] ?? 'Rozmovio',
   ...(process.env['RESEND_API_KEY'] ? { resendApiKey: process.env['RESEND_API_KEY'] } : {}),
   ...(process.env['RESEND_API_ROOT'] ? { resendRoot: process.env['RESEND_API_ROOT'] } : {}),
   // Ящик по IMAP и SMTP — только там, где площадка не закрывает

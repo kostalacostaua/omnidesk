@@ -65,6 +65,7 @@ import {
   withTenant,
   type Pool,
   badOutUrl,
+  type Mailer,
 } from '@omnidesk/core';
 
 /**
@@ -95,6 +96,16 @@ export interface SettingsDeps {
   /** Ключ Resend: домены почтовых каналов живут в нашем аккаунте. */
   resendApiKey?: string;
   resendRoot?: string;
+  /**
+   * Чем зовём нового сотрудника.
+   *
+   * Приглашение — это письмо, а не строка в таблице: человек, которого
+   * завели, об этом не знает, и ждать от него входа бессмысленно.
+   */
+  mailer?: Mailer;
+  /** Адрес кабинета: в письме должна быть ссылка, а не название. */
+  appUrl?: string;
+  appName?: string;
   /**
    * Можно ли подключать существующий ящик по IMAP и SMTP.
    *
@@ -1846,9 +1857,92 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       });
 
       if ('error' in result) return reply.code(409).send(result);
-      return reply.code(201).send(result);
+
+      // Письмо — отдельно от записи и после неё: сотрудник заведён
+      // даже если почта легла, а «не удалось пригласить» на форме при
+      // уже заведённом человеке читается как «ничего не вышло».
+      const sent = await invite(auth.tenantId, email, fullName ?? '');
+      return reply.code(201).send({ ...result, invited: sent });
     },
   );
+
+  /**
+   * Позвать ещё раз.
+   *
+   * Письмо теряется, попадает в спам и просто не доходит, а человек в
+   * списке уже есть — и добавить его второй раз нельзя. Кнопка рядом с
+   * ним решает это, не заставляя удалять и заводить заново.
+   */
+  app.post<{ Params: { id: string } }>('/users/:id/invite', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const who = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ email: string; full_name: string | null }>(
+        `SELECT email, full_name FROM users WHERE id = $1`,
+        [req.params.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!who) return reply.code(404).send({ error: 'not_found' });
+
+    const sent = await invite(auth.tenantId, who.email, who.full_name ?? '');
+    if (!sent) return reply.code(503).send({ error: 'mail_unavailable' });
+    return { ok: true };
+  });
+
+  /**
+   * Приглашение в команду.
+   *
+   * Кода входа в письме нет намеренно: он живёт десять минут, а письмо
+   * читают вечером. Поэтому зовём на страницу входа — человек впишет
+   * свою почту и получит свежий код. Пароля у нас нет вовсе, и
+   * придумывать его человеку не придётся.
+   */
+  async function invite(tenantId: string, email: string, name: string): Promise<boolean> {
+    const mailer = deps.mailer;
+    if (!mailer || mailer.kind === 'log') {
+      app.log.warn({ email }, 'Приглашение не отправлено: почта не настроена');
+      return false;
+    }
+
+    const company = await withSystem(pool, 'название компании для приглашения', async (db) => {
+      const { rows } = await db.query<{ name: string }>(
+        `SELECT name FROM tenants WHERE id = $1`,
+        [tenantId],
+      );
+      return rows[0]?.name ?? '';
+    });
+
+    const app_ = deps.appName ?? 'Rozmovio';
+    const link = (deps.appUrl ?? '').replace(/[/]+$/, '') + '/app';
+    const hello = name ? `${name}, вас` : 'Вас';
+    const where = company ? `${company} у ${app_}` : app_;
+
+    try {
+      await mailer.send({
+        to: email,
+        subject: `${hello} запрошено до ${where}`,
+        text:
+          `${hello} додали до команди ${where}.` +
+          `\n\nЩоб увійти, відкрийте ${link} і вкажіть цю адресу пошти — ` +
+          `ми надішлемо код. Пароль вигадувати не треба.` +
+          `\n\nЯкщо ви не чекали цього листа — просто видаліть його.`,
+        html:
+          `<div style="font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;color:#16161a">` +
+          `<p>${hello} додали до команди <b>${where}</b>.</p>` +
+          `<p><a href="${link}" style="display:inline-block;padding:11px 18px;border-radius:10px;` +
+          `background:#3b40e8;color:#fff;text-decoration:none;font-weight:600">Увійти</a></p>` +
+          `<p style="color:#6b6b75;font-size:13px">На сторінці входу вкажіть цю адресу пошти — ` +
+          `ми надішлемо код. Пароль вигадувати не треба.<br>` +
+          `Якщо ви не чекали цього листа — просто видаліть його.</p></div>`,
+      });
+      return true;
+    } catch (err) {
+      app.log.warn({ err, email }, 'Приглашение не ушло');
+      return false;
+    }
+  }
 
   app.patch<{ Params: { id: string }; Body: { role?: string; isActive?: boolean } }>(
     '/users/:id',
@@ -1882,6 +1976,53 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       return { ok: true };
     },
   );
+
+  /**
+   * Убрать человека из команды насовсем.
+   *
+   * Отличается от «відключити» тем, чем удаление отличается от
+   * отпуска: отключённый остаётся в списке и в подписях под своими
+   * ответами, удалённый исчезает отовсюду.
+   *
+   * Переписку при этом не трогаем — она принадлежит компании, а не
+   * оператору. Но подпись под ней снимается: строки указывают на
+   * человека, которого больше нет, и база этого не позволит. Об этом
+   * сказано на кнопке, а не выяснится потом.
+   *
+   * Себя и владельца удалить нельзя: первое лишает доступа того, кто
+   * нажал, второе — компанию целиком.
+   */
+  app.delete<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+    if (req.params.id === auth.userId) return reply.code(409).send({ error: 'cannot_delete_self' });
+
+    const done = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows } = await db.query<{ role: string }>(
+        `SELECT role FROM users WHERE id = $1`,
+        [req.params.id],
+      );
+      const who = rows[0];
+      if (!who) return 'missing' as const;
+      if (who.role === 'owner') return 'owner' as const;
+
+      // Ссылки снимаем поимённо, а не каскадом: каскад здесь унёс бы
+      // диалоги и заметки вместе с человеком.
+      await db.query(`UPDATE conversations SET assignee_id = NULL WHERE assignee_id = $1`, [req.params.id]);
+      await db.query(`UPDATE messages SET sender_user_id = NULL WHERE sender_user_id = $1`, [req.params.id]);
+      await db.query(`UPDATE contact_notes SET author_id = NULL WHERE author_id = $1`, [req.params.id]);
+      await db.query(`UPDATE quick_replies SET created_by = NULL WHERE created_by = $1`, [req.params.id]);
+      await db.query(`UPDATE audit_log SET user_id = NULL WHERE user_id = $1`, [req.params.id]);
+      await db.query(`UPDATE zoho_installations SET installed_by = NULL WHERE installed_by = $1`, [req.params.id]);
+      await db.query(`UPDATE crm_connections SET created_by = NULL WHERE created_by = $1`, [req.params.id]);
+      await db.query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
+      return 'gone' as const;
+    });
+
+    if (done === 'missing') return reply.code(404).send({ error: 'not_found' });
+    if (done === 'owner') return reply.code(409).send({ error: 'cannot_delete_owner' });
+    return { ok: true };
+  });
 
   // ── Шаблоны быстрых ответов ───────────────────────────────────────
   app.get('/quick-replies', async (req, reply) => {

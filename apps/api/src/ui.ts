@@ -7715,10 +7715,14 @@ function tabUsers(){
       '<select id="uro">' + opts + '</select>' +
       L('<button id="uadd">Додати</button></div>') +
       L('<div class="hint">Оператор бачить діалоги і відповідає. Спостерігач тільки читає. ') +
-      L('Адміністратор може змінювати канали і склад команди.</div>') +
+      L('Адміністратор може змінювати канали і склад команди.<br>') +
+      L('Ми надішлемо лист із запрошенням: пароля у нас немає, людина увійде кодом на свою пошту.</div>') +
       '<div class="err" id="uerr"></div></div>' +
 
       L('<div class="card"><h3>Команда (') + USERS.length + ')</h3>' +
+      L('<div class="hint" style="margin:0 0 10px">Відключений залишається у списку і в підписах ') +
+      L('під своїми відповідями. Видалений зникає звідусіль: листування лишиться, а підпис ') +
+      L('оператора під ним — ні.</div>') +
       USERS.map(function(u){
         var pill = u.is_active ? '' : L('<span class="pill warn">відключений</span>');
         var seen = u.last_seen_at ? L('був ') + fmtTime(u.last_seen_at) : L('ще не заходив');
@@ -7726,11 +7730,13 @@ function tabUsers(){
           '<div class="t">' + esc(u.full_name || u.email) + pill + '</div>' +
           '<div class="s">' + esc(u.email) + ' · ' + esc(ROLES[u.role] || u.role) +
           ' · ' + esc(seen) + '</div></div>' +
-          '<div style="display:flex;gap:6px;flex:none">' +
+          '<div style="display:flex;gap:6px;flex:none;flex-wrap:wrap">' +
           (u.role === 'owner' ? '' :
+            L('<button class="ghost mini" data-uinv="') + u.id + L('">Надіслати запрошення</button>') +
             '<button class="ghost mini" data-user="' + u.id + '" data-active="' +
             (u.is_active ? 'false' : 'true') + '">' +
-            (u.is_active ? L('Відключити') : L('Увімкнути')) + '</button>') +
+            (u.is_active ? L('Відключити') : L('Увімкнути')) + '</button>' +
+            L('<button class="ghost mini" data-udel="') + u.id + L('">Видалити</button>')) +
           '</div></div>';
       }).join('') + '</div>' +
       '<div id="mtx"></div>';
@@ -7740,7 +7746,14 @@ function tabUsers(){
       busy(el('uadd'), true);
       api('/users', { method:'POST', body:{
         email: el('uem').value.trim(), fullName: el('unm').value.trim(), role: el('uro').value
-      }}).then(function(){ tabUsers() })
+      }}).then(function(r){
+        // Человек заведён в любом случае, а письмо могло не уйти: о
+        // втором говорим отдельно, иначе «не запрошено» читается как
+        // «не додано».
+        toast(r && r.invited ? L('Запрошення надіслано') : L('Додано. Лист не пішов: пошта не налаштована'));
+        el('uem').value = ''; el('unm').value = '';
+        tabUsers();
+      })
         .catch(function(e){
           var p = e.payload || {};
           el('uerr').textContent = p.error === 'seats_limit_reached'
@@ -7757,6 +7770,30 @@ function tabUsers(){
           body:{ isActive: b.dataset.active === 'true' } })
           .then(tabUsers).catch(function(){ busy(b, false) });
       };
+    });
+
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-uinv]'), function(b){
+      b.onclick = function(){
+        busy(b, true);
+        api('/users/' + b.dataset.uinv + '/invite', { method:'POST' })
+          .then(function(){ toast(L('Запрошення надіслано')) })
+          .catch(function(){ toast(L('Лист не пішов: пошта не налаштована')) })
+          .then(function(){ busy(b, false) });
+      };
+    });
+
+    /* Удаление — в два нажатия: переписка останется, но подпись
+       оператора под ней снимется, и вернуть её будет нечем. */
+    armDelete(pageBox().querySelectorAll('[data-udel]'), function(b){
+      return api('/users/' + b.dataset.udel, { method:'DELETE' })
+        .then(tabUsers)
+        .catch(function(e){
+          var p = (e && e.payload) || {};
+          toast(p.error === 'cannot_delete_self' ? L('Себе видалити не можна')
+            : p.error === 'cannot_delete_owner' ? L('Власника видалити не можна')
+            : L('Не вдалося видалити'));
+          throw e;
+        });
     });
     loadAccess();
   }).catch(sErr);
