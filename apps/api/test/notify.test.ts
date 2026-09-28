@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkConfig, cleanEvents } from '../src/notify.js';
+import { checkConfig, cleanChannels, cleanEvents } from '../src/notify.js';
 
 /**
  * Настройка адресата проверяется до сохранения, а не в тот момент,
@@ -62,5 +62,25 @@ describe('подписка на события', () => {
   it('мусор вместо списка — это пустой список, а не падение', () => {
     expect(cleanEvents(null)).toEqual([]);
     expect(cleanEvents('conversation.new')).toEqual([]);
+  });
+});
+
+/*
+ * Каналы читаются наоборот событиям: пусто — значит все. Событие
+ * выбирают осознанно, а каналы у большинства компаний не выбирают
+ * вовсе, и «жодного каналу» не хочет никто.
+ */
+describe('канали адресата', () => {
+  const one = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const two = '110ec58a-a0f2-4ac4-8393-c866d813b8d1';
+
+  it('берём только опознаватели своих каналов', () => {
+    expect(cleanChannels([one, 'усі', two])).toEqual([one, two]);
+    expect(cleanChannels('усі')).toEqual([]);
+    expect(cleanChannels(undefined)).toEqual([]);
+  });
+
+  it('повтор в списке — одна подписка', () => {
+    expect(cleanChannels([one, one])).toEqual([one]);
   });
 });

@@ -149,18 +149,36 @@ export function createNotifier(deps: NotifyDeps) {
     }, { jobId: notifyJobId(tenantId, `test--${targetId}--${Date.now()}`) });
   }
 
+  /**
+   * Кому это событие.
+   *
+   * Две подписки, и они читаются по-разному. Событие выбрано — значит
+   * присылать; пустой список событий означает молчащего адресата.
+   * Каналы наоборот: пусто — обо всех, потому что каналы у
+   * большинства компаний не выбирают вовсе, а «ни одного канала» не
+   * выбирает никто.
+   *
+   * Событие без канала — «заявка з сайту», «клієнт сплатив рахунок» —
+   * доходит до всех, кто подписан на него: отсеивать его по каналам
+   * значило бы молча потерять то, у чего канала и не бывает.
+   */
   async function targetsFor(
     tenantId: string,
     event: string,
     onlyId?: string,
+    channelId?: string | null,
   ): Promise<TargetRow[]> {
     return withTenant(pool, tenantId, async (db) => {
       const { rows } = await db.query<TargetRow>(
         `SELECT id, kind, title, config, events, credentials_enc FROM notify_targets
           WHERE tenant_id = $1 AND is_active = true
             AND ($2::uuid IS NULL OR id = $2::uuid)
-            AND ($2::uuid IS NOT NULL OR $3 = ANY (events))`,
-        [tenantId, onlyId ?? null, event],
+            AND ($2::uuid IS NOT NULL OR $3 = ANY (events))
+            AND ($2::uuid IS NOT NULL
+                 OR cardinality(channels) = 0
+                 OR $4::uuid IS NULL
+                 OR $4::uuid = ANY (channels))`,
+        [tenantId, onlyId ?? null, event, channelId ?? null],
       );
       return rows;
     });
@@ -371,7 +389,12 @@ export function createNotifier(deps: NotifyDeps) {
   async function handle(job: NotifyJob): Promise<void> {
     if (!isNotifyEvent(job.event)) throw new UnrecoverableError(`Невідома подія: ${job.event}`);
 
-    const targets = await targetsFor(job.tenantId, job.event, job.targetId);
+    const targets = await targetsFor(
+      job.tenantId,
+      job.event,
+      job.targetId,
+      job.payload.channelId ?? null,
+    );
     if (!targets.length) return;
 
     const message = renderNotify(job.event, job.payload);
@@ -471,11 +494,12 @@ export function createNotifier(deps: NotifyDeps) {
           text: string | null;
           contact: string | null;
           channel_type: string;
+          channel_id: string;
           minutes: number;
         }>(
           `SELECT c.id AS conversation_id, m.id AS message_id,
                   m.content->>'text' AS text,
-                  ct.display_name AS contact, ch.type AS channel_type,
+                  ct.display_name AS contact, ch.type AS channel_type, ch.id AS channel_id,
                   floor(extract(epoch FROM now() - m.sent_at) / 60)::int AS minutes
              FROM conversations c
              JOIN channels ch ON ch.id = c.channel_id
@@ -503,6 +527,7 @@ export function createNotifier(deps: NotifyDeps) {
             who: row.contact,
             text: row.text,
             channel: row.channel_type,
+            channelId: row.channel_id,
             conversationId: row.conversation_id,
             waitingMinutes: row.minutes,
           },
@@ -549,6 +574,7 @@ export function createNotifier(deps: NotifyDeps) {
         text: string | null;
         contact: string | null;
         channel_type: string;
+        channel_id: string;
         since: Date;
       }>(
         /*
@@ -559,7 +585,7 @@ export function createNotifier(deps: NotifyDeps) {
          */
         `SELECT c.id AS conversation_id, w.id AS message_id,
                 w.content->>'text' AS text,
-                ct.display_name AS contact, ch.type AS channel_type,
+                ct.display_name AS contact, ch.type AS channel_type, ch.id AS channel_id,
                 w.sent_at AS since
            FROM conversations c
            JOIN channels ch ON ch.id = c.channel_id
@@ -602,6 +628,7 @@ export function createNotifier(deps: NotifyDeps) {
           who: row.contact,
           text: row.text,
           channel: row.channel_type,
+          channelId: row.channel_id,
           conversationId: row.conversation_id,
           waitingMinutes: Math.round(waited / 60),
           slaLeftMinutes: Math.round((targetMinutes * 60 - waited) / 60),

@@ -776,10 +776,26 @@ export const INBOX_HTML = `<!DOCTYPE html>
      друга. */
   .sheet.wide{max-width:900px}
   .orow{display:flex;justify-content:space-between;align-items:center;gap:10px}
-  .ocols{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
-  .ocol{flex:1 1 320px;min-width:0}
-  .olist{margin-top:8px;max-height:44vh;overflow-y:auto;
+  /* Две равные половины: каталог и само заказанное. Плавающие колонки
+     разной ширины читались как случайная верстка — при широком окне
+     правая половина отъезжала от левой на треть экрана. */
+  .ocols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
+  @media(max-width:780px){.ocols{grid-template-columns:1fr}}
+  .ocol{min-width:0}
+  /* Подпись половины: без неё правая колонка начиналась строкой
+     «нажмите товар слева» и выглядела подсказкой, а не разделом. */
+  .ocol-t{font-size:11.5px;font-weight:600;color:var(--t2);margin:0 0 7px}
+  .olist{max-height:44vh;overflow-y:auto;
     border:1px solid var(--line);border-radius:12px}
+  /* Заказанное — в такой же рамке, что и каталог: две половины одного
+     действия должны выглядеть как две половины, а не как список и
+     россыпь полей под ним. */
+  .ocart{border:1px solid var(--line);border-radius:12px;padding:9px 11px;
+    background:var(--panel2)}
+  .ocart .empty{padding:22px 4px;text-align:center;font-size:12.5px}
+  .osum{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:12.5px}
+  .osum b{font-size:14px}
   .oitem{display:flex;gap:10px;align-items:center;padding:7px 10px;cursor:pointer;
     font-size:12.5px;border-bottom:1px solid var(--line)}
   .oitem:last-child{border-bottom:0}
@@ -1037,6 +1053,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .snip{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
     font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0}
   .ntevs{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 4px}
+  /* Строка про каналы отделена от событий чертой: это вторая
+     подписка, а не продолжение первой. */
+  .ntch-h{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--t2)}
   .ntev{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);cursor:pointer}
   .ntev input{width:auto;margin:0}
   .chico.soon{background:var(--panel2);color:var(--t3)}
@@ -3177,11 +3197,13 @@ function ordPaint(){
             : L('<div class="empty">Тягнемо каталог із Zoho...</div>'))
         : '<div class="ocols">' +
             '<div class="ocol">' +
+              L('<div class="ocol-t">Каталог</div>') +
               L('<input id="oQ" placeholder="пошук: назва або артикул">') +
-              '<div class="hint" id="oNum" style="margin-top:6px"></div>' +
+              '<div class="hint" id="oNum" style="margin:6px 0 7px"></div>' +
               '<div id="oList" class="olist"></div>' +
             '</div>' +
             '<div class="ocol">' +
+              L('<div class="ocol-t">Замовлення</div>') +
               '<div id="oCart"></div>' +
               '<div id="oFlds"></div>' +
               '<span class="ok" id="oDone2"></span>' +
@@ -3286,8 +3308,8 @@ function ordCart(){
   var cart = el('oCart');
   if (!cart) return;
 
-  cart.innerHTML = (!ORD.lines.length
-    ? L('<div class="hint">Натисніть товар зліва — він стане рядком замовлення.</div>')
+  cart.innerHTML = '<div class="ocart">' + (!ORD.lines.length
+    ? L('<div class="empty">Порожньо. Натисніть товар зліва — він стане рядком.</div>')
     : ORD.lines.map(function(l, i){
         return '<div class="oline">' +
           '<span class="on">' + esc(l.name) + '</span>' +
@@ -3302,22 +3324,18 @@ function ordCart(){
           '<span class="x" data-odel="' + i + '" style="cursor:pointer">×</span>' +
         '</div>';
       }).join('') +
-      L('<div class="kv2" style="margin-top:9px"><div class="k">Сума</div><div>') +
-        esc(ordMoney(ordSum())) + '</div>' +
+      L('<div class="osum"><span>Сума</span><span>') + esc(ordMoney(ordSum())) + '</span></div>' +
       (ordOffLines() > 0
-        ? L('<div class="k">Знижки рядків</div><div>−') + esc(ordMoney(ordOffLines())) + '</div>'
+        ? L('<div class="osum" style="border-top:0;padding-top:0;margin-top:4px"><span>Знижки рядків</span>') +
+          '<span>−' + esc(ordMoney(ordOffLines())) + '</span></div>'
         : '') +
-      '</div>' +
       (ORD.form && ORD.form.wholeOff
         ? L('<div class="oline" style="margin-top:7px"><span class="on">Знижка на замовлення</span>') +
         '<input id="oOff" value="' + esc(ORD.off || '') + '"' +
         L(' placeholder="грн або %" style="width:96px;text-align:right"></div>')
         : '') +
-      L('<div class="kv2" style="margin-top:7px"><div class="k"><b>Разом</b></div><div><b>') +
-        esc(ordMoney(ordTotal())) + '</b></div></div>') +
-    L('<div class="fld" style="margin-top:9px"><label>Назва замовлення</label>') +
-      '<input id="oSub" value="' + esc(ORD.subject || '') + '"' +
-      L(' placeholder="залишіть пустим — назвемо самі"></div>');
+      L('<div class="osum"><b>Разом</b><b>') + esc(ordMoney(ordTotal())) + '</b></div>') +
+    '</div>';
 
   Array.prototype.forEach.call(cart.querySelectorAll('[data-oqty]'), function(x){
     x.onchange = function(){
@@ -3340,7 +3358,6 @@ function ordCart(){
     x.onclick = function(){ ORD.lines.splice(Number(x.dataset.odel), 1); ordCart() };
   });
   if (el('oOff')) el('oOff').onchange = function(){ ORD.off = el('oOff').value; ordCart() };
-  el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
 
   /*
    * Сумма сделки. У заказа её считает Zoho по строкам товаров, а у
@@ -3376,9 +3393,15 @@ function ordFlds(){
 
   box.innerHTML =
     (f && !f.ready
-      ? L('<div class="hint">Замовлення ще не налаштоване: у «Інтеграціях» вкажіть, ') +
-        L('куди його створювати.</div>')
+      ? L('<div class="hint" style="margin-top:9px">Замовлення ще не налаштоване: ') +
+        L('у «Інтеграціях» вкажіть, куди його створювати.</div>')
       : '') +
+    /* Название — первое поле деталей, а не хвост корзины: корзина
+       перерисовывается на каждое изменение количества, и поле, в
+       котором в этот момент печатают, ей не место. */
+    L('<div class="fld" style="margin-top:11px"><label>Назва замовлення</label>') +
+      '<input id="oSub" value="' + esc(ORD.subject || '') + '"' +
+      L(' placeholder="залишіть пустим — назвемо самі"></div>') +
     /* Сумма — только пока позиций нет: с позициями её считает CRM, и
        поле рядом обещало бы, что итог назначает оператор. */
     (f && f.askAmount && !ORD.lines.length
@@ -3394,13 +3417,15 @@ function ordFlds(){
         }).join('') + '</select></div>'
       : '') +
     flds.map(ordFld).join('') +
-    L('<div style="margin-top:10px"><button class="primary" id="oMake">Створити замовлення</button></div>');
+    L('<div style="margin-top:12px"><button class="primary" id="oMake" style="width:100%">') +
+    L('Створити замовлення</button></div>');
 
   if (el('oPipe')) el('oPipe').onchange = function(){
     ORD.pipe = el('oPipe').value;
     ordFlds();
   };
   if (el('oAmt')) el('oAmt').oninput = function(){ ORD.amount = el('oAmt').value };
+  el('oSub').oninput = function(){ ORD.subject = el('oSub').value };
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-off]'), function(x){
     x.onchange = function(){
@@ -6681,15 +6706,17 @@ function whForm(w, events){
     '<div class="row2">' +
     L('<input id="whName" placeholder="назва: на склад, в аналітику">') +
     L('<input id="whUrl" placeholder="https://firma.com/rozmovio">') + '</div>' +
-    L('<div class="hint">Тільки https і тільки зовнішня адреса: запит іде з нашої мережі, ') +
-    L('і внутрішні адреси цим полем не відкриваються.</div>') +
+    L('<div class="hint">Адреса, на яку ми надсилатимемо події. Тільки https і тільки ') +
+    L('доступна ззовні: запит іде з нашого сервера, а не з вашого браузера, ') +
+    L('тож 127.0.0.1 і адреси вашої локальної мережі сюди не годяться.</div>') +
 
     '<div class="row2" style="margin-top:9px">' +
     L('<input id="whHName" placeholder="свій заголовок, напр. Authorization">') +
     L('<input id="whHVal" type="password" autocomplete="new-password" placeholder="значення заголовка">') +
     '</div>' +
-    L('<div class="hint">Потрібен, якщо перед вашим застосунком стоїть шлюз. Підпис він не ') +
-    L('замінює: підпис про те, що тіло не підмінили.</div>') +
+    L('<div class="hint">Не обовʼязково. Якщо ваш сервер пускає лише запити з певним ') +
+    L('заголовком — впишіть його тут, і ми додамо його до кожної події. Це не заміна ') +
+    L('підпису: підпис нижче — про те, що подію надіслали справді ми.</div>') +
 
     L('<div class="pg-sec" style="margin-top:14px"><h3>Події</h3>') + checks + '</div>' +
 
@@ -7844,7 +7871,10 @@ function saveAccess(kind, userId, ids){
    «слать/не слать»: групп бывает две — «продажи» и «поломки», — и у
    каждой свой список событий. */
 
-var NT = { data:null };
+/* open — какие адресаты показывают список каналов. Живёт рядом с
+   данными, а не в разметке: страница перерисовывается целиком, и
+   раскрытый список обязан пережить перерисовку. */
+var NT = { data:null, open:{} };
 
 function ntKind(k){
   return { telegram:L('Група Telegram'), email:L('Пошта'), push:L('Пуш у браузер') }[k] || k;
@@ -7870,6 +7900,45 @@ function ntEvents(t){
   }).join('');
 }
 
+/**
+ * Из каких каналов оповещать.
+ *
+ * Пусто — из всех, и это не то же самое, что пусто у событий. События
+ * выбирают осознанно, каналы у большинства не выбирают вовсе:
+ * «жодного каналу» не хочет никто, а «всі канали» хотят по умолчанию.
+ *
+ * Список свёрнут, пока выбраны все: строка «усі канали» с кнопкой
+ * честнее, чем полтора десятка отмеченных галочек, которые выглядят
+ * как сделанная кем-то настройка.
+ */
+function ntChannels(t){
+  var all = NT.data.channels || [];
+  if (!all.length) return '';
+  var picked = t.channels || [];
+
+  var head = '<div class="ntch-h">' +
+    (picked.length
+      ? esc(L('Канали: ') + picked.length + L(' з ') + all.length)
+      : L('Канали: усі')) +
+    ' <a class="lnk" data-ntch="' + t.id + '">' +
+    (NT.open[t.id] ? L('згорнути') : L('вибрати')) + '</a></div>';
+
+  if (!NT.open[t.id]) return head;
+
+  return head + '<div class="ntevs">' +
+    all.map(function(c){
+      var on = picked.indexOf(c.id) >= 0;
+      return '<label class="ntev">' +
+        '<input type="checkbox" data-ntc="' + c.id + '" data-tid="' + t.id + '"' +
+          (on ? ' checked' : '') + '>' + esc(c.display_name) + '</label>';
+    }).join('') + '</div>' +
+    (picked.length
+      ? L('<div class="hint">Відмічені канали — і тільки вони. Зніміть усі, щоб знову ') +
+        L('отримувати з усіх.</div>')
+      : L('<div class="hint">Нічого не відмічено — приходить з усіх каналів. Події без каналу ') +
+        L('(заявка з сайту, оплата рахунку) приходять завжди.</div>'));
+}
+
 function ntCard(t){
   var err = t.lastError && t.lastError.detail;
   return '<div class="tile">' +
@@ -7880,6 +7949,7 @@ function ntCard(t){
     (t.isActive ? '' : L('<div><span class="pill warn">вимкнено</span></div>')) +
     (err ? '<div><span class="pill crit">' + esc(err) + '</span></div>' : '') +
     '<div class="ntevs">' + ntEvents(t) + '</div>' +
+    ntChannels(t) +
     '<div class="acts">' +
       L('<button class="ghost mini" data-nt-test="') + t.id + L('">Перевірити</button>') +
       '<button class="ghost mini" data-nt-off="' + t.id + '" data-to="' + (t.isActive ? '0' : '1') + '">' +
@@ -7970,20 +8040,28 @@ function ntAdd(){
 function tabNotify(){
   api('/settings/notify').then(function(d){
     NT.data = d;
-    var list = (d.targets || []).map(ntCard).join('');
-
-    pageBox().innerHTML = '<div class="pg">' + setNav('notify') +
-      pageHead(L('Сповіщення'),
-        L('Куди повідомляти про те, що відбувається в інбоксі, коли на нього ніхто не дивиться.')) +
-      ntWaitRow() +
-      (list
-        ? L('<div class="pg-sec"><h3>Кому надсилати</h3><div class="grid">') + list + '</div></div>'
-        : L('<div class="pg-sec"><div class="empty">Поки нікому. Додайте адресата нижче.</div></div>')) +
-      ntAdd() +
-      '</div>';
-
-    wireNotify();
+    ntPaint();
   }).catch(sErr);
+}
+
+/* Рисуем отдельно от загрузки: раскрытие списка каналов и снятая
+   галочка меняют страницу, но не данные на сервере — спрашивать его
+   об этом заново незачем. */
+function ntPaint(){
+  var d = NT.data || {};
+  var list = (d.targets || []).map(ntCard).join('');
+
+  pageBox().innerHTML = '<div class="pg">' + setNav('notify') +
+    pageHead(L('Сповіщення'),
+      L('Куди повідомляти про те, що відбувається в інбоксі, коли на нього ніхто не дивиться.')) +
+    ntWaitRow() +
+    (list
+      ? L('<div class="pg-sec"><h3>Кому надсилати</h3><div class="grid">') + list + '</div></div>'
+      : L('<div class="pg-sec"><div class="empty">Поки нікому. Додайте адресата нижче.</div></div>')) +
+    ntAdd() +
+    '</div>';
+
+  wireNotify();
 }
 
 function ntSave(id, body, done){
@@ -8008,6 +8086,25 @@ function wireNotify(){
       if (box.checked) set.push(box.dataset.ev);
       t.events = set;
       ntSave(t.id, { events:set });
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ntch]'), function(a){
+    a.onclick = function(){
+      NT.open[a.dataset.ntch] = !NT.open[a.dataset.ntch];
+      ntPaint();
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ntc]'), function(box){
+    box.onchange = function(){
+      var t = (NT.data.targets || []).filter(function(x){ return x.id === box.dataset.tid })[0];
+      if (!t) return;
+      var set = (t.channels || []).filter(function(c){ return c !== box.dataset.ntc });
+      if (box.checked) set.push(box.dataset.ntc);
+      t.channels = set;
+      ntSave(t.id, { channels:set });
+      ntPaint();
     };
   });
 
@@ -11050,8 +11147,30 @@ var VIEWS = {
   notify: tabNotify
 };
 
+/**
+ * Где человек стоит.
+ *
+ * Запоминается, потому что обновление страницы — это не «начать
+ * сначала». Человек правил сценарий, нажал F5 и оказался в чатах: всё,
+ * что он делал, надо искать заново. Раздел один на вкладку и живёт в
+ * браузере: это взгляд одного человека, а не настройка компании.
+ */
+function rememberView(view){
+  try { localStorage.setItem('rz.view', view) } catch (e) {}
+}
+
+/** Вернуться туда, где были. Роль к этому моменту уже известна. */
+function restoreView(){
+  var v = '';
+  try { v = localStorage.getItem('rz.view') || '' } catch (e) {}
+  if (!v || v === 'chats' || !VIEWS[v]) return;
+  // Закрытый для этой роли раздел applyRole вернёт в чаты сам.
+  setView(v);
+}
+
 function setView(view){
   el('app').dataset.view = view;
+  rememberView(view);
   if (view === 'chats') { backToList(); }
   Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
     /* Страницы настроек прячутся за одной кнопкой рейла — и она горит
@@ -11278,6 +11397,9 @@ function supSend(){
   });
 }
 
+/** Переход уже задан ссылкой — память раздела в этот раз не спрашиваем. */
+var NAVED = false;
+
 function start(){
   applyLang();
   wireTips();
@@ -11302,6 +11424,9 @@ function start(){
        входе, а не после того, как человек обновит страницу. */
     if (d && d.access && d.access.blocked)
       payWall({ why: d.access.blocked, paidUntil: d.access.paidUntil });
+    // Возвращаемся в свой раздел после того, как роль известна: иначе
+    // оператор успел бы увидеть чужую страницу и мигание.
+    if (!NAVED) restoreView();
   }).catch(function(){});
   /* Поддержку спрашиваем сразу, но тихо: ответ нужен не для окна, а
      для точки на кнопке — человек должен увидеть, что ему ответили,
@@ -11321,9 +11446,14 @@ function start(){
   }).catch(function(){});
 
   refresh();
-  readMetaHash();
+  /*
+   * Хвост ссылки важнее памяти: по нему пришли из оповещения или
+   * вернулись от чужого сервиса, и это осознанный переход, а не
+   * «где я был вчера».
+   */
+  NAVED = readMetaHash() || NAVED;
   readPipedriveHash();
-  readNotifyHash();
+  NAVED = readNotifyHash() || NAVED;
   // Три секунды — компромисс: живо ощущается и не создаёт заметной
   // нагрузки. Позже сюда встанут вебсокеты, и опрос уйдёт.
   timer = setInterval(refresh, 3000);

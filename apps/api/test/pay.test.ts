@@ -56,6 +56,21 @@ describe('страница оплаты', () => {
     expect(html).toContain('location.hostname.replace');
   });
 
+  /*
+   * Корень витрины отдаёт промо-страницу: человек, нажавший «у
+   * кабінет», попадал на рекламу продукта, которым уже пользуется.
+   */
+  it('ведёт на страницу кабинета, а не на корень домена', () => {
+    expect(html).toContain("u.origin + '/app'");
+    expect(html).toContain('/app"');
+  });
+
+  // Paddle возвращает на эту же страницу своей ссылкой, без наших
+  // параметров: адрес кабинета обязан пережить такое возвращение.
+  it('запоминает адрес кабинета на время вкладки', () => {
+    expect(html).toContain('sessionStorage');
+  });
+
   it('в песочнице переключает окружение, в бою — нет', () => {
     expect(html).toContain('Environment.set');
     expect(payPage({ ...DEPS, env: 'production' })).toContain('"production"');

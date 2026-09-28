@@ -55,6 +55,8 @@ interface TargetBody {
   title?: string;
   config?: Record<string, unknown>;
   events?: string[];
+  /** Каналы, о которых оповещать. Пусто — обо всех. */
+  channels?: string[];
   isActive?: boolean;
 }
 
@@ -127,6 +129,24 @@ export function cleanEvents(events: unknown): NotifyEvent[] {
   for (const e of events) {
     const s = String(e);
     if (isNotifyEvent(s) && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Каналы подписки: только опознаватели, только свои.
+ *
+ * Чужой канал в списке молча ничего не сломает — выборка идёт внутри
+ * компании, — но мусор в поле превращает «оповіщати тільки про
+ * Instagram» в правило, которое никто не может перечитать.
+ */
+export function cleanChannels(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const out: string[] = [];
+  for (const item of list) {
+    const s = String(item);
+    if (uuid.test(s) && !out.includes(s)) out.push(s);
   }
   return out;
 }
@@ -221,7 +241,7 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
 
     const data = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows: targets } = await db.query(
-        `SELECT id, kind, title, config, events, is_active, last_error, last_sent_at
+        `SELECT id, kind, title, config, events, channels, is_active, last_error, last_sent_at
            FROM notify_targets WHERE tenant_id = $1 ORDER BY created_at`,
         [auth.tenantId],
       );
@@ -229,6 +249,17 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
         `SELECT id, display_name FROM channels
            WHERE tenant_id = $1 AND type IN ('telegram_bot', 'telegram_business')
            ORDER BY display_name`,
+        [auth.tenantId],
+      );
+      /*
+       * Все каналы — для выбора «звідки саме оповіщати». Отдельным
+       * запросом от ботов: те выбираются как отправитель оповещения, а
+       * эти как его повод, и путать два списка в одном месте значит
+       * однажды показать человеку не тот.
+       */
+      const { rows: channels } = await db.query<{ id: string; display_name: string; type: string }>(
+        `SELECT id, display_name, type FROM channels
+           WHERE tenant_id = $1 AND status <> 'deleted' ORDER BY display_name`,
         [auth.tenantId],
       );
       const { rows: tenant } = await db.query<{ waiting_alert_minutes: number; sla: unknown }>(
@@ -246,11 +277,13 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
           title: (t as Record<string, unknown>)['title'],
           config: (t as Record<string, unknown>)['config'],
           events: (t as Record<string, unknown>)['events'],
+          channels: (t as Record<string, unknown>)['channels'],
           isActive: (t as Record<string, unknown>)['is_active'],
           lastError: (t as Record<string, unknown>)['last_error'],
           lastSentAt: (t as Record<string, unknown>)['last_sent_at'],
         })),
         bots,
+        channels,
         waitingAlertMinutes: tenant[0]?.waiting_alert_minutes ?? 15,
         /*
          * Обещание отдаётся сюда, потому что оно отменяет этот порог.
@@ -417,9 +450,18 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
 
     const row = await withTenant(pool, auth.tenantId, async (db) => {
       const { rows } = await db.query<{ id: string }>(
-        `INSERT INTO notify_targets (tenant_id, kind, title, config, events, credentials_enc)
-         VALUES ($1, $2, $3, $4::jsonb, $5::text[], $6) RETURNING id`,
-        [auth.tenantId, kind, title, JSON.stringify(config), cleanEvents(req.body?.events), enc],
+        `INSERT INTO notify_targets
+           (tenant_id, kind, title, config, events, channels, credentials_enc)
+         VALUES ($1, $2, $3, $4::jsonb, $5::text[], $6::uuid[], $7) RETURNING id`,
+        [
+          auth.tenantId,
+          kind,
+          title,
+          JSON.stringify(config),
+          cleanEvents(req.body?.events),
+          cleanChannels(req.body?.channels),
+          enc,
+        ],
       );
       return rows[0] ?? null;
     });
@@ -474,8 +516,9 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
               SET title = COALESCE($2, title),
                   config = $3::jsonb,
                   events = COALESCE($4::text[], events),
-                  is_active = COALESCE($5, is_active),
-                  credentials_enc = COALESCE($6, credentials_enc),
+                  channels = COALESCE($5::uuid[], channels),
+                  is_active = COALESCE($6, is_active),
+                  credentials_enc = COALESCE($7, credentials_enc),
                   last_error = NULL
             WHERE id = $1`,
           [
@@ -483,6 +526,9 @@ export function registerNotify(app: FastifyInstance, deps: NotifyDeps): NotifyAp
             req.body?.title?.trim().slice(0, 120) ?? null,
             JSON.stringify(config),
             req.body?.events ? cleanEvents(req.body.events) : null,
+            // Пустой список — это «всі канали», и прислать его можно
+            // намеренно: отличаем «не трогали» по отсутствию поля.
+            req.body?.channels === undefined ? null : cleanChannels(req.body.channels),
             typeof req.body?.isActive === 'boolean' ? req.body.isActive : null,
             enc,
           ],

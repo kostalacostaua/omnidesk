@@ -40,6 +40,15 @@ export interface NotifyPayload {
   channel?: string | null;
   /** Диалог, чтобы ссылка вела прямо в него. */
   conversationId?: string | null;
+  /**
+   * В каком канале это произошло.
+   *
+   * Отдельно от channel: там человеческое имя для текста оповещения, а
+   * здесь опознаватель для подписки. Без него «тільки Instagram»
+   * невозможно: по слову «Instagram» в тексте каналы не различить,
+   * когда их два.
+   */
+  channelId?: string | null;
   /** Сколько минут человек ждёт ответа. */
   waitingMinutes?: number | null;
   /**

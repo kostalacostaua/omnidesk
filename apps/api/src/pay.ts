@@ -45,7 +45,16 @@ export function payTxn(value: unknown): string | null {
  * значило бы собирать одно и то же ради одной подстановки.
  */
 export function payPage(deps: PayDeps): string {
-  const back = deps.appUrl || 'https://app.rozmovio.com';
+  /*
+   * Куда возвращаться, если кабинет не назвал себя сам.
+   *
+   * С хвостом /app, а не на корень домена: корень витрины отдаёт
+   * промо-страницу, и человек, нажавший «у кабінет», попадал на
+   * рекламу собственного продукта. Страница кабинета отдаётся с любого
+   * нашего домена, поэтому этот адрес хуже правильного, но всегда
+   * ведёт туда, куда написано на кнопке.
+   */
+  const back = (deps.appUrl || 'https://app.rozmovio.com') + '/app';
   return `<!doctype html><html lang="uk"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Оплата — Rozmovio</title>
@@ -85,13 +94,23 @@ var BACK = ${JSON.stringify(back)};
  * ссылка «вернуться в кабинет», ведущая на чужую страницу входа.
  */
 (function(){
+  var KEY = 'rz.pay.back';
   try {
     var asked = new URLSearchParams(location.search).get('back') || '';
+    /*
+     * Paddle возвращает человека на эту же страницу своей ссылкой, и
+     * своих параметров в ней уже нет. Поэтому адрес кабинета
+     * запоминается на время вкладки: иначе кнопка после оплаты ведёт
+     * не туда, откуда пришли, — а это ровно тот момент, когда по ней
+     * нажимают.
+     */
+    if (!asked) asked = sessionStorage.getItem(KEY) || '';
     if (!asked) return;
     var u = new URL(asked);
     var base = location.hostname.replace(/^www[.]/, '');
     if (u.protocol === 'https:' && (u.hostname === base || u.hostname.slice(-(base.length + 1)) === '.' + base)) {
-      BACK = u.origin;
+      BACK = u.origin + '/app';
+      try { sessionStorage.setItem(KEY, u.origin) } catch (e) {}
     }
   } catch (e) {}
 })();

@@ -202,6 +202,7 @@ export interface NotifyJob {
     who?: string | null;
     text?: string | null;
     channel?: string | null;
+    channelId?: string | null;
     conversationId?: string | null;
     waitingMinutes?: number | null;
     email?: string | null;

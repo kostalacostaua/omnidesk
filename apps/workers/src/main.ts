@@ -1804,6 +1804,7 @@ async function aiAnswer(
           who: msg.peerProfile.name ?? null,
           text,
           channel: msg.channelType,
+          channelId: msg.channelId,
           conversationId,
         },
         `ai.handoff:${conversationId}:${Math.floor(Date.now() / 3600_000)}`,
@@ -1881,7 +1882,7 @@ async function announceChannelDown(
     await notifier.notify(
       tenantId,
       'channel.down',
-      { channel: name, text: detail },
+      { channel: name, channelId, text: detail },
       // Раз в сутки на канал: чинить его всё равно человеку, и
       // напоминать об этом каждой неудачной отправкой — травля.
       `channel.down:${channelId}:${Math.floor(Date.now() / 86_400_000)}`,
@@ -2020,6 +2021,7 @@ async function announceNew(msg: UnifiedMessage, conversationId: string): Promise
         who: first.name ?? msg.peerProfile.name ?? null,
         text: typeof msg.content.text === 'string' ? msg.content.text : null,
         channel: msg.channelType,
+        channelId: msg.channelId,
         conversationId,
       },
       firstOne ? `conversation.new:${conversationId}` : `message.new:${conversationId}:${count}`,
