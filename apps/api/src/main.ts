@@ -11,6 +11,11 @@ import {
   QUEUE_WA_LOGIN,
   assertRlsIntegrity,
   canSendFreeform,
+  canStartChat,
+  normalizePhone,
+  outreachPeerId,
+  outreachWindow,
+  startsWithTemplate,
   isCommentChannel,
   isPlatformOwner,
   parsePlatformOwners,
@@ -1386,6 +1391,100 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
 
   return { messages: rows };
 });
+
+/**
+ * Написать первым.
+ *
+ * Ручка только заводит диалог: контакт, связь с каналом и сама
+ * переписка. Отправка идёт обычным путём — той же ручкой, тем же
+ * воркером, с теми же проверками окна. Своего пути отправки здесь нет
+ * намеренно: второй путь означал бы вторую проверку окна, и однажды
+ * они разъедутся.
+ *
+ * Поэтому у WhatsApp Business ничего дополнительно запрещать не
+ * приходится. Окно у заведённого нами диалога пустое, а пустое окно
+ * типа standard — это «закрыто»: обычная проверка отправки сама
+ * пропустит только шаблон.
+ */
+app.post<{ Body: { channelId?: string; phone?: string; name?: string } }>(
+  '/conversations',
+  async (req, reply) => {
+    const auth = requireAuth(req as never);
+    if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+    const channelId = String(req.body?.channelId ?? '');
+    const phone = normalizePhone(String(req.body?.phone ?? ''));
+    const name = String(req.body?.name ?? '').trim().slice(0, 120);
+    if (!channelId) return reply.code(400).send({ error: 'channel_required' });
+    if (!phone) return reply.code(400).send({ error: 'bad_phone' });
+
+    const out = await withTenant(pool, auth.tenantId, async (db) => {
+      // Канал из чужого среза не годится: оператору, которому отдали
+      // один канал, «написать первым» из остальных нельзя ровно так
+      // же, как нельзя в них отвечать.
+      const { rows: chans } = await db.query<{ type: string; status: string }>(
+        `SELECT type, status FROM channels
+          WHERE id = $1 AND ${channelScope('id', '$2')} LIMIT 1`,
+        [channelId, auth.userId],
+      );
+      const ch = chans[0];
+      if (!ch) return { error: 'channel_not_found' as const };
+      if (!canStartChat(ch.type)) return { error: 'channel_cannot_start' as const };
+      if (ch.status !== 'active') return { error: 'channel_inactive' as const };
+
+      const peerId = outreachPeerId(ch.type, phone);
+
+      /*
+       * Тот же человек, а не второй такой же. Ищем по связи с каналом:
+       * номер в contacts бывает записан по-разному, а связь — это ровно
+       * то, по чему потом находит входящее сообщение.
+       */
+      const { rows: known } = await db.query<{ contact_id: string }>(
+        `SELECT contact_id FROM contact_identities
+          WHERE channel_type = $1 AND external_id = $2 LIMIT 1`,
+        [ch.type, peerId],
+      );
+
+      let contactId = known[0]?.contact_id ?? null;
+      if (!contactId) {
+        const { rows: made } = await db.query<{ id: string }>(
+          `INSERT INTO contacts (tenant_id, display_name, phone_e164)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [auth.tenantId, name || phone, phone],
+        );
+        contactId = made[0]!.id;
+        const { rows: linked } = await db.query<{ contact_id: string }>(
+          `INSERT INTO contact_identities (tenant_id, contact_id, channel_type, external_id, raw_profile)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (tenant_id, channel_type, external_id) DO UPDATE
+             SET raw_profile = contact_identities.raw_profile
+           RETURNING contact_id`,
+          [auth.tenantId, contactId, ch.type, peerId, JSON.stringify({ phone })],
+        );
+        contactId = linked[0]!.contact_id;
+      }
+
+      const win = outreachWindow(ch.type);
+      const { rows: conv } = await db.query<{ id: string; created: boolean }>(
+        `INSERT INTO conversations
+           (tenant_id, channel_id, contact_id, status, window_type, window_expires_at, last_message_at)
+         VALUES ($1, $2, $3, 'open', $4, NULL, now())
+         ON CONFLICT (tenant_id, channel_id, contact_id) DO UPDATE
+           SET status = CASE WHEN conversations.status = 'resolved' THEN 'open'
+                             ELSE conversations.status END
+         RETURNING id, (xmax = 0) AS created`,
+        [auth.tenantId, channelId, contactId, win.type],
+      );
+
+      return { id: conv[0]!.id, created: conv[0]!.created, template: startsWithTemplate(ch.type) };
+    });
+
+    if ('error' in out) {
+      return reply.code(out.error === 'channel_not_found' ? 404 : 400).send({ error: out.error });
+    }
+    return out;
+  },
+);
 
 /**
  * Заметка для команды.

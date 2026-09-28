@@ -763,6 +763,23 @@ export const INBOX_HTML = `<!DOCTYPE html>
     stroke-linecap:round;stroke-linejoin:round}
   .iq:hover{background:var(--hover);color:var(--t1)}
   .iq.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  /* «Написати першим» — тёмная, а не синяя: синяя кнопка на экране
+     одна, и она в шапке разговора. Здесь это вход в отдельное дело, а
+     не главное действие списка. */
+  .iq.dark{background:var(--rail);border-color:var(--rail);color:#fff}
+  .iq.dark:hover{background:var(--t1);border-color:var(--t1);color:#fff}
+
+  /* Окно «написати першим»: три поля и одна кнопка. Подпись слева,
+     поле справа — та же пара, что и в карточке клиента, чтобы человек
+     не учился второй раскладке ради трёх строк. */
+  #nSheet .nhead{display:flex;justify-content:space-between;align-items:center;
+    margin-bottom:18px}
+  #nSheet .nhead b{font-size:19px;font-weight:700;letter-spacing:-.02em}
+  #nSheet .fld2{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  #nSheet .fld2 label{width:84px;flex:none;font-size:13px;color:var(--t3)}
+  #nSheet .fld2 input,#nSheet .fld2 select{flex:1 1 0;min-width:0;height:38px;font-size:14px}
+  #nSheet .hint{margin-top:12px}
+  #nSheet button#nGo{width:100%;height:42px;font-size:14px;font-weight:600}
 
   /* Поиск. Рамки нет, пока в поле не пишут: она делит шапку на пять
      одинаковых прямоугольников, из которых ни один не главный. */
@@ -1632,6 +1649,8 @@ export const INBOX_HTML = `<!DOCTYPE html>
             aria-label="Фільтри" data-ta></button>
           <button class="iq" id="cardBtn" data-icon="side"
             aria-label="Картка клієнта" data-ta></button>
+          <button class="iq dark" id="newConv" data-icon="plus" style="display:none"
+            aria-label="Написати першим" data-ta></button>
         </div>
       </div>
       <label class="lsearch" data-icon="search">
@@ -2661,6 +2680,13 @@ function renderComposer(force){
     // Не прячем поле молча — объясняем, почему нельзя. Причина у каналов
     // разная: в WhatsApp остаются шаблоны, в Viber не остаётся ничего,
     // пока клиент не напишет сам. Обещать шаблоны там — обманывать.
+    /* У WhatsApp вне окна остаётся шаблон — и его надо дать, а не
+       рассказать о нём. Раньше здесь стоял только текст, а список
+       шаблонов был написан и никем не вызывался. */
+    if (c && (c.channel_type === 'whatsapp' || c.channel_type === 'whatsapp_cloud')){
+      waTemplates(box, c);
+      return;
+    }
     box.innerHTML = L('<div class="blocked"><b>Вікно відповіді закрито.</b> ') +
       L('Вільний текст надіслати не можна — так влаштовані правила каналу, ') +
       L('а не наш застосунок. ') +
@@ -3242,6 +3268,121 @@ function send(){
         : p.reason || p.error || L('Не вдалося надіслати');
     })
     .then(function(){ busy(el('send'), false) });
+}
+
+/* ══════════════ Написать первым ══════════════
+ *
+ * Обычно диалог заводит клиент. Три канала разрешают обратное, и это
+ * ровно те, ради которых компании держат номер: перезвонить по заявке
+ * с сайта, прислать накладную, ответить на пропущенный звонок.
+ *
+ * Кнопки нет, пока нет ни одного такого канала: кнопка, которой некуда
+ * вести, хуже отсутствующей. Сам список каналов в окне — тоже только
+ * из умеющих: выбор, который потом ответит «этим нельзя», — это
+ * вопрос, заданный впустую.
+ */
+/* Список тот же, что на сервере. Разойдись они — кнопка появлялась бы
+   ради отказа, а это вопрос, заданный впустую. */
+var START_TYPES = { telegram_user:1, whatsapp_user:1, whatsapp:1 };
+
+function startChannels(){
+  return CHANNELS.filter(function(c){
+    return START_TYPES[c.type] && c.status !== 'disabled' && c.is_active !== false;
+  });
+}
+
+function paintStartBtn(){
+  var b = el('newConv');
+  if (b) b.style.display = startChannels().length ? '' : 'none';
+}
+
+function startOpen(){
+  var list = startChannels();
+  if (!list.length) return;
+  if (el('nVeil')) return;
+  var v = document.createElement('div');
+  v.className = 'veil';
+  v.id = 'nVeil';
+  v.innerHTML =
+    '<div class="sheet" id="nSheet">' +
+      L('<div class="nhead"><b>Написати першим</b>') +
+      L('<button class="ghost mini" id="nX">Закрити</button></div>') +
+      L('<div class="fld2"><label>Канал</label><select id="nCh">') +
+        list.map(function(c){
+          return '<option value="' + esc(c.id) + '" data-type="' + esc(c.type) + '">' +
+            esc(c.display_name || CH[c.type] || c.type) + '</option>';
+        }).join('') +
+      '</select></div>' +
+      L('<div class="fld2"><label>Телефон</label>') +
+      L('<input id="nPh" placeholder="+380 67 000 00 00" inputmode="tel" autocomplete="off"></div>') +
+      L('<div class="fld2"><label>Імʼя</label>') +
+      L('<input id="nNm" placeholder="не обовʼязково" autocomplete="off"></div>') +
+      '<div class="hint" id="nHint"></div>' +
+      '<div class="err" id="nErr"></div>' +
+      L('<div class="row2" style="margin-top:14px"><button id="nGo">Створити діалог</button></div>') +
+    '</div>';
+  document.body.appendChild(v);
+  v.onclick = function(ev){ if (ev.target === v) startClose() };
+  document.addEventListener('keydown', startEsc);
+  el('nX').onclick = startClose;
+  el('nCh').onchange = startHint;
+  el('nGo').onclick = startGo;
+  el('nPh').onkeydown = function(e){ if (e.key === 'Enter') startGo() };
+  startHint();
+  el('nPh').focus();
+}
+
+function startClose(){
+  var v = el('nVeil');
+  if (v) v.parentNode.removeChild(v);
+  document.removeEventListener('keydown', startEsc);
+}
+
+function startEsc(e){ if (e.key === 'Escape') startClose() }
+
+/* Чем уйдёт первое сообщение — говорим до того, как человек наберёт
+   номер. WhatsApp Business принимает от нас только утверждённый
+   шаблон, и узнать об этом после набора текста — значит набрать его
+   зря. */
+function startHint(){
+  var o = el('nCh').options[el('nCh').selectedIndex];
+  var t = o ? o.dataset.type : '';
+  el('nHint').innerHTML = (t === 'whatsapp' || t === 'whatsapp_cloud')
+    ? L('WhatsApp Business дозволяє першим лише погоджений шаблон — його оберете у діалозі.')
+    : t === 'telegram_user'
+    ? L('Telegram знайде людину за номером. Номер потрапить у контакти цього акаунта — інакше ' +
+        'Telegram адресата не віддає. Якщо номера в Telegram немає або людина заборонила ' +
+        'пошук за номером, повідомлення не піде, і ми це покажемо.')
+    : L('Повідомлення піде звичайним текстом.');
+}
+
+function startGo(){
+  var b = el('nGo');
+  var channelId = el('nCh').value;
+  var phone = el('nPh').value.trim();
+  el('nErr').textContent = '';
+  if (!phone){ el('nErr').textContent = L('Вкажіть номер'); return }
+  busy(b, true);
+  api('/conversations', { method:'POST', body:{
+    channelId: channelId, phone: phone, name: el('nNm').value.trim()
+  }})
+    .then(function(r){
+      startClose();
+      // Список обновляем до открытия: новый диалог должен стоять в нём,
+      // а не появиться через три секунды опроса.
+      lastList = null;
+      return refresh().then(function(){ openConv(r.id) });
+    })
+    .catch(function(e){
+      var p = e.payload || {};
+      el('nErr').textContent =
+        p.error === 'bad_phone' ? L('Номер не схожий на телефон')
+        : p.error === 'channel_cannot_start' ? L('Цим каналом першим написати не можна')
+        : p.error === 'channel_inactive' ? L('Канал вимкнено')
+        : p.error === 'channel_not_found' ? L('Канал не знайдено')
+        : p.detail || L('Не вдалося створити діалог');
+    })
+    .then(function(){ if (el('nGo')) busy(b, false) });
 }
 
 /* ══════════════ Карточка клиента ══════════════ */
@@ -10006,6 +10147,7 @@ var ICONS = {
   side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
   spark:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   pen:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
@@ -10354,7 +10496,7 @@ function openFilter(anchor, key, all){
   });
 }
 
-function fillChannelFilter(){ paintFilters() }
+function fillChannelFilter(){ paintFilters(); paintStartBtn() }
 
 /* Метки в фильтре подтягиваются отдельно от списка: список — это
    страница, а фильтр обязан знать про все метки, иначе нужной в нём не
@@ -12118,6 +12260,8 @@ function paintFilterBox(){
   box.classList.toggle('on', open || set > 0);
   el('fToggle').classList.toggle('on', set > 0);
 }
+
+el('newConv').onclick = startOpen;
 
 el('fToggle').onclick = function(){
   el('filters').classList.toggle('on');

@@ -21,6 +21,7 @@ import {
   mtprotoLoginKey,
   mtprotoPasswordKey,
   parseMasterKey,
+  peerNeedsLookup,
   withSystem,
   withTenant,
   type Attachment,
@@ -419,6 +420,59 @@ async function resolvePeer(l: Live, peerId: string, accessHash?: string) {
   return l.client.getInputEntity(peerId);
 }
 
+/**
+ * Номер → аккаунт Telegram.
+ *
+ * Когда пишем первыми, про человека известен только номер, а Telegram
+ * адресует по внутреннему идентификатору. Единственный способ узнать
+ * его — попросить у сервера, добавив номер в контакты аккаунта: так
+ * это устроено в самом Telegram, и «тихого» способа там нет. Значит,
+ * в контактах владельца номера появится запись — об этом лучше знать
+ * заранее, чем обнаружить.
+ *
+ * Пустой ответ — это не сбой связи. Это либо номера нет в Telegram,
+ * либо человек запретил находить себя по номеру, и повторять запрос
+ * бессмысленно: ответ не изменится ни через минуту, ни через час.
+ *
+ * Найденный идентификатор записываем в связь вместо номера: второй
+ * раз спрашивать не придётся, и следующее сообщение уйдёт сразу.
+ */
+async function lookupByPhone(
+  l: Live,
+  tenantId: string,
+  contactPhone: string,
+): Promise<{ id: string; hash: string } | null> {
+  const res = (await l.client.invoke(
+    new Api.contacts.ImportContacts({
+      contacts: [
+        new Api.InputPhoneContact({
+          clientId: bigInt(0),
+          phone: contactPhone,
+          firstName: contactPhone,
+          lastName: '',
+        }),
+      ],
+    }),
+  )) as { users?: Array<{ id: unknown; accessHash?: unknown }> };
+
+  const user = res.users?.[0];
+  if (!user || user.accessHash === undefined || user.accessHash === null) return null;
+
+  const id = String(user.id);
+  const hash = String(user.accessHash);
+  await withTenant(pool, tenantId, async (db) => {
+    await db.query(
+      `UPDATE contact_identities
+          SET external_id = $2,
+              raw_profile = coalesce(raw_profile, '{}'::jsonb)
+                            || jsonb_build_object('accessHash', $3::text, 'phone', $1::text)
+        WHERE channel_type = 'telegram_user' AND external_id = $1`,
+      [contactPhone, id, hash],
+    );
+  });
+  return { id, hash };
+}
+
 /** Постоянные отказы: повторять бессмысленно. */
 const PERMANENT = /PEER_ID_INVALID|USER_IS_BLOCKED|INPUT_USER_DEACTIVATED|YOU_BLOCKED_USER|PRIVACY_RESTRICTED|USER_PRIVACY_RESTRICTED|MESSAGE_EMPTY|CHAT_WRITE_FORBIDDEN|REACTION_INVALID/;
 
@@ -449,8 +503,24 @@ async function handleSend(job: OutboundJob, worker: Worker): Promise<void> {
     throw new UnrecoverableError('Неизвестен получатель');
   }
 
+  /*
+   * Пишем первым: в связи лежит номер, а не идентификатор аккаунта.
+   * Раскрываем его до отправки — и дальше это обычное сообщение.
+   */
+  let peerId = row.peer_id;
+  let accessHash = row.raw_profile?.accessHash;
+  if (peerNeedsLookup(peerId)) {
+    const found = await lookupByPhone(l, job.tenantId, peerId).catch(() => null);
+    if (!found) {
+      await markFailed(job, { reason: 'phone_not_on_telegram' });
+      throw new UnrecoverableError('Номер не знайдено в Telegram');
+    }
+    peerId = found.id;
+    accessHash = found.hash;
+  }
+
   try {
-    const peer = await resolvePeer(l, row.peer_id, row.raw_profile?.accessHash);
+    const peer = await resolvePeer(l, peerId, accessHash);
     const replyTo = row.content?.replyToExternalId
       ? Number(row.content.replyToExternalId.split(':')[1])
       : undefined;
