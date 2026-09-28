@@ -91,9 +91,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
      уезжает под неё, и человек видит переписку, но не видит, куда
      писать. dvh считает видимую часть, а при открытой клавиатуре
      высоту доставляет visualViewport (см. fitHeight). */
-  #app{display:none;grid-template-columns:66px 316px minmax(0,1fr) 284px;height:100vh;height:100dvh}
-  #app.no-card{grid-template-columns:66px 316px minmax(0,1fr)}
-  #app[data-view="bots"]{grid-template-columns:66px minmax(0,1fr)}
+  #app{display:none;grid-template-columns:76px 348px minmax(0,1fr) 320px;height:100vh;height:100dvh}
+  #app.no-card{grid-template-columns:76px 348px minmax(0,1fr)}
+  #app[data-view="bots"]{grid-template-columns:76px minmax(0,1fr)}
   #app[data-view="bots"] #list,#app[data-view="bots"] #thread,
   #app[data-view="bots"] #card{display:none}
   #app[data-view="chats"] #bots{display:none}
@@ -104,7 +104,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
      выезжает поверх переписки по нажатию на имя клиента — там же, где
      на широком экране она и стоит, справа. */
   #cardVeil,#cardX{display:none}
-  @media(max-width:1180px){#app{grid-template-columns:66px 306px minmax(0,1fr)}
+  @media(max-width:1180px){#app{grid-template-columns:76px 336px minmax(0,1fr)}
     #app #card{display:none}
     /* Кнопка «Клієнт» прячет третью колонку, а третьей колонки здесь
        уже нет: карточка выезжает поверх переписки по нажатию на имя.
@@ -141,8 +141,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   @keyframes cardIn{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
   @media(prefers-reduced-motion:reduce){#app.card-open #card{animation:none}}
   @media(max-width:820px){
-    /* 62, а не 56: «Сповіщення» иначе переносится одной буквой. */
-    #app{grid-template-columns:62px minmax(0,1fr)}
+    /* Рейл на телефоне уже: 76 точек забирают у переписки полтора
+       слова в строке, а подписи помещаются и в 66. */
+    #app{grid-template-columns:66px minmax(0,1fr)}
     #app.thread-open #list{display:none}
     #app:not(.thread-open) #thread{display:none}}
 
@@ -595,21 +596,24 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .kv code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
     background:var(--panel2);padding:1px 5px;border-radius:4px}
 
-  /* ═══ Оформление «Стекло» ═══════════════════════════════════════
+  /* ═══ Оформление ════════════════════════════════════════════════
      Второй слой поверх базовых правил: те же классы, но другая
-     поверхность. Панели полупрозрачные и размывают фон, цвет живёт
-     в знаке и в одном акценте, движение короткое и без отскоков.
+     поверхность. Цвет живёт в знаке и в одном акценте, движение
+     короткое и без отскоков.
 
      Почему слоем, а не правкой по месту: базовые правила описывают
      раскладку и поведение, этот блок — только вид. Так видно,
-     что именно относится к оформлению, и его можно заменить целиком. */
+     что именно относится к оформлению, и его можно заменить целиком.
 
-  body{background:var(--bg);
-    background-image:
-      radial-gradient(60vw 48vh at 8% -8%, rgba(47,107,255,.16), transparent 60%),
-      radial-gradient(52vw 44vh at 104% 8%, rgba(122,60,240,.14), transparent 62%),
-      radial-gradient(44vw 40vh at 50% 118%, rgba(47,107,255,.09), transparent 64%);
-    background-attachment:fixed;}
+     Фон ровный. Раньше под кабинетом лежали три цветных пятна —
+     синее сверху слева, фиолетовое справа, синее снизу. На пустой
+     странице это выглядело нарядно, а в работе мешало: карточка на
+     светлом пятне и та же карточка на тёмном — разной яркости, и
+     глаз всё время подозревает, что одна из них чем-то отличается.
+     Поверхностей в кабинете три — рейл, белые колонки и поле, где
+     читают; пятна были четвёртой, ничего не значащей. */
+
+  body{background:var(--bg)}
 
   .glass{background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
 
@@ -656,16 +660,53 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   /* ─── Каркас ───────────────────────────────────────────────────── */
   #app{gap:0;padding:0}
+  /* Рейл — единственная тёмная поверхность кабинета. Он держит левый
+     край экрана и не спорит с белыми колонками за внимание: разделов
+     восемь, и восемь подсвеченных плашек рядом с перепиской читались
+     бы как восемь предложений что-то нажать.
+     Поэтому наведение и выбор здесь — прозрачный белый, а не синий:
+     синий в кабинете означает «нажми», а раздел, в котором стоишь,
+     нажимать уже не надо. */
+  /* Черта справа нужна только тёмной теме: там рабочая область почти
+     того же цвета, что и рейл, и без неё край экрана расплывается.
+     На светлой она приходится на стык тёмного с белым и не видна. */
   #rail{background:var(--rail);border-right:1px solid var(--line);
-    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);padding:14px 0 12px}
-  #rail .logo{width:34px;height:34px;margin-bottom:18px}
-  #rail .logo svg{width:32px;height:32px}
-  .rbtn{border-radius:12px;width:54px;padding:9px 0;font-size:9.5px;letter-spacing:.01em;
-    transition:background-color .16s ease,color .16s ease,transform .1s cubic-bezier(.2,.8,.3,1)}
-  .rbtn:hover{background:var(--hover)}
-  .rbtn.on{background:var(--railOnBg);color:var(--accent)}
-  .rbtn.on svg{stroke:var(--accent)}
-  .rbtn .cnt{background:var(--crit);box-shadow:0 0 0 2px var(--bg)}
+    padding:18px 0 14px;gap:4px}
+  #rail .logo{width:28px;height:28px;margin-bottom:18px}
+  #rail .logo svg{width:28px;height:28px}
+  .rbtn{width:60px;padding:9px 0 7px;border-radius:12px;gap:4px;letter-spacing:0;
+    font-size:11px;font-weight:500;color:var(--railT);
+    transition:background-color .16s ease,color .16s ease}
+  .rbtn svg{width:20px;height:20px;stroke-width:1.75}
+  .rbtn:hover{background:rgba(255,255,255,.07);color:var(--railOn)}
+  .rbtn.on{background:var(--railOnBg);color:var(--railOn);box-shadow:none}
+  .rbtn.on svg{stroke:currentColor}
+  /* Непрочитанное — оранжевое, и оранжевый в кабинете больше нигде не
+     значит ничего другого: «на тебя ждут». Цифра тёмная, потому что
+     белая в десять точек на оранжевом не читается. */
+  .rbtn .cnt{top:4px;right:8px;background:var(--attention);color:var(--rail);
+    font-size:10px;font-weight:700;box-shadow:none}
+  /* Нижний ряд — не разделы, а переключатели своего рабочего места:
+     тема, звук, выход. Подпись им не нужна — они не место, куда
+     переходят, а действие, которое делают; название читается из
+     подсказки, а место в рейле стоит дорого. */
+  .rmini{width:40px;height:40px;padding:0;border-radius:10px;gap:0;
+    align-items:center;justify-content:center}
+  .rmini svg{width:20px;height:20px}
+  /* Звук включён — колокольчик белый, выключен — перечёркнутый и
+     серый. Зелёный здесь был третьим значением цвета в кабинете, где
+     цвет и так занят: синий — «нажми», оранжевый — «ждут». */
+  .rmini.live{color:var(--railOn)}
+  /* Аватар в самом низу — это «я»: свой профиль, своя организация,
+     свои настройки. Кольцо цвета рейла отделяет его от фона, не рисуя
+     вокруг рамки; у выбранного оно белое — тот же признак, что и
+     заливка у разделов, только по кругу. */
+  .rav{margin-top:8px;width:34px;height:34px;flex:none;padding:0;border:0;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:13px;
+    font-weight:600;letter-spacing:-.01em;display:grid;place-items:center;
+    cursor:pointer;box-shadow:0 0 0 2px var(--rail),0 0 0 3px rgba(255,255,255,.16)}
+  .rav:hover{box-shadow:0 0 0 2px var(--rail),0 0 0 3px rgba(255,255,255,.34)}
+  .rav.on{box-shadow:0 0 0 2px var(--rail),0 0 0 3px var(--railOn)}
 
   #list{background:var(--panel);border-right:1px solid var(--line);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
@@ -846,7 +887,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #app:not([data-view="chats"]) #list,
   #app:not([data-view="chats"]) #thread,
   #app:not([data-view="chats"]) #card{display:none}
-  #app:not([data-view="chats"]){grid-template-columns:66px minmax(0,1fr)}
+  #app:not([data-view="chats"]){grid-template-columns:76px minmax(0,1fr)}
   #app:not([data-view="chats"]) #page{display:block}
   /* Колонка уже прежней: строка длиной во весь экран читается плохо,
      а на широком мониторе содержимое расползалось по краям. */
@@ -1108,10 +1149,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
        и закреплённая страница спрятала бы поле ввода кода. */
     #gate{height:100dvh;overflow-y:auto;align-items:flex-start;padding-top:8vh}
 
-    /* «Сповіщення» и «Notifications» в 56 точек одной строкой не
-       влезают: переносим слово, а не обрезаем его. */
-    .rbtn{width:60px;font-size:9px;padding:8px 2px;white-space:normal;
-      overflow-wrap:anywhere;line-height:1.1}
+    /* Длинные подписи вроде «Налаштування» в узком рейле одной
+       строкой не влезают: переносим слово, а не обрезаем его. */
+    .rbtn{width:58px;font-size:10px;padding:8px 2px;white-space:normal;
+      overflow-wrap:anywhere;line-height:1.15}
+    .rmini{width:40px;padding:0}
     .thead{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
     .thead .back{order:1;flex:none}
     /* Действия сжимаются и прокручиваются вбок, а не переносятся:
@@ -1333,20 +1375,21 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <div id="impbar" style="display:none"></div>
 <div id="app" data-view="chats">
   <nav id="rail">
-    <div class="logo" id="logo" title="До чатів" data-tt style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><defs><linearGradient id="rzg" x1="10" y1="8" x2="92" y2="94" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2F6BFF"/><stop offset="1" stop-color="#7A3CF0"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#rzg)" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
+    <div class="logo" id="logo" title="До чатів" data-tt style="cursor:pointer"><svg viewBox="0 0 100 100" aria-label="Rozmovio"><path fill-rule="evenodd" fill="#FFFFFF" d="M6 22A16 16 0 0 1 22 6H60A32 32 0 0 1 92 38A28 28 0 0 1 72 64.6L93 90.5A5 5 0 0 1 89 94H67.5A5 5 0 0 1 63.6 92.1L44 67L25.2 91.2A8 8 0 0 1 6 86ZM32 23H62A9 9 0 0 1 71 32V41A9 9 0 0 1 62 50H43L30.5 60.5A1.5 1.5 0 0 1 28 59.4V50.2A9 9 0 0 1 23 42V32A9 9 0 0 1 32 23Z"/></svg></div>
     <button class="rbtn on" data-view="chats" data-icon="chat" data-t>Чати<span class="cnt" id="railCnt" style="display:none"></span></button>
     <button class="rbtn" data-view="channels" data-icon="plug" data-admin="1" data-t>Канали</button>
-    <button class="rbtn" data-view="bots" data-icon="bot" data-admin="1" data-t>Сценарії</button>
+    <button class="rbtn" data-view="bots" data-icon="flow" data-admin="1" data-t>Сценарії</button>
     <button class="rbtn" data-view="replies" data-icon="bolt" data-t>Шаблони</button>
     <button class="rbtn" data-view="reports" data-icon="chart" data-admin="1" data-t>Звіти</button>
     <button class="rbtn" data-view="integrations" data-icon="link" data-admin="1" data-t>Інтеграції</button>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
-    <button class="rbtn" id="themeTitle" data-icon="sun" data-t>Тема</button>
-    <button class="rbtn" id="bell" data-icon="bell" data-t>Звук</button>
-    <button class="rbtn" data-view="profile" data-icon="gear" data-t>Налаштування</button>
-    <button class="rbtn" id="out" data-icon="exit" data-t>Вийти</button>
+    <button class="rbtn rmini" id="themeTitle" data-icon="sun" aria-label="Тема" data-ta></button>
+    <button class="rbtn rmini" id="bell" data-icon="bell" aria-label="Звук" data-ta></button>
+    <button class="rbtn rmini" id="out" data-icon="exit" aria-label="Вийти" title="Вийти" data-tt data-ta></button>
+    <button class="rav" id="ravBtn" data-view="profile"
+      aria-label="Налаштування" data-ta>··</button>
   </nav>
 
   <div id="list">
@@ -9519,6 +9562,7 @@ function tabReplies(){
 var ICONS = {
   chat:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l1.9-4.6a8.4 8.4 0 0 1-.9-3.9 8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"/>',
   bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8M9 14h.01M15 14h.01"/>',
+  flow:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a3 3 0 0 0 3 3H14"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
   bellOff:'<path d="M13.7 21a2 2 0 0 1-3.4 0M18.6 13A17 17 0 0 1 18 8a6 6 0 0 0-9.3-5M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14M2 2l20 20"/>',
@@ -9678,7 +9722,6 @@ function paintBell(){
   var on = PREFS.sound || PREFS.push;
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(on ? 'bell' : 'bellOff'));
-  b.insertAdjacentText('beforeend', on ? L('Звук') : L('Тихо'));
   b.classList.toggle('live', on);
   b.title = (PREFS.sound ? L('Звук увімкнено') : L('Звук вимкнено')) + ' · ' +
     (PREFS.push ? L('сповіщення увімкнені') : L('сповіщення вимкнені')) +
@@ -9696,7 +9739,6 @@ function paintThemeBtn(){
   var v = themeGet();
   b.innerHTML = '';
   b.insertAdjacentHTML('afterbegin', icon(v === 'light' ? 'sun' : v === 'dark' ? 'moon' : 'auto'));
-  b.insertAdjacentText('beforeend', v === 'light' ? L('Світла') : v === 'dark' ? L('Темна') : L('Тема'));
   b.title = v === 'auto'
     ? L('Тема як у системі — натисніть, щоб вибрати світлу')
     : v === 'light' ? L('Світла тема — натисніть, щоб вибрати темну')
@@ -11213,7 +11255,7 @@ function setView(view){
   el('app').dataset.view = view;
   rememberView(view);
   if (view === 'chats') { backToList(); }
-  Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
+  Array.prototype.forEach.call(document.querySelectorAll('#rail [data-view]'), function(b){
     /* Страницы настроек прячутся за одной кнопкой рейла — и она горит
        на любой из них, иначе человек на «Команді» видит рейл, где не
        выбрано ничего, и не понимает, где он. */
@@ -11248,6 +11290,7 @@ function applyRole(){
     b.style.display = plat && plat.owner ? '' : 'none';
   });
   ownBar();
+  paintUser();
   if (!(plat && plat.owner) && el('app').dataset.view === 'owner') setView('chats');
   // Если оператор стоял в закрытом для него разделе — возвращаем в чаты.
   if (!admin && el('app').dataset.view !== 'chats' && el('app').dataset.view !== 'profile'){
@@ -11256,6 +11299,25 @@ function applyRole(){
 }
 
 function isAdmin(){ return ROLE === 'owner' || ROLE === 'admin' }
+
+/**
+ * Аватар в рейле.
+ *
+ * Инициалы, а не фото: фотографии сотрудника у нас нет и спрашивать её
+ * незачем. Подсказка называет человека и организацию — по ней видно,
+ * в чьём кабинете ты сидишь, и это единственное место, где это видно
+ * всегда. У владельца платформы кабинетов много, и перепутать их,
+ * работая за клиента, стоит дороже всего.
+ */
+function paintUser(){
+  var b = el('ravBtn');
+  if (!b) return;
+  var u = (ME && ME.user) || {};
+  var name = u.full_name || u.email || '';
+  b.textContent = name ? initials(name) : '··';
+  var org = (ME && ME.tenant && ME.tenant.name) || '';
+  b.title = (name || L('Налаштування')) + (org ? ' · ' + org : '');
+}
 
 /* ── Поддержка ─────────────────────────────────────────────────────
  *
@@ -11534,7 +11596,7 @@ function logout(){
 
 /* ── Обработчики ─────────────────────────────────────────────────── */
 
-Array.prototype.forEach.call(document.querySelectorAll('.rbtn[data-view]'), function(b){
+Array.prototype.forEach.call(document.querySelectorAll('#rail [data-view]'), function(b){
   // Переход по рейлу — это «покажи раздел», а не «верни, где я был»:
   // открытая CRM сбрасывается, иначе «Інтеграції» ведут не на список.
   b.onclick = function(){ CRM_OPEN = null; setView(b.dataset.view) };

@@ -104,5 +104,12 @@ function applyLang(){
     if (!n.dataset.ukt) n.dataset.ukt = n.getAttribute('title') || '';
     n.setAttribute('title', L(n.dataset.ukt));
   });
+  /* Кнопка без подписи называется только для читалки экрана, и это
+     название — такой же текст интерфейса, как надпись: непереведённое,
+     оно оставляло бы незрячего человека в украинском кабинете. */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ta]'), function(n){
+    if (!n.dataset.uka) n.dataset.uka = n.getAttribute('aria-label') || '';
+    n.setAttribute('aria-label', L(n.dataset.uka));
+  });
 }
 `;
