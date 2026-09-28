@@ -204,6 +204,26 @@ async function paddleFetch(
   return { ok: true, data: (parsed as { data?: unknown } | null)?.data ?? null };
 }
 
+/**
+ * Валюты, в которых заведён прайс.
+ *
+ * Одно место на весь счёт: и список для кабинета, и проверка того, что
+ * прислал браузер. Разойтись они не должны — иначе выбор в кабинете
+ * окажется шире того, чем мы торгуем.
+ */
+function sellCurrencies(planPrices: Record<string, Record<string, unknown>>): string[] {
+  const seen: string[] = [];
+  for (const plan of SELLABLE) {
+    for (const cur of Object.keys(planPrices[plan] ?? {})) {
+      const code = cur.toUpperCase();
+      if (/^[A-Z]{3}$/.test(code) && !seen.includes(code)) seen.push(code);
+    }
+  }
+  // Доллар первым: в нём заведено большинство прайсов, и он же остаётся
+  // запасным, когда у тарифа нет цены в выбранной валюте.
+  return seen.sort((a, b) => (a === 'USD' ? -1 : b === 'USD' ? 1 : a.localeCompare(b)));
+}
+
 export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
   const { pool, requireAuth } = deps;
   const rateFor = makeRateFor(pool);
@@ -315,6 +335,15 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       current: plan,
       perSeat: isPerSeatPlan(me.plan),
       seats,
+      /*
+       * Валюты, в которых мы продаём.
+       *
+       * Раньше кабинет показывал цену в долларах, а Paddle списывал в
+       * валюте страны покупателя: человек видел одно, а в банке —
+       * другое, и объяснить это ему было нечем. Список берём из прайса
+       * платформы: чего в нём нет, того мы и не продаём.
+       */
+      currencies: sellCurrencies(planPrices),
       plans: SELLABLE.map((plan) => {
         const per = isPerSeatPlan(plan);
         // Цена за человека сверяется с прайсом, а не проверяется на
@@ -359,7 +388,9 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
    * к чужой же организации. Здесь его ставим мы, и подменить его
    * снаружи нечем.
    */
-  app.post<{ Body: { plan?: string; period?: string; seats?: number } }>('/billing/checkout', async (req, reply) => {
+  app.post<{ Body: { plan?: string; period?: string; seats?: number; currency?: string } }>(
+    '/billing/checkout',
+    async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
     if (!deps.apiKey) return reply.code(503).send({ error: 'paddle_not_configured' });
@@ -394,10 +425,24 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       ? seatsOf(req.body?.seats, Number(me.seats_limit ?? 1), seatFloor(plan))
       : 1;
 
+    /*
+     * Валюта списания — та, которую человек видел на странице.
+     *
+     * Без неё Paddle выбирает валюту сам, по стране покупателя, и
+     * украинец, читавший «50 USD», видит в окне оплаты гривны. Сумма
+     * при этом другая — курс не наш, — и доверия к странице после
+     * такого не остаётся. Принимаем только то, что есть в прайсе:
+     * валюта из браузера не должна расширять список того, чем мы
+     * торгуем.
+     */
+    const asked = String(req.body?.currency ?? '').toUpperCase();
+    const currency = sellCurrencies(p.plan_prices ?? {}).includes(asked) ? asked : '';
+
     const made = await paddleFetch(deps, req.log, '/transactions', {
       method: 'POST',
       body: {
         items: [{ price_id: priceId, quantity }],
+        ...(currency ? { currency_code: currency } : {}),
         custom_data: { tenant_id: a.tenantId },
         // Клиента передаём, если он уже есть: иначе Paddle заведёт
         // второго на ту же почту, и в его кабинете окажется половина
@@ -425,7 +470,8 @@ export function registerBilling(app: FastifyInstance, deps: BillingDeps): void {
       // знает только сервер.
       payUrl: deps.payUrl ? `${deps.payUrl}?_ptxn=${encodeURIComponent(id)}` : '',
     };
-  });
+    },
+  );
 
   /**
    * Оплаты клиента.

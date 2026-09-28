@@ -71,6 +71,31 @@ var TOKEN = ${JSON.stringify(deps.clientToken)};
 var ENV = ${JSON.stringify(deps.env)};
 var BACK = ${JSON.stringify(back)};
 
+/*
+ * Куда возвращаться.
+ *
+ * Адрес кабинета называет сам кабинет: он открывает эту страницу и
+ * прикладывает свой origin. Так надо потому, что страница оплаты живёт
+ * на витрине — Paddle разрешает продавать именно с неё, — а кабинет
+ * стоит на своём домене, и вход у него свой. Вернуть человека на
+ * витрину значит показать ему форму входа там, где он никогда не
+ * входил, при живой сессии в соседней вкладке.
+ *
+ * Принимаем только свой домен: чужой адрес в этом параметре — это
+ * ссылка «вернуться в кабинет», ведущая на чужую страницу входа.
+ */
+(function(){
+  try {
+    var asked = new URLSearchParams(location.search).get('back') || '';
+    if (!asked) return;
+    var u = new URL(asked);
+    var base = location.hostname.replace(/^www[.]/, '');
+    if (u.protocol === 'https:' && (u.hostname === base || u.hostname.slice(-(base.length + 1)) === '.' + base)) {
+      BACK = u.origin;
+    }
+  } catch (e) {}
+})();
+
 function say(title, text, link){
   document.getElementById('ttl').textContent = title;
   document.getElementById('msg').textContent = text;

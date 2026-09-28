@@ -4883,6 +4883,22 @@ var BILL = null;
 /* Год стоит первым и выбран по умолчанию: он дешевле, и человек должен
    увидеть сначала лучшую цену, а не худшую. */
 var BILL_PERIOD = 'year';
+
+/*
+ * Валюта, в которой человек смотрит цены и в которой пройдёт списание.
+ *
+ * Помним её в браузере: это не настройка компании, а взгляд одного
+ * человека на цену, и спрашивать его об этом на каждой странице
+ * незачем.
+ */
+var BILL_CUR = (function(){
+  try { return localStorage.getItem('rozmovio_cur') || '' } catch (e) { return '' }
+})();
+
+function billSetCur(cur){
+  BILL_CUR = cur;
+  try { localStorage.setItem('rozmovio_cur', cur) } catch (e) {}
+}
 /* Что выбрано к покупке: тариф и, для тарифа за пользователя, сколько
    лицензий. Выбор живёт здесь, а не в разметке: перерисовка списка не
    должна сбрасывать то, что человек уже выбрал. */
@@ -4921,9 +4937,17 @@ function billLoad(){
     });
 }
 
+/*
+ * В какой валюте показываем цену.
+ *
+ * Сперва та, что выбрал человек. Нет её у этого тарифа — доллар, и
+ * только потом что найдётся: показать цену в валюте, которой у тарифа
+ * нет, значит показать выдуманную.
+ */
 function billCur(prices){
   var cur = Object.keys(prices || {});
   if (!cur.length) return null;
+  if (BILL_CUR && prices[BILL_CUR] !== undefined) return BILL_CUR;
   return prices.USD !== undefined ? 'USD' : cur[0];
 }
 
@@ -5148,11 +5172,25 @@ function billPaint(){
   // Переключатель периода. Годовая цена показывается в месяцах, а не
   // одной суммой за год: сравнивать 600 с 60 человек не станет, а 50 с
   // 60 сравнит сразу.
-  var seg = '<div class="seg" style="margin:10px 0">' +
+  var curs = BILL.currencies || [];
+  if (curs.length && curs.indexOf(BILL_CUR) < 0) BILL_CUR = curs.indexOf('USD') >= 0 ? 'USD' : curs[0];
+
+  var seg = '<div class="row2" style="margin:10px 0;align-items:center">' +
+    '<div class="seg">' +
     '<button data-per="year"' + (BILL_PERIOD === 'year' ? ' class="on"' : '') + '>' +
       L('За рік') + '</button>' +
     '<button data-per="month"' + (BILL_PERIOD === 'month' ? ' class="on"' : '') + '>' +
       L('Щомісяця') + '</button>' +
+    '</div>' +
+    /* Валюта стоит рядом с периодом: это два вопроса об одной цене, и
+       ответ на них человек даёт в один заход. Одна валюта в прайсе —
+       переключателя нет: выбор из одного пункта не выбор. */
+    (curs.length > 1
+      ? '<div class="seg">' + curs.map(function(c){
+          return '<button data-cur="' + esc(c) + '"' + (c === BILL_CUR ? ' class="on"' : '') +
+            '>' + esc(c) + '</button>';
+        }).join('') + '</div>'
+      : '') +
     '</div>';
 
   /*
@@ -5224,7 +5262,8 @@ function billPaint(){
     '</div>';
 
   box.innerHTML = head + seg + cards + buttons +
-    L('<div class="hint" style="margin-top:8px">Карткою оплату проводить Paddle: він приймає платіж, ') +
+    L('<div class="hint" style="margin-top:8px">Списання пройде у вибраній валюті — тій, у якій ') +
+    L('ви бачите ціну вище. Карткою оплату проводить Paddle: він приймає платіж, ') +
     L('нараховує податок вашої країни і надсилає чек. Рахунок — для оплати з рахунку компанії, ') +
     L('реквізити беремо з профілю організації. Скасувати можна будь-коли — ') +
     L('доступ триває до кінця оплаченого періоду.</div>') +
@@ -5266,6 +5305,10 @@ function billPaint(){
 
   Array.prototype.forEach.call(box.querySelectorAll('[data-per]'), function(btn){
     btn.onclick = function(){ BILL_PERIOD = btn.dataset.per; billPaint() };
+  });
+
+  Array.prototype.forEach.call(box.querySelectorAll('[data-cur]'), function(btn){
+    btn.onclick = function(){ billSetCur(btn.dataset.cur); billPaint() };
   });
 
   /* Выбор тарифа. Перерисовываем целиком: цена, поле лицензий и кнопки
@@ -5354,13 +5397,20 @@ function billPay(plan, btn){
   if (err) err.textContent = '';
   busy(btn, true);
   api('/billing/checkout', { method:'POST',
-    body:{ plan: plan, period: BILL_PERIOD, seats: billSeats(plan) } })
+    body:{ plan: plan, period: BILL_PERIOD, seats: billSeats(plan), currency: BILL_CUR } })
     .then(function(d){
       /* Окно оплаты открывается там, где Paddle разрешил продавать.
          Домен кабинета он одобряет отдельно от витрины и может не
          одобрить вовсе, поэтому адрес называет сервер, а не мы здесь.
          Пусто — открываем на месте, как раньше. */
-      if (d.payUrl) { window.location.href = d.payUrl; return null }
+      /* Адрес кабинета прикладываем сами: страница оплаты живёт на
+         витрине, и вернуть оттуда человека на витрину значит показать
+         ему форму входа при живой сессии в соседней вкладке. */
+      if (d.payUrl) {
+        window.location.href = d.payUrl +
+          (d.payUrl.indexOf('?') >= 0 ? '&' : '?') + 'back=' + encodeURIComponent(location.origin);
+        return null;
+      }
       return paddleReady(d).then(function(){
         busy(btn, false);
         window.Paddle.Checkout.open({ transactionId: d.transactionId });

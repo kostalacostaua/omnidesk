@@ -43,6 +43,19 @@ describe('страница оплаты', () => {
     expect(html).toContain('_ptxn');
   });
 
+  /*
+   * Страница живёт на витрине, а кабинет — на своём домене, и вход у
+   * него свой. Вернуть человека на витрину значит показать ему форму
+   * входа там, где он никогда не входил.
+   */
+  it('берёт адрес возврата у того, кто открыл страницу', () => {
+    expect(html).toContain("get('back')");
+    // Чужой адрес в этом параметре — ссылка «вернуться в кабинет»,
+    // ведущая на чужую страницу входа, поэтому проверяется домен.
+    expect(html).toContain("u.protocol === 'https:'");
+    expect(html).toContain('location.hostname.replace');
+  });
+
   it('в песочнице переключает окружение, в бою — нет', () => {
     expect(html).toContain('Environment.set');
     expect(payPage({ ...DEPS, env: 'production' })).toContain('"production"');
