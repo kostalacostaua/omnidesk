@@ -741,7 +741,18 @@ export function registerBitrixOrders(app: FastifyInstance, deps: BitrixOrderDeps
       }
 
       deps.log('info', 'Сделка в Битриксе создана', { tenantId: a.tenantId, dealId });
-      return { id: String(dealId), url: `${got.link.portal}/crm/deal/details/${dealId}/` };
+      const url = `${got.link.portal}/crm/deal/details/${dealId}/`;
+      deps.hook?.(a.tenantId, 'order.created', {
+        crm: 'bitrix',
+        orderId: String(dealId),
+        subject: fields.TITLE ?? null,
+        url,
+        conversationId: req.params.id,
+        contact: conv.display_name ?? null,
+        items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price })),
+        total: amount,
+      });
+      return { id: String(dealId), url };
     } catch (err) {
       return reply.code(502).send(bitrixFail(err));
     }
@@ -760,6 +771,8 @@ export interface BitrixOrderDeps {
   masterKey: Buffer;
   requireAuth: (req: unknown) => { tenantId: string; userId: string } | null;
   log: (level: 'info' | 'warn' | 'error', msg: string, extra?: Record<string, unknown>) => void;
+  /** Рассказать вебхукам клиента об оформленной сделке. */
+  hook?: (tenantId: string, event: string, data: Record<string, unknown>) => void;
 }
 
 /** Адрес вкладки, которую Битрикс показывает внутри карточки. */

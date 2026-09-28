@@ -42,6 +42,13 @@ export interface InboxDeps {
     tenantId: string;
     conversationId: string;
   }) => void;
+  /**
+   * Рассказать вебхукам клиента о том, что диалог изменился.
+   *
+   * Передача чата, статус и закрытие случаются в кабинете, а не в
+   * переписке: воркеру о них узнать неоткуда.
+   */
+  hook?: (tenantId: string, event: string, data: Record<string, unknown>) => void;
   /** Записать карточку CRM на того, кто взял диалог. */
   crmOwner?: (task: {
     tenantId: string;
@@ -52,7 +59,7 @@ export interface InboxDeps {
 }
 
 export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
-  const { pool, requireAuth, markReadUpstream, crmOwner } = deps;
+  const { pool, requireAuth, markReadUpstream, crmOwner, hook } = deps;
   const auth401 = { error: 'unauthorized' } as const;
 
   // ── Список диалогов ───────────────────────────────────────────────
@@ -376,7 +383,7 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
       if (b.read === true) sets.push(`unread_count = 0`);
       if (b.read === false) sets.push(`unread_count = GREATEST(unread_count, 1)`);
 
-      if (!sets.length) return true;
+      if (!sets.length) return 'nothing' as const;
 
       // Изменять диалог можно только в своём канале: иначе оператор,
       // который его не видит, всё равно мог бы закрыть его по ссылке.
@@ -446,11 +453,33 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
           },
         });
       }
-      return true;
+      return { status: row.status, contactId: row.contact_id };
     });
 
     if (updated === 'bad_status_id') return reply.code(400).send({ error: 'bad_status_id' });
     if (!updated) return reply.code(404).send({ error: 'not_found' });
+
+    /*
+     * Наружу — после того, как правка записана, и никогда вместо неё.
+     * Диалог передан потому, что оператор так решил; готовность чужого
+     * сервера об этом услышать на это не влияет.
+     */
+    if (hook && typeof updated === 'object') {
+      const about = { conversationId: req.params.id, contactId: updated.contactId };
+      if (b.assigneeId !== undefined) {
+        hook(auth.tenantId, 'conversation.assigned', { ...about, assigneeId: b.assigneeId ?? null });
+      }
+      if (b.status || statusId !== undefined) {
+        hook(auth.tenantId, 'conversation.status', {
+          ...about,
+          status: updated.status,
+          statusId: statusId ?? null,
+        });
+        // Закрытие — отдельное событие: на него подписываются те, кому
+        // не нужен каждый переезд по воронке.
+        if (updated.status === 'resolved') hook(auth.tenantId, 'conversation.closed', about);
+      }
+    }
 
     // Прочитано у нас — значит прочитано и там. Иначе владелец видит в
     // своём телефоне непрочитанный чат, на который уже ответили.
@@ -570,6 +599,15 @@ export function registerInbox(app: FastifyInstance, deps: InboxDeps): void {
     });
 
     if (!ok) return reply.code(404).send({ error: 'not_found' });
+
+    hook?.(auth.tenantId, 'contact.updated', {
+      contactId: req.params.id,
+      // Только то, что правили: пустое поле в событии означает «не
+      // трогали», а не «стёрли».
+      ...(b.displayName === undefined ? {} : { name: b.displayName }),
+      ...(b.phone === undefined ? {} : { phone: b.phone }),
+      ...(b.email === undefined ? {} : { email: b.email }),
+    });
     return { ok: true };
   });
 

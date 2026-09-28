@@ -90,6 +90,8 @@ interface CrmDeps {
   };
   /** Ключи приложения Zoho: нужны, чтобы говорить с её API отсюда. */
   zoho?: { clientId: string; clientSecret: string };
+  /** Рассказать вебхукам клиента об оформленном заказе. */
+  hook?: (tenantId: string, event: string, data: Record<string, unknown>) => void;
 }
 
 interface Creds {
@@ -198,7 +200,7 @@ export function crmPhoneReader(deps: CrmDeps) {
 }
 
 export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
-  const { pool, masterKey, requireAuth } = deps;
+  const { pool, masterKey, requireAuth, hook } = deps;
 
   app.get('/settings/crm', async (req, reply) => {
     const a = requireAuth(req);
@@ -1101,16 +1103,25 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       return reply.code(502).send(why);
     }
 
-    return {
+    const url = zohoRecordUrl(
+      z.inst.api_domain,
+      // В интерфейсе закладки называются иначе, чем модули в API.
+      s.module === 'Deals' ? 'Potentials' : 'SalesOrders',
+      first.details.id,
+    );
+
+    hook?.(a.tenantId, 'order.created', {
+      crm: 'zoho',
       orderId: first.details.id,
       subject,
-      // В интерфейсе закладки называются иначе, чем модули в API.
-      url: zohoRecordUrl(
-        z.inst.api_domain,
-        s.module === 'Deals' ? 'Potentials' : 'SalesOrders',
-        first.details.id,
-      ),
-    };
+      url,
+      conversationId: req.params.id,
+      contactId: conv.contact_id,
+      items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price })),
+      total: orderTotal(items),
+    });
+
+    return { orderId: first.details.id, subject, url };
   });
 
   /**

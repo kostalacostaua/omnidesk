@@ -90,6 +90,13 @@ import {
   type UnifiedMessage,
   mailboxReceived,
   type MailboxCreds,
+  QUEUE_WEBHOOK,
+  emitHook,
+  hookHeaders,
+  writeHookDelivery,
+  type HookAuth,
+  type HookEvent,
+  type WebhookJob,
 } from '@omnidesk/core';
 import {
   fetchMail,
@@ -225,8 +232,10 @@ async function persistMessage(
   contactId: string | null;
   /** Заполнен, если у контакта ещё нет аватара — его нужно подтянуть. */
   avatarFor: string | null;
+  /** Контакт заведён этим сообщением, а не найден по прежним. */
+  contactCreated: boolean;
 }> {
-  return withTenant(pool, msg.tenantId, async (db) => {
+  const out = await withTenant(pool, msg.tenantId, async (db) => {
     // 1. Контакт — ищем по идентичности в канале, создаём при первом обращении.
     const { rows: identityRows } = await db.query<{ contact_id: string }>(
       `SELECT contact_id FROM contact_identities
@@ -236,6 +245,7 @@ async function persistMessage(
     );
 
     let contactId = identityRows[0]?.contact_id;
+    let contactCreated = false;
 
     // access_hash у пользователя Telegram может смениться, а без
     // актуального значения ответить ему нельзя. Обновляем при каждом
@@ -271,7 +281,10 @@ async function persistMessage(
          RETURNING contact_id`,
         [msg.tenantId, contactId, msg.channelType, msg.peerId, JSON.stringify(msg.peerProfile)],
       );
-      // Если гонку выиграл другой воркер — берём его contact_id.
+      // Если гонку выиграл другой воркер — берём его contact_id, и
+      // тогда контакт завёл он: рассказать о новом контакте должен
+      // кто-то один.
+      contactCreated = linked[0]!.contact_id === contactId;
       contactId = linked[0]!.contact_id;
     }
 
@@ -391,8 +404,27 @@ async function persistMessage(
       conversationId,
       contactId,
       avatarFor: av[0]?.avatar_url ? null : contactId,
+      contactCreated,
     };
   });
+
+  /*
+   * О новом контакте рассказываем здесь, а не в каждом из десяти мест,
+   * откуда сюда приходят: канал добавится завтра, а событие должно
+   * уйти и из него тоже.
+   */
+  if (out.contactCreated && out.contactId) {
+    await hook(msg.tenantId, 'contact.created', {
+      contactId: out.contactId,
+      name: msg.peerProfile.name ?? null,
+      phone: msg.peerProfile.phone ?? null,
+      email: msg.peerProfile.email ?? null,
+      username: msg.peerProfile.username ?? null,
+      channelType: msg.channelType,
+    });
+  }
+
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1954,11 +1986,12 @@ async function assignConversation(msg: UnifiedMessage, conversationId: string): 
 async function announceNew(msg: UnifiedMessage, conversationId: string): Promise<void> {
   try {
     const first = await withTenant(pool, msg.tenantId, async (db) => {
-      const { rows } = await db.query<{ n: string; name: string | null }>(
+      const { rows } = await db.query<{ n: string; name: string | null; contact: string | null }>(
         `SELECT (SELECT count(*) FROM messages
                   WHERE conversation_id = $1 AND direction = 'in') AS n,
                 (SELECT ct.display_name FROM conversations c
-                   JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1) AS name`,
+                   JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1) AS name,
+                (SELECT c.contact_id FROM conversations c WHERE c.id = $1) AS contact`,
         [conversationId],
       );
       return rows[0] ?? null;
@@ -1991,6 +2024,33 @@ async function announceNew(msg: UnifiedMessage, conversationId: string): Promise
       },
       firstOne ? `conversation.new:${conversationId}` : `message.new:${conversationId}:${count}`,
     );
+
+    /*
+     * То же событие наружу, к коду клиента. Здесь, а не отдельным
+     * проходом по базе: данные уже собраны, а второй запрос за тем же
+     * самым — это второй запрос на каждое входящее сообщение.
+     */
+    const who = {
+      id: first.contact,
+      name: first.name ?? msg.peerProfile.name ?? null,
+      phone: msg.peerProfile.phone ?? null,
+      username: msg.peerProfile.username ?? null,
+      email: msg.peerProfile.email ?? null,
+    };
+    const about = {
+      conversationId,
+      contact: who,
+      channelId: msg.channelId,
+      channelType: msg.channelType,
+    };
+    if (firstOne) await hook(msg.tenantId, 'conversation.created', about);
+    await hook(msg.tenantId, 'message.in', {
+      ...about,
+      messageId: msg.externalId,
+      text: typeof msg.content.text === 'string' ? msg.content.text : null,
+      attachments: msg.content.attachments?.length ?? 0,
+      at: msg.sentAt.toISOString(),
+    });
   } catch (err) {
     // Оповещение никогда не мешает переписке: не ушло — записали в лог
     // и пошли дальше.
@@ -3332,9 +3392,79 @@ async function markFailed(job: OutboundJob, failure: Record<string, unknown>): P
   });
 }
 
+/**
+ * Событие об исходящем — после того, как оно правда ушло.
+ *
+ * Проверяем статус в базе, а не факт того, что обработчик не упал.
+ * У номерных каналов отправка делегируется службе сессий: задача здесь
+ * заканчивается успехом в момент, когда сообщение только передано
+ * дальше. Сказать в этот момент «відповідь надіслано» значило бы
+ * сказать неправду — и сказать её первой, до самой отправки.
+ */
+async function hookOutbound(job: OutboundJob): Promise<void> {
+  try {
+    await hookOutboundInner(job);
+  } catch (err) {
+    // Сообщение уже ушло клиенту. Повторять задачу из-за рассказа о
+    // ней значило бы отправить ответ второй раз.
+    log('warn', 'Событие об исходящем не поставлено', {
+      messageId: job.messageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function hookOutboundInner(job: OutboundJob): Promise<void> {
+  const row = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<{
+      status: string;
+      text: string | null;
+      external_id: string | null;
+      conversation_id: string;
+      contact_id: string | null;
+      channel_type: string;
+    }>(
+      `SELECT m.status, m.text, m.external_id, m.conversation_id,
+              c.contact_id, ch.type AS channel_type
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         JOIN channels ch ON ch.id = m.channel_id
+        WHERE m.id = $1`,
+      [job.messageId],
+    );
+    return rows[0] ?? null;
+  });
+  if (!row) return;
+
+  const about = {
+    conversationId: row.conversation_id,
+    contactId: row.contact_id,
+    channelId: job.channelId,
+    channelType: row.channel_type,
+    messageId: job.messageId,
+  };
+
+  // Отметка о прочтении — это не ответ клиенту, а то, что оператор
+  // открыл диалог. Событие у неё своё.
+  if (job.kind === 'read') {
+    await hook(job.tenantId, 'message.read', about);
+    return;
+  }
+  if (row.status !== 'sent' && row.status !== 'delivered' && row.status !== 'read') return;
+  await hook(job.tenantId, 'message.out', {
+    ...about,
+    externalId: row.external_id,
+    text: row.text,
+    at: new Date().toISOString(),
+  });
+}
+
 const outboundWorker: Worker<OutboundJob> = new Worker<OutboundJob>(
   QUEUE_OUTBOUND,
-  async (job) => handleOutbound(job.data, outboundWorker),
+  async (job) => {
+    await handleOutbound(job.data, outboundWorker);
+    await hookOutbound(job.data);
+  },
   {
     connection,
     concurrency: Number(process.env['OUTBOUND_CONCURRENCY'] ?? 3),
@@ -3666,6 +3796,120 @@ const crmSync = createCrmSync({
   clientSecret: process.env['ZOHO_CLIENT_SECRET'] ?? '',
   log,
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Вебхуки: события наружу, к коду клиента
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Клиент подписывается на события и получает их себе. Дальше это его
+// дело: писать в свою базу, считать отчёты, дёргать склад.
+//
+// Отдельная очередь, потому что на той стороне чужой сервер. Он может
+// лежать, отвечать минуту и отвечать пятисоткой — и ни одно из этого
+// не должно задерживать ни переписку, ни оповещения.
+
+const webhookQueue = new Queue<WebhookJob>(QUEUE_WEBHOOK, { connection, defaultJobOptions });
+
+/**
+ * Рассказать подписчикам о том, что случилось.
+ *
+ * Никогда не мешает основному делу. Сообщение клиента записано и
+ * показано оператору независимо от того, готов ли чужой сервер о нём
+ * услышать, — поэтому все отказы здесь заканчиваются строкой в журнале,
+ * а не исключением наверх.
+ */
+async function hook(
+  tenantId: string,
+  event: HookEvent,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await emitHook(pool, (job) => webhookQueue.add('hook', job), tenantId, event, data);
+  } catch (err) {
+    log('warn', 'Событие не поставлено в очередь вебхуков', {
+      event,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Одна доставка.
+ *
+ * Отказ считаем временным и даём очереди повторить: чужой сервер может
+ * лежать минуту, и терять из-за этого событие незачем. Исключения два.
+ * Вебхук, которого больше нет или который выключили, — повторять некому
+ * и некуда. И 404 с 410: адрес, которого не существует, повторами не
+ * чинится.
+ */
+async function deliverHook(job: WebhookJob): Promise<void> {
+  const row = await withTenant(pool, job.tenantId, async (db) => {
+    const { rows } = await db.query<{ url: string; is_active: boolean; secret_enc: Buffer }>(
+      `SELECT url, is_active, secret_enc FROM webhooks WHERE id = $1`,
+      [job.webhookId],
+    );
+    return rows[0] ?? null;
+  });
+  if (!row || !row.is_active) return;
+
+  const auth = decryptJson<HookAuth>(masterKey, job.tenantId, row.secret_enc);
+  const text = JSON.stringify(job.body);
+
+  let status: number | null = null;
+  let error: string | null = null;
+  let gone = false;
+  try {
+    const res = await fetch(row.url, {
+      method: 'POST',
+      headers: hookHeaders(auth, job.event, job.deliveryId, text),
+      body: text,
+      signal: AbortSignal.timeout(20_000),
+    });
+    status = res.status;
+    gone = res.status === 404 || res.status === 410;
+    if (!res.ok) error = 'Сервер відповів ' + res.status;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+
+  await writeHookDelivery(pool, job.tenantId, {
+    id: job.deliveryId,
+    webhookId: job.webhookId,
+    event: job.event,
+    status,
+    error,
+    body: job.body,
+  });
+
+  await withTenant(pool, job.tenantId, async (db) => {
+    await db.query(
+      error
+        ? `UPDATE webhooks SET last_error = $2 WHERE id = $1`
+        : `UPDATE webhooks SET last_error = NULL, last_ok_at = now() WHERE id = $1`,
+      error ? [job.webhookId, error.slice(0, 500)] : [job.webhookId],
+    );
+  });
+
+  if (gone) throw new UnrecoverableError('Адреса вебхука не існує: ' + status);
+  if (error) throw new Error('Вебхук не принял событие: ' + error);
+}
+
+const webhookWorker = new Worker<WebhookJob>(
+  QUEUE_WEBHOOK,
+  async (job) => deliverHook(job.data),
+  { connection, concurrency: Number(process.env['WEBHOOK_CONCURRENCY'] ?? 4) },
+);
+
+webhookWorker.on('failed', (job, err) => {
+  log('warn', 'Доставка вебхука не удалась', {
+    webhookId: job?.data?.webhookId,
+    event: job?.data?.event,
+    attempt: job?.attemptsMade,
+    error: err.message,
+  });
+});
+
+webhookWorker.on('ready', () => log('info', 'Воркер вебхуков запущен'));
 
 const crmWorker = new Worker<CrmSyncJob>(
   QUEUE_CRM_SYNC,

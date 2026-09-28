@@ -6619,14 +6619,151 @@ function crmBack(){
     L('Всі інтеграції') + '</button></div>';
 }
 
+/*
+ * Какой вебхук открыт.
+ *
+ * Устроено как у CRM: витрина и страница одного подключения. Причина
+ * та же — настройка вебхука это адрес, ключ, список событий и журнал
+ * доставок, и вчетвером они не помещаются в строку списка.
+ *
+ * Пусто — витрина, 'new' — новый, иначе идентификатор.
+ */
+var WH_OPEN = null;
+
+/** Секрет, показанный один раз. Живёт до ухода со страницы. */
+var WH_SECRET = null;
+
+function whBack(){
+  return '<div class="pg-back"><button class="ghost mini" id="whBack">← ' +
+    L('Всі інтеграції') + '</button></div>';
+}
+
+/** Состояние вебхука одним словом: по нему видно, доходит ли. */
+function whState(w){
+  if (!w.isActive) return { text:L('вимкнено') };
+  if (w.lastError) return { warn:1, text:L('не доходить') };
+  return { on:1, text:w.lastOkAt ? L('працює') : L('ще не спрацьовував') };
+}
+
+/** Строка витрины. */
+function whRow(w){
+  var st = whState(w);
+  return '<div class="int-row"><div style="min-width:0">' +
+    '<div class="int-n">' + esc(w.title || w.url) + '</div>' +
+    // Без имени именем служит адрес: показывать его второй раз строкой
+    // ниже — это одна и та же строка дважды.
+    (w.title ? '<div class="int-s">' + esc(w.url) + '</div>' : '') +
+    '<div class="int-s">' + esc(w.events.length) + ' ' + L('подій') +
+      (w.lastError ? ' · ' + esc(w.lastError) : '') + '</div>' +
+    '</div><div class="int-rb">' +
+    '<span class="pill' + (st.on ? ' good' : (st.warn ? ' warn' : '')) + '">' + esc(st.text) + '</span>' +
+    '<button class="ghost mini" data-whopen="' + w.id + L('">Налаштувати</button></div></div>');
+}
+
+/**
+ * Форма вебхука.
+ *
+ * Адрес и события обязательны, остальное — нет. Свой заголовок стоит
+ * под адресом и с пояснением: он нужен тем, у кого перед приложением
+ * шлюз, и не нужен всем прочим.
+ */
+function whForm(w, events){
+  var mine = w || { title:'', url:'', events:[], headerName:'', isActive:true };
+  var checks = events.map(function(e){
+    var on = mine.events.indexOf(e.id) >= 0;
+    return '<label class="ntev" style="align-items:flex-start">' +
+      '<input type="checkbox" data-whev="' + e.id + '"' + (on ? ' checked' : '') + '> ' +
+      '<span><b>' + esc(e.title) + '</b><br>' +
+      '<span class="int-s">' + esc(e.hint) + '</span></span></label>';
+  }).join('');
+
+  return '<div class="card int">' +
+    '<div class="row2">' +
+    L('<input id="whName" placeholder="назва: на склад, в аналітику">') +
+    L('<input id="whUrl" placeholder="https://firma.com/rozmovio">') + '</div>' +
+    L('<div class="hint">Тільки https і тільки зовнішня адреса: запит іде з нашої мережі, ') +
+    L('і внутрішні адреси цим полем не відкриваються.</div>') +
+
+    '<div class="row2" style="margin-top:9px">' +
+    L('<input id="whHName" placeholder="свій заголовок, напр. Authorization">') +
+    L('<input id="whHVal" type="password" autocomplete="new-password" placeholder="значення заголовка">') +
+    '</div>' +
+    L('<div class="hint">Потрібен, якщо перед вашим застосунком стоїть шлюз. Підпис він не ') +
+    L('замінює: підпис про те, що тіло не підмінили.</div>') +
+
+    L('<div class="pg-sec" style="margin-top:14px"><h3>Події</h3>') + checks + '</div>' +
+
+    '<div class="err" id="whErr"></div></div>';
+}
+
+/**
+ * Как проверить подпись — кодом, а не словами.
+ *
+ * Тому, кто принимает вебхук, нужно ровно это: какие заголовки придут и
+ * что с ними делать. Пример не переводится: код одинаков на всех
+ * языках, а переведённый комментарий внутри него — повод сверять
+ * перевод вместо кода.
+ */
+function whHowTo(){
+  var code = [
+    'const crypto = require("node:crypto");',
+    '',
+    '// Тіло саме таким, яким прийшло: до JSON.parse.',
+    'const raw = req.rawBody;',
+    'const ts  = req.headers["x-rozmovio-timestamp"];',
+    'const sig = req.headers["x-rozmovio-signature"];',
+    '',
+    'const mine = "sha256=" + crypto',
+    '  .createHmac("sha256", SECRET)',
+    '  .update(ts + "." + raw)',
+    '  .digest("hex");',
+    '',
+    'if (mine !== sig) return res.sendStatus(401);',
+    'if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return res.sendStatus(401);',
+    '',
+    'res.sendStatus(200);'
+  ].join(String.fromCharCode(10));
+
+  return L('<div class="pg-sec"><h3>Як перевірити підпис</h3><div class="card">') +
+    L('<div class="int-s" style="white-space:normal">Тіло приходить рядком, і підпис рахується ') +
+    L('саме від нього: розібраний і зібраний назад JSON дасть інші байти і інший підпис. ') +
+    L('Час у підписі — щоб перехоплений запит не можна було надіслати вдруге: ') +
+    L('запити, старші за пʼять хвилин, відкидайте.</div>') +
+    '<div class="snip">' + esc(code) + '</div>' +
+    L('<div class="int-s" style="white-space:normal;margin-top:10px">Відповідайте 200 одразу, ') +
+    L('а роботу робіть у себе в черзі: ми чекаємо відповідь 20 секунд і повторюємо невдалу ') +
+    L('доставку пʼять разів зі зростаючою паузою. 404 і 410 вважаємо остаточними — ') +
+    L('повторів не буде.</div>') +
+    '</div></div>';
+}
+
+/** Журнал доставок: подія, код, час, повтор. */
+function whLog(rows){
+  if (!rows.length) return L('<div class="int-s">Спроб ще не було.</div>');
+  return '<table class="tbl"><thead><tr>' +
+    L('<th>Подія</th><th>Відповідь</th><th>Спроб</th><th>Коли</th><th></th>') +
+    '</tr></thead><tbody>' +
+    rows.map(function(r){
+      var ok = r.status && r.status >= 200 && r.status < 300;
+      return '<tr><td>' + esc(r.event) + '</td>' +
+        '<td>' + (r.status ? esc(r.status) : L('немає відповіді')) +
+          (r.error && !ok ? ' <span class="int-s">' + esc(r.error) + '</span>' : '') + '</td>' +
+        '<td>' + esc(r.tries) + '</td>' +
+        '<td>' + esc(fmtTime(r.created_at)) + '</td>' +
+        '<td><button class="ghost mini" data-whretry="' + r.id + L('">Повторити</button></td></tr>');
+    }).join('') + '</tbody></table>';
+}
+
 function pageIntegrations(){
   Promise.all([
     api('/settings/zoho'),
     api('/settings/ai').catch(function(){ return null }),
     api('/settings/crm').catch(function(){ return null }),
-    api('/settings/crm/bitrix').catch(function(){ return null })
+    api('/settings/crm/bitrix').catch(function(){ return null }),
+    api('/settings/webhooks').catch(function(){ return null })
   ]).then(function(res){
     var d = res[0], ai = res[1] || {}, crm = (res[2] && res[2].connections) || [];
+    var wh = res[4] || { webhooks:[], events:[] };
     var cset = (res[2] && res[2].settings) || {};
     var list = d.installations || [];
     var bx = null, pd = null;
@@ -6834,6 +6971,51 @@ function pageIntegrations(){
       return;
     }
 
+    if (WH_OPEN){
+      var one = null;
+      wh.webhooks.forEach(function(w){ if (w.id === WH_OPEN) one = w });
+      if (!one && WH_OPEN !== 'new'){ WH_OPEN = null; pageIntegrations(); return }
+
+      pageBox().innerHTML = '<div class="pg">' + whBack() +
+        pageHead(one ? (one.title || L('Вебхук')) : L('Новий вебхук'),
+          L('Події Rozmovio приходять на вашу адресу. Підпис у заголовку ') +
+          '<code>x-rozmovio-signature</code>' + L(': HMAC-SHA256 від часу і тіла запиту.'),
+          one ? '<span class="pill' + (whState(one).on ? ' good' : (whState(one).warn ? ' warn' : '')) +
+            '">' + esc(whState(one).text) + '</span>' : '') +
+        whForm(one, wh.events) +
+
+        (WH_SECRET
+          ? L('<div class="card" style="margin-top:12px"><div class="int-n">Ключ підпису</div>') +
+            L('<div class="int-s" style="white-space:normal">Показуємо один раз. Збережіть ') +
+            L('його зараз: другого разу не буде, буде тільки перевипуск.</div>') +
+            '<div class="row2" style="margin-top:8px"><code id="whSec">' + esc(WH_SECRET) + '</code>' +
+            L('<button class="ghost mini" id="whCopy">Скопіювати</button></div></div>')
+          : '') +
+
+        '<div class="acts" style="margin-top:12px">' +
+        '<button id="whSave">' + (one ? L('Зберегти') : L('Створити')) + '</button>' +
+        (one
+          ? '<button class="ghost" id="whTest">' + L('Перевірити') + '</button>' +
+            '<button class="ghost" id="whToggle">' +
+              (one.isActive ? L('Вимкнути') : L('Увімкнути')) + '</button>' +
+            '<button class="ghost" id="whKey">' + L('Перевипустити ключ') + '</button>' +
+            '<button class="ghost" id="whDel">' + L('Видалити') + '</button>'
+          : '') +
+        '<span class="ok" id="whOk"></span></div>' +
+
+        (one
+          ? L('<div class="pg-sec"><h3>Останні спроби</h3><div class="card">') +
+            '<div id="whLogBox">' + L('<div class="int-s">Завантажую…</div>') + '</div>' +
+            '</div></div>'
+          : '') +
+
+        whHowTo() +
+        '</div>';
+
+      wireHooks(one, wh.events);
+      return;
+    }
+
     pageBox().innerHTML = '<div class="pg">' +
       pageHead(L('Інтеграції'), L('Rozmovio живе поряд з вашою CRM: листування видно в картці ') +
         L('клієнта, а нові звернення перетворюються на ліди.')) +
@@ -6867,8 +7049,27 @@ function pageIntegrations(){
       L('Немає співробітника з такою поштою — нічого не змінюємо і нікого не заводимо.</div>') +
       '<div class="err" id="crmSetErr"></div></div></div>' +
 
+      /* Вебхуки. Не CRM и не плитка: подключений может быть несколько,
+         у каждого свой адрес и свой список событий. */
+      L('<div class="pg-sec"><h3>Вебхуки</h3><div class="card">') +
+      L('<div class="int-s" style="white-space:normal">Події Rozmovio — нове повідомлення, ') +
+      L('зміна статусу, оформлене замовлення — приходять POST-запитом на вашу адресу. ') +
+      L('Тіло підписане ключем, який знаєте тільки ви.</div>') +
+      (wh.webhooks.length
+        ? '<div style="margin-top:10px">' + wh.webhooks.map(whRow).join('') + '</div>'
+        : '') +
+      '<div class="acts"><button class="ghost" id="whNew">' + L('Додати вебхук') + '</button></div>' +
+      '</div></div>' +
+
       aiSection(ai) +
       '</div>';
+
+    if (el('whNew')) el('whNew').onclick = function(){
+      WH_OPEN = 'new'; WH_SECRET = null; pageIntegrations();
+    };
+    Array.prototype.forEach.call(pageBox().querySelectorAll('[data-whopen]'), function(b){
+      b.onclick = function(){ WH_OPEN = b.dataset.whopen; WH_SECRET = null; pageIntegrations() };
+    });
 
     // Плитка открывается вся: попадать в маленький знак пальцем на
     // телефоне — работа, которой человек не просил.
@@ -6895,6 +7096,136 @@ function pageIntegrations(){
 
     wireAi(ai);
   }).catch(sErr);
+}
+
+/*
+ * Живые части страницы вебхука.
+ *
+ * Отдельной функцией, а не внутри рендера: страница перерисовывается
+ * после каждого сохранения, и обработчики должны навешиваться заново,
+ * а не копиться на старых узлах.
+ */
+function wireHooks(one, events){
+  if (el('whBack')) el('whBack').onclick = function(){
+    WH_OPEN = null; WH_SECRET = null; pageIntegrations();
+  };
+  if (!el('whSave')) return;
+
+  if (one){
+    el('whName').value = one.title || '';
+    el('whUrl').value = one.url || '';
+    el('whHName').value = one.headerName || '';
+    // Значение чужого ключа мы не знаем и показать не можем: пустое
+    // поле здесь означает «не трогати», а не «стерти».
+    if (one.hasHeader) el('whHVal').placeholder = L('збережено, введіть нове щоб змінити');
+  }
+
+  if (el('whCopy')) el('whCopy').onclick = function(){ copyText(WH_SECRET || '') };
+
+  var picked = function(){
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('[data-whev]'), function(c){
+      if (c.checked) out.push(c.dataset.whev);
+    });
+    return out;
+  };
+
+  var body = function(){
+    var b = {
+      title: el('whName').value.trim(),
+      url: el('whUrl').value.trim(),
+      events: picked()
+    };
+    var hn = el('whHName').value.trim(), hv = el('whHVal').value;
+    // Заголовок правим только тогда, когда его правда трогали: иначе
+    // сохранение имени вебхука стирало бы чужой ключ.
+    if (hn || hv || (one && one.hasHeader && !hn)){ b.headerName = hn; b.headerValue = hv }
+    return b;
+  };
+
+  var why = function(e){
+    var p = (e && e.payload) || {};
+    return p.detail || (p.error === 'no_events' ? L('Виберіть хоча б одну подію')
+      : L('Не вдалося зберегти'));
+  };
+
+  el('whSave').onclick = function(){
+    el('whErr').textContent = '';
+    var b = body();
+    if (!b.events.length){ el('whErr').textContent = L('Виберіть хоча б одну подію'); return }
+    busy(el('whSave'), true);
+
+    var go = one
+      ? api('/settings/webhooks/' + one.id, { method:'PATCH', body: b })
+      : api('/settings/webhooks', { method:'POST', body: b });
+
+    go.then(function(r){
+      if (r && r.secret){ WH_SECRET = r.secret; WH_OPEN = r.id }
+      toast(L('Збережено'));
+      pageIntegrations();
+    }).catch(function(e){
+      el('whErr').textContent = why(e);
+      busy(el('whSave'), false);
+    });
+  };
+
+  if (!one) return;
+
+  el('whTest').onclick = function(){
+    el('whErr').textContent = '';
+    busy(el('whTest'), true);
+    api('/settings/webhooks/' + one.id + '/test', { method:'POST' })
+      .then(function(r){
+        if (r.error) el('whErr').textContent = r.error;
+        else toast(L('Відповів ') + r.status);
+        whLogLoad(one.id);
+      })
+      .catch(function(e){ el('whErr').textContent = why(e) })
+      .then(function(){ busy(el('whTest'), false) });
+  };
+
+  el('whToggle').onclick = function(){
+    busy(el('whToggle'), true);
+    api('/settings/webhooks/' + one.id, { method:'PATCH', body:{ isActive: !one.isActive } })
+      .then(function(){ pageIntegrations() })
+      .catch(function(e){ el('whErr').textContent = why(e); busy(el('whToggle'), false) });
+  };
+
+  el('whKey').onclick = function(){
+    busy(el('whKey'), true);
+    api('/settings/webhooks/' + one.id + '/secret', { method:'POST' })
+      .then(function(r){ WH_SECRET = r.secret; pageIntegrations() })
+      .catch(function(e){ el('whErr').textContent = why(e); busy(el('whKey'), false) });
+  };
+
+  // Удаление — в два нажатия, как и везде: события перестают приходить
+  // сразу, и «упс» здесь стоит чужой сломанной интеграции.
+  armDelete([el('whDel')], function(){
+    return api('/settings/webhooks/' + one.id, { method:'DELETE' })
+      .then(function(){ WH_OPEN = null; WH_SECRET = null; toast(L('Видалено')); pageIntegrations() });
+  });
+
+  whLogLoad(one.id);
+}
+
+/** Журнал: грузится отдельно от страницы — он нужен не сразу и не всем. */
+function whLogLoad(id){
+  if (!el('whLogBox')) return;
+  api('/settings/webhooks/' + id + '/deliveries').then(function(d){
+    if (!el('whLogBox')) return;
+    el('whLogBox').innerHTML = whLog(d.deliveries || []);
+    Array.prototype.forEach.call(el('whLogBox').querySelectorAll('[data-whretry]'), function(b){
+      b.onclick = function(){
+        busy(b, true);
+        api('/settings/webhooks/' + id + '/deliveries/' + b.dataset.whretry + '/retry',
+            { method:'POST' })
+          .then(function(){ toast(L('Поставлено в чергу')); setTimeout(function(){ whLogLoad(id) }, 1500) })
+          .catch(function(){ busy(b, false) });
+      };
+    });
+  }).catch(function(){
+    if (el('whLogBox')) el('whLogBox').innerHTML = L('<div class="int-s">Журнал недоступний.</div>');
+  });
 }
 
 /*

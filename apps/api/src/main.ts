@@ -38,10 +38,16 @@ import {
   type CrmSyncJob,
   type MtprotoLoginJob,
   type WaLoginJob,
+  QUEUE_WEBHOOK,
+  emitHook,
+  isHookEvent,
+  type HookEvent,
+  type WebhookJob,
 } from '@omnidesk/core';
 import { INBOX_HTML, UI_BUILD } from './ui.js';
 import { registerSettings } from './settings.js';
 import { registerInbox } from './inbox.js';
+import { registerWebhooks } from './webhooks.js';
 import { registerEmailAuth } from './auth-email.js';
 import { createMailer } from './mailer.js';
 import { registerLegal } from './legal.js';
@@ -130,6 +136,38 @@ const waLoginQueue = new Queue<WaLoginJob>(QUEUE_WA_LOGIN, {
   connection: redis,
   defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
 });
+/**
+ * События наружу: вебхуки клиента.
+ *
+ * Очередь нужна и кабинету: отсюда уходят повторы из журнала и те
+ * события, которые случаются в кабинете, а не в переписке, — смена
+ * статуса, назначение, оформленный заказ.
+ */
+const webhookQueue = new Queue<WebhookJob>(QUEUE_WEBHOOK, {
+  connection: redis,
+  defaultJobOptions,
+});
+
+/**
+ * Рассказать вебхукам о том, что случилось.
+ *
+ * Никогда не мешает основному делу: не нашли подписчиков, не легла
+ * задача в очередь — пишем в лог и идём дальше. Статус диалога меняется
+ * потому, что оператор так решил, а не потому, что чужой сервер готов
+ * об этом услышать.
+ */
+async function hook(
+  tenantId: string,
+  event: HookEvent,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await emitHook(pool, (job) => webhookQueue.add('hook', job), tenantId, event, data);
+  } catch (err) {
+    app.log.warn({ err, event }, 'Событие не поставлено в очередь вебхуков');
+  }
+}
+
 const storage = createStorage();
 
 const app = Fastify({
@@ -639,6 +677,9 @@ registerInbox(app, {
   pool,
   requireAuth: (req) => requireAuth(req as never),
   markReadUpstream,
+  hook: (tenantId, event, data) => {
+    if (isHookEvent(event)) void hook(tenantId, event, data);
+  },
   /*
    * Взял чат — стал ответственным и в CRM. Задача ставится в очередь, а
    * не выполняется на месте: поход в чужой API занимает секунды и
@@ -684,6 +725,18 @@ registerEmailAuth(app, {
         '<pre style="font:14px/1.6 ui-monospace,Menlo,monospace">' + lines + '</pre>' })
       .catch((err: unknown) => app.log.warn({ err }, 'Письмо о регистрации не ушло'));
   },
+});
+
+/*
+ * Вебхуки клиента: настройка, ключи и журнал доставок. Сама доставка —
+ * в воркерах, здесь только очередь.
+ */
+registerWebhooks(app, {
+  pool,
+  masterKey,
+  requireAuth: (req) => requireAuth(req as never),
+  enqueue: (job) => webhookQueue.add('hook', job),
+  log: (level, msg, extra) => app.log[level === 'error' ? 'error' : 'info'](extra ?? {}, msg),
 });
 
 registerSettings(app, {
@@ -808,6 +861,9 @@ registerCrm(app, {
   pool,
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
+  hook: (tenantId, event, data) => {
+    if (isHookEvent(event)) void hook(tenantId, event, data);
+  },
   // Ключи приложения Pipedrive нужны только для панели в карточке.
   // Без них подключение по токену работает как прежде.
   pipedrive: {
@@ -835,6 +891,9 @@ registerBitrixOrders(app, {
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
   log: (level, msg, extra) => app.log.info(extra ?? {}, `${level}: ${msg}`),
+  hook: (tenantId, event, data) => {
+    if (isHookEvent(event)) void hook(tenantId, event, data);
+  },
 });
 
 registerDocs(app, (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''));

@@ -64,6 +64,7 @@ import {
   withSystem,
   withTenant,
   type Pool,
+  badOutUrl,
 } from '@omnidesk/core';
 
 /**
@@ -2843,36 +2844,3 @@ async function resolveWaba(
   return null;
 }
 
-/**
- * Адрес, на который мы будем стучаться.
- *
- * Проверка здесь не про опечатки, а про то, куда именно мы пойдём с
- * сервера. Адрес задаёт клиент, а запрос уходит из нашей сети — значит
- * этим полем можно попросить нас постучаться во внутренний адрес,
- * которого снаружи не видно. Поэтому только https и только наружу.
- */
-function badOutUrl(raw: string): string | null {
-  if (!raw) return 'Вкажіть адресу для вихідних повідомлень';
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return 'Адреса має бути повною, разом з https://';
-  }
-  if (u.protocol !== 'https:') return 'Адреса має починатися з https://';
-
-  const host = u.hostname.toLowerCase();
-  const local =
-    host === 'localhost' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal') ||
-    /^(127|10)\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    host === '0.0.0.0' ||
-    host === '[::1]';
-  if (local) return 'Адреса має бути доступною ззовні, а не внутрішньою';
-
-  return null;
-}
