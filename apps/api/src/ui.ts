@@ -888,6 +888,50 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chsum b{font-weight:600}
   .chsum .ok{color:var(--good);font-weight:500}
   .chsum .bad{color:var(--warn);font-weight:500}
+
+  /* ─── Отчёты ───────────────────────────────────────────────────── */
+  /* Период — переключатель, а не три кнопки: выбран всегда ровно один,
+     и три одинаковые кнопки этого не показывали. Тёмный, а не синий:
+     синяя кнопка на экране одна, и на отчётах это «Вивантажити CSV»
+     ровно настолько же, насколько ничто. */
+  .rpbar{gap:8px;margin-bottom:0}
+  .rpseg{display:inline-flex;padding:3px;border-radius:10px;background:var(--solid);
+    border:1px solid var(--line2);flex:none}
+  .rpseg button{height:30px;padding:0 12px;border:0;border-radius:7px;background:transparent;
+    color:var(--t2);font-size:13px;font-weight:500;box-shadow:none;white-space:nowrap}
+  .rpseg button:hover{color:var(--t1);background:var(--hover)}
+  .rpseg button.on{background:var(--rail);color:#fff;font-weight:600}
+  .rpbar .fbtn{height:38px;border-radius:10px;background:var(--solid);
+    border:1px solid var(--line2);font-size:13px;font-weight:500;color:var(--t2)}
+  .rpbar .fbtn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .rpbar button.mini{height:38px;border-radius:10px;font-size:13px;font-weight:600}
+  /* Вкладки отчёта — подчёркиванием, а не плашками: это разделы одного
+     отчёта, а не четыре кнопки, среди которых надо выбрать. */
+  .rptabs{gap:28px;margin:0 0 4px;border-bottom:1px solid var(--line2)}
+  .rptabs .tab{padding:0 0 12px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;
+    background:transparent;border-radius:0;font-size:14px;font-weight:500;color:var(--t3)}
+  .rptabs .tab:hover{background:transparent;color:var(--t1)}
+  .rptabs .tab.on{background:transparent;color:var(--t1);font-weight:600;border-color:var(--rail)}
+  /* Число крупное и под подписью, а не над ней: подпись читают первой,
+     чтобы понять, что это за число, и обратный порядок заставлял
+     возвращаться глазом. */
+  .nums{gap:16px}
+  .numbox{background:var(--solid);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;display:flex;flex-direction:column;gap:6px}
+  .numbox .l{order:1;margin:0;font-size:13px;font-weight:500;color:var(--t2)}
+  .numbox .n{order:2;font-size:36px;font-weight:700;letter-spacing:-.03em;line-height:1.05}
+  /* Внутри раздела числа мельче: там они поясняют, а не объявляют. */
+  /* Числа внутри раздела — одна рамка с чертами между, а не четыре
+     карточки в карточке. Это одна мысль, разложенная на четыре
+     стороны: медиана, среднее, девять из десяти и доля. */
+  .card .nums{gap:0;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .card .numbox{background:transparent;border:0;border-radius:0;padding:0 22px}
+  .card .numbox:first-child{padding-left:0}
+  .card .numbox + .numbox{border-left:1px solid var(--line)}
+  .card .numbox .n{font-size:26px}
+  @media(max-width:760px){
+    .card .numbox{padding:0}
+    .card .numbox + .numbox{border-left:0;margin-top:14px}}
   .chico.sm svg{width:10px;height:10px}
   .conv .nm{font-size:14px;font-weight:600}
   .conv.unread .nm{font-weight:700}
@@ -9127,20 +9171,22 @@ function tabReports(){
     RP.breaches = res[1] || null;
     var d = RP.data, t = d.totals || {};
 
-    pageBox().innerHTML = '<div class="pg">' +
-      pageHead(L('Звіти'), L('Рахуються за стрічкою подій: те, що сталося, а не те, як воно виглядає зараз. ') +
-        L('Час відповіді — у робочих годинах компанії.')) +
-
-      '<div class="rpbar">' +
+    /* Отбор стоит в шапке, рядом с названием: он относится ко всему
+       отчёту сразу, а не к той вкладке, под которой лежал. */
+    var bar = '<div class="rpbar">' +
+      '<div class="rpseg" role="group">' +
       [[7, L('7 днів')], [30, L('30 днів')], [90, L('90 днів')]].map(function(x){
-        return '<button class="ghost mini' + (RP.days === x[0] ? ' on' : '') +
-          '" data-days="' + x[0] + '">' + esc(x[1]) + '</button>';
-      }).join('') +
-      '<span class="grow"></span>' +
+        return '<button' + (RP.days === x[0] ? ' class="on"' : '') +
+          ' data-days="' + x[0] + '">' + esc(x[1]) + '</button>';
+      }).join('') + '</div>' +
       '<button class="fbtn" id="rpCh" style="flex:0 0 170px"></button>' +
       '<button class="fbtn" id="rpUs" style="flex:0 0 170px"></button>' +
-      L('<button class="ghost mini" id="rpCsv">Вивантажити CSV</button>') +
-      '</div>' +
+      L('<button class="ghost mini" id="rpCsv">CSV</button>') +
+      '</div>';
+
+    pageBox().innerHTML = '<div class="pg wide">' +
+      pageHead(L('Звіти'), L('Рахуються за стрічкою подій: те, що сталося, а не те, як воно виглядає зараз. ') +
+        L('Час відповіді — у робочих годинах компанії.'), bar) +
 
       '<div class="tabs rptabs">' +
       RP_TABS.map(function(x){
