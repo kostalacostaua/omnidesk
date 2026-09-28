@@ -806,10 +806,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Сколько ждут. Заменяет счётчик, когда ждут дольше четверти часа:
      к этому времени «сколько сообщений» человеку уже неинтересно —
      интересно, насколько он опоздал. */
-  .wait{display:inline-flex;gap:4px;align-items:center;height:20px;padding:0 8px;flex:none;
+  .waited{display:inline-flex;gap:4px;align-items:center;height:20px;padding:0 8px;flex:none;
     border-radius:999px;background:var(--warn-bg);color:var(--warn);font-size:11.5px;
     font-weight:600;white-space:nowrap}
-  .wait svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;
+  .waited svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;
     stroke-linecap:round;stroke-linejoin:round}
   .chip{border-radius:7px;padding:2px 7px;background:var(--panel2);color:var(--t2)}
   /* Свой статус — единственная цветная метка в строке, и цвет у неё
@@ -822,15 +822,65 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Лента — на фоне рабочей области, а список и карточка на белом:
      так видно, где читают, а где работают руками. */
   #thread{background:var(--bg)}
-  .thead{background:var(--solid);border-bottom:1px solid var(--line);padding:12px 16px}
-  .thead .nm{font-size:15px;font-weight:600;letter-spacing:-.018em}
-  #msgs{padding:22px 18px;gap:9px}
+  .thead{background:var(--solid);border-bottom:1px solid var(--line);
+    height:72px;padding:0 24px;gap:10px}
+  .thead .nm{font-size:16px;font-weight:700;letter-spacing:-.015em}
+  .thead .who{flex:1 1 0}
+  .thead .sub{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t3);margin-top:2px}
+  /* Значок сети в подписи — тот же, что на аватарке в списке, только
+     мельче: одна примета канала на весь кабинет. */
+  .chico.xs{width:14px;height:14px;border-radius:50%;flex:none}
+  .chico.xs svg{width:8px;height:8px}
+  .thead .acts{gap:8px;align-items:center}
+  .thead .acts button.mini,.thead .acts .asel{height:36px;border-radius:9px;
+    font-size:13px;font-weight:500;padding:0 12px}
+  .thead .acts button.mini{display:inline-flex;align-items:center;gap:8px}
+  .thead .acts button svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;
+    stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+  /* Одна синяя кнопка на экран — «Взяти собі». Всё остальное в шапке
+     белое с рамкой: это переключатели состояния, а не то, ради чего
+     человек сюда пришёл. */
+  .thead .acts button.take{font-weight:600;padding:0 16px}
+  .thead .acts .iq{width:36px;height:36px;flex:none}
+  /* Точка у бота — состояние, а не украшение, и стоит рядом со словом:
+     цвет сам по себе в этом кабинете ничего не значит. */
+  .bdot{width:7px;height:7px;border-radius:50%;background:var(--t3);flex:none}
+  .bdot.live{background:var(--good-dot)}
+  .thead .sep{width:3px;height:3px;border-radius:50%;background:var(--t3);flex:none}
+  .thead .open{color:var(--good);font-weight:500}
+
+  #msgs{padding:24px 40px;gap:8px}
+  /* День. Лента без него — сплошная простыня, в которой «вчора о 18:40»
+     и «сьогодні о 18:40» стоят вплотную и выглядят как одна минута. */
+  .dsep{align-self:center;font-size:12px;font-weight:500;color:var(--t3);
+    margin:12px 0 4px;flex:none}
+  .dsep:first-child{margin-top:0}
+  .mwrap{max-width:min(460px,76%)}
+  /* Серия сообщений подряд: угол к отправителю поджат не только снизу,
+     но и сверху у всех, кроме первого. Так три реплики подряд читаются
+     как одна очередь, а не как три отдельных выкрика. */
+  .mwrap.tail.out .m{border-top-right-radius:6px}
+  .mwrap.tail.in .m{border-top-left-radius:6px}
+  /* «Відповісти» и «Реакція» показываются по наведению — и до сих пор
+     держали под каждым пузырём двадцать точек пустоты, даже будучи
+     невидимыми. Из-за этого сообщения подряд стояли так же далеко, как
+     сообщения через час, и очередь реплик не читалась очередью.
+     Теперь кнопки лежат сбоку от пузыря и места в ленте не занимают. */
+  .mwrap{position:relative}
+  .mtools{position:absolute;top:6px;margin:0;gap:4px;white-space:nowrap}
+  .mwrap.out .mtools{right:100%;margin-right:8px}
+  .mwrap.in .mtools{left:100%;margin-left:8px}
   /* Пузырь: угол к отправителю поджат. Это единственное, чем
      сообщение показывает направление, — цвет тут второй признак, а не
      первый: на чёрно-белом экране лента обязана читаться так же. */
-  .m{border-radius:18px;padding:10px 14px;font-size:13.5px;line-height:1.52;box-shadow:none}
-  .m.in{background:var(--solid);border:1px solid var(--line);border-bottom-left-radius:6px}
-  .m.out{background:var(--accent);color:var(--on-accent);border:0;border-bottom-right-radius:6px}
+  .m{border-radius:18px;padding:10px 14px;font-size:14px;line-height:1.5;box-shadow:none}
+  .m .meta{font-size:11px;opacity:1;color:var(--t3);margin-top:4px}
+  .m.out .meta{color:#C9D5FF;justify-content:flex-end}
+  .m.bot .meta{color:#C9D5FF}
+  .m.in{background:var(--solid);border:1px solid var(--line);border-bottom-left-radius:6px;
+    box-shadow:none}
+  .m.out{background:var(--accent);color:var(--on-accent);border:0;border-bottom-right-radius:6px;
+    box-shadow:none}
   /* Бот — тот же исходящий, только бледнее: это наш ответ, просто не
      от человека. Отдельный фиолетовый делал из него третью сторону
      разговора, которой в разговоре нет. */
@@ -1703,6 +1753,35 @@ function fmtTime(iso){
     : d.toLocaleDateString(locale(),{day:'2-digit',month:'2-digit'});
 }
 
+/* Подпись дня в ленте. «Сьогодні» и «Вчора» словами, дальше — дата без
+   года, пока год тот же: год в подписи каждого дня читается как часть
+   номера, а не как сведение. */
+function dayLabel(iso){
+  var d = new Date(iso), now = new Date();
+  var day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return L('Сьогодні');
+  if (diff === 1) return L('Вчора');
+  return d.toLocaleDateString(locale(), d.getFullYear() === now.getFullYear()
+    ? { day:'numeric', month:'long' }
+    : { day:'numeric', month:'long', year:'numeric' });
+}
+
+function sameDay(a, b){
+  if (!a || !b) return false;
+  var x = new Date(a), y = new Date(b);
+  return x.toDateString() === y.toDateString();
+}
+
+/* В ленте день сказан подписью сверху, поэтому у сообщения — только
+   часы и минуты. Дата в каждом пузыре повторяла подпись и отнимала
+   место у самой важной части меты: «доставлено» или «прочитано». */
+function clockTime(iso){
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString(locale(), { hour:'2-digit', minute:'2-digit' });
+}
+
 function fmtDate(iso){
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString(locale(),{day:'2-digit',month:'long',year:'numeric'});
@@ -1805,7 +1884,7 @@ function waitWord(ms){
 
 function mark(c){
   var w = waitedFor(c);
-  if (w) return '<span class="wait" title="' + L('Клієнт чекає на відповідь') + '">' +
+  if (w) return '<span class="waited" title="' + L('Клієнт чекає на відповідь') + '">' +
     icon('clock') + waitWord(w) + '</span>';
   return c.unread_count > 0 ? '<span class="badge">' + c.unread_count + '</span>' : '';
 }
@@ -1986,22 +2065,27 @@ function renderHead(){
   var closed = c.status === 'resolved';
   var mine = ME && ME.user && c.assignee_id === ME.user.id;
 
+  /* Подпись под именем отвечает на один вопрос: можно ли писать.
+     «У мережі» в макете здесь нарисовано с чужих скриншотов — ни
+     Telegram, ни Instagram, ни WhatsApp присутствия клиента нам не
+     отдают, и зелёная точка «в сети» была бы выдумкой. Показываем то,
+     что знаем точно и что решает дело: открыто ли окно ответа и
+     сколько его осталось. */
+  var where = w.open
+    ? (w.left ? L('<span class="open">вікно ще ') + esc(w.left) + '</span>' : '')
+    : L('<span>вікно закрито</span>');
+
   el('thead').innerHTML =
     L('<button class="ghost mini back" id="aBack" title="До списку чатів">← Чати</button>') +
     '<div class="who" id="aCard">' +
-      '<div class="avwrap">' +
-        '<div class="av" data-av="' + c.contact_id + '" style="' +
-          avStyle(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
-        chBadge(c.channel_type) +
-      '</div>' +
       '<div style="min-width:0"><div class="nm">' + esc(c.display_name || L('Без імені')) + '</div>' +
-      '<div class="sub">' + esc(CH[c.channel_type] || c.channel_type) +
-        (w.open && w.left ? L(' · вікно відповіді ще ') + w.left : (w.open ? '' : L(' · вікно закрито'))) +
-        ' · ' + esc(c.assignee_name || L('без відповідального')) +
+      '<div class="sub">' + chMark(c.channel_type) +
+        '<span>' + esc(CH[c.channel_type] || c.channel_type) + '</span>' +
+        (c.phone_e164 ? '<span class="sep"></span><span>' + esc(c.phone_e164) + '</span>' : '') +
+        (where ? '<span class="sep"></span>' + where : '') +
       '</div></div>' +
     '</div>' +
     '<div class="acts">' +
-      (mine ? '' : L('<button class="ghost mini" id="aTake">Взяти собі</button>')) +
       /* Передача конкретному человеку. Списком, а не поиском: операторов
          в смене единицы, и выпадающий список честнее показывает, что
          выбор невелик. «Взяти собі» рядом остаётся: это самое частое
@@ -2032,10 +2116,18 @@ function renderHead(){
          вовсе: выключатель, который ничего не выключает, хуже её отсутствия. */
       (isComments(c.channel_type)
         ? ''
-        : '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + L('">Бот: ') +
-          esc(botState(c).label) + '</button>') +
-      '<button class="' + (closed ? '' : 'ghost ') + 'mini" id="aClose">' +
-        (closed ? L('Відкрити заново') : L('Закрити чат')) + '</button>' +
+        : '<button class="ghost mini" id="aBot" title="' + esc(botState(c).why) + '">' +
+          icon('bot') + L('Бот <span class="bdot') +
+          (botState(c).on ? ' live' : '') + '"></span></button>') +
+      /* Закрыть — галочка без подписи: действие частое, значок у него
+         один на весь кабинет, а слово занимало место синей кнопки.
+         Открыть заново — наоборот, словами: это редкое действие, и
+         значок «открыть» пришлось бы угадывать. */
+      (closed
+        ? L('<button class="ghost mini" id="aClose">Відкрити заново</button>')
+        : '<button class="ghost mini iq" id="aClose" title="' + L('Закрити чат') +
+          '" aria-label="' + L('Закрити чат') + '">' + icon('check') + '</button>') +
+      (mine ? '' : L('<button class="mini take" id="aTake">Взяти собі</button>')) +
     '</div>';
 
   if (el('aTake')) el('aTake').onclick = function(){
@@ -2200,12 +2292,12 @@ function toast(text){
  * молчащий бот выглядит сломанным.
  */
 function botState(c){
-  if (!c.bot_enabled) return { label:L('вимк'), why:L('Автовідповіді вимкнені для цього діалогу') };
-  if (c.assignee_id) return { label:L('пауза'), why:L('У діалогу є відповідальний — бот не втручається') };
+  if (!c.bot_enabled) return { on:false, label:L('вимк'), why:L('Автовідповіді вимкнені для цього діалогу') };
+  if (c.assignee_id) return { on:false, label:L('пауза'), why:L('У діалогу є відповідальний — бот не втручається') };
   if (c.human_replied_at && (new Date() - new Date(c.human_replied_at)) < 30*60*1000) {
-    return { label:L('пауза'), why:L('Оператор відповідав менше 30 хвилин тому. Бот увімкнеться сам') };
+    return { on:false, label:L('пауза'), why:L('Оператор відповідав менше 30 хвилин тому. Бот увімкнеться сам') };
   }
-  return { label:L('увімк'), why:L('Бот відповідає на відповідні повідомлення') };
+  return { on:true, label:L('увімк'), why:L('Бот відповідає на відповідні повідомлення') };
 }
 
 function patchConv(body){
@@ -2220,13 +2312,24 @@ function loadThread(){
   if (!current) return;
   api('/conversations/' + current + '/messages').then(function(d){
     var wasBottom = isAtBottom();
-    var html = (d.messages || []).map(function(m){
+    var list = d.messages || [];
+    var html = list.map(function(m, i){
       var c = m.content || {};
       var isOut = m.direction !== 'in';
+      var prev = list[i - 1];
+      // Подпись дня — перед первым сообщением каждого дня.
+      var day = (!prev || !sameDay(prev.sent_at, m.sent_at))
+        ? '<div class="dsep">' + esc(dayLabel(m.sent_at)) + '</div>'
+        : '';
+      /* Продолжение очереди: та же сторона, тот же день и не позже чем
+         через пять минут. Дальше это уже новая мысль, а не вторая
+         строка той же. */
+      var tail = !day && prev && (prev.direction !== 'in') === isOut &&
+        (new Date(m.sent_at) - new Date(prev.sent_at)) < 5 * 60000;
       var cls = 'm ' + (isOut ? 'out' : 'in') +
         (m.sender_type === 'bot' ? ' bot' : '') +
         (m.status === 'failed' ? ' failed' : '');
-      var meta = fmtTime(m.sent_at) +
+      var meta = clockTime(m.sent_at) +
         (m.sender_type === 'bot' ? L(' · бот') : '') +
         (isOut ? ' · ' + statusLabel(m.status) : '');
 
@@ -2281,7 +2384,8 @@ function loadThread(){
 
       var body = subj + ig + cm + quote + renderAttachments(m.id, c.attachments) + (c.text ? esc(c.text) : '');
 
-      return '<div class="mwrap ' + (isOut ? 'out' : 'in') + '" data-mid="' + m.id +
+      return day + '<div class="mwrap ' + (isOut ? 'out' : 'in') + (tail ? ' tail' : '') +
+        '" data-mid="' + m.id +
         '" data-ext="' + esc(m.external_id || '') + '" data-text="' + esc((c.text || '').slice(0,120)) + '">' +
         '<div class="' + cls + '">' + body +
           '<div class="meta">' + esc(meta) + '</div></div>' +
@@ -5821,6 +5925,12 @@ function chIcon(type){
 function chBadge(type){
   return '<span class="chico sm ' + esc(type || 'custom') + '" title="' +
     esc(CH[type] || type || '') + '">' + chIcon(type) + '</span>';
+}
+
+/* Тот же значок для строки подписи: там он стоит рядом с названием
+   сети и работает как точка цвета, а не как метка на аватарке. */
+function chMark(type){
+  return '<span class="chico xs ' + esc(type || 'custom') + '">' + chIcon(type) + '</span>';
 }
 
 /* Ключи своего канала. Показываются при подключении и потом на странице
@@ -9709,6 +9819,7 @@ var ICONS = {
   search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
   flow:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a3 3 0 0 0 3 3H14"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
