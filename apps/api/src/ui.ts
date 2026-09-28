@@ -479,9 +479,9 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .int-row{display:flex;align-items:center;gap:12px;padding:6px 0}
   .int-n{font-size:13.5px;font-weight:600}
   .int-rb{display:flex;gap:6px;margin-left:auto;flex:none}
-  .chico.zoho{background:linear-gradient(140deg,#3b82f6,#1d4ed8)}
-  .chico.bitrix{background:linear-gradient(140deg,#2fc7f7,#0b7fd4);font-size:11px}
-  .chico.pipedrive{background:linear-gradient(140deg,#2b2b2b,#4d4d4d)}
+  .chico.zoho{background:#2563EB}
+  .chico.bitrix{background:#0B7FD4;font-size:11px}
+  .chico.pipedrive{background:#2B2B2B}
   /* Витрина CRM.
      Карточки со всеми полями сразу давали полотно, в котором поля одной
      CRM соседствовали с полями другой, а настройки Zoho — с настройками
@@ -711,27 +711,106 @@ export const INBOX_HTML = `<!DOCTYPE html>
   #list{background:var(--panel);border-right:1px solid var(--line);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
   .lhead{padding:16px 16px 0;border-bottom:1px solid var(--line)}
-  .lhead b{font-size:18px;font-weight:600;letter-spacing:-.024em}
-  .filters select,.search input{border-radius:10px;font-size:12.5px}
-  .tabs{gap:6px;margin:12px 0 0}
-  .tab{border-radius:10px 10px 0 0;padding:8px 10px;border-bottom:2px solid transparent}
-  .tab.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
-  .tab .n{background:none}
+  .lhead{padding:20px 20px 0;border-bottom:0;display:flex;flex-direction:column;gap:14px}
+  .lhead b{font-size:22px;font-weight:700;letter-spacing:-.02em}
+  .lacts{display:flex;gap:4px;flex:none}
+  /* Квадратная кнопка со значком. Подпись у неё в aria-label и в
+     подсказке: в шапке списка место дороже слова, а этих кнопок две и
+     обе открывают то, что и так видно сразу после нажатия. */
+  .iq{width:34px;height:34px;padding:0;border-radius:9px;display:grid;place-items:center;
+    background:var(--solid);border:1px solid var(--line2);color:var(--t2);box-shadow:none}
+  .iq svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75;
+    stroke-linecap:round;stroke-linejoin:round}
+  .iq:hover{background:var(--hover);color:var(--t1)}
+  .iq.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 
-  .conv{padding:12px 14px;border-bottom:1px solid var(--line);
+  /* Поиск. Рамки нет, пока в поле не пишут: она делит шапку на пять
+     одинаковых прямоугольников, из которых ни один не главный. */
+  .lsearch{height:38px;border-radius:10px;background:var(--panel2);display:flex;
+    align-items:center;gap:8px;padding:0 12px;color:var(--t3);
+    border:1px solid transparent;cursor:text}
+  .lsearch:focus-within{background:var(--solid);border-color:var(--accent);
+    box-shadow:0 0 0 4px var(--ring)}
+  .lsearch svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;
+    stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+  .lsearch input,.lsearch input:hover,.lsearch input:focus{flex:1 1 0;min-width:0;border:0;
+    background:transparent;padding:0;height:36px;font-size:14px;color:var(--t1);
+    box-shadow:none;border-radius:0;text-overflow:ellipsis}
+  .kbd{font-family:var(--mono);font-size:11px;color:var(--t3);border:1px solid var(--line2);
+    border-radius:5px;padding:1px 5px;flex:none;line-height:1.5}
+
+  /* Зрізи — один переключатель, а не россыпь. Отдельные вкладки и
+     отдельный фильтр «відповідальний» спрашивали об одном и том же
+     двумя разными способами; переключатель говорит, что срез один и
+     выбран ровно один. */
+  .seg{display:flex;padding:3px;gap:2px;border-radius:10px;background:var(--panel2)}
+  .seg button{flex:1 1 0;min-width:0;height:30px;padding:0 6px;border:0;border-radius:8px;
+    background:transparent;color:var(--t2);font-size:13px;font-weight:500;white-space:nowrap;
+    display:inline-flex;align-items:center;justify-content:center;gap:5px;box-shadow:none}
+  .seg button:hover{color:var(--t1)}
+  .seg button .n{font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+  .seg button.on{background:var(--solid);color:var(--t1);font-weight:600;
+    box-shadow:var(--shadow),0 0 0 1px var(--line)}
+  .seg button.on .n{color:var(--accent);font-weight:600}
+  /* Пока ищут, срез не выбран ни один: поиск идёт по всем диалогам, и
+     подсвеченная вкладка обещала бы, что закрытых в выдаче нет. */
+  .seg.q button.on{background:transparent;color:var(--t2);font-weight:500;box-shadow:none}
+  .seg.q button.on .n{color:var(--t3);font-weight:500}
+
+  /* Фильтры свёрнуты. Их четыре, они нужны не каждый день, и
+     развёрнутыми они забирали у списка две строки навсегда. Свёрнутый
+     фильтр с выбранным значением — это невидимый срез, поэтому панель
+     сама раскрывается, как только в ней что-то выбрано. */
+  .filters{display:none;gap:6px;margin:0;flex-wrap:wrap}
+  .filters.on{display:flex}
+  .fbtn{border-radius:9px;padding:7px 9px;font-size:12.5px;background:var(--panel2);
+    border-color:transparent}
+  .fbtn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+
+  #convs{border-top:1px solid var(--line)}
+  .conv{padding:14px 20px;gap:12px;border-bottom:1px solid var(--line);
     transition:background-color .16s ease,box-shadow .16s ease}
   .conv:hover{background:var(--hover)}
-  .conv.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
-  .av{width:38px;height:38px;border-radius:13px;font-weight:700;
-    background:linear-gradient(140deg,var(--brand1),var(--brand2));color:#fff;
-    border:0;font-size:13px;letter-spacing:-.02em;
+  .conv.on{background:var(--selected);box-shadow:inset 3px 0 0 var(--accent)}
+  /* Аватар светлый, буквы тёмные того же тона. Плотный цветной кружок
+     в каждой строке спорил с синим — цветом действия; светлый остаётся
+     приметой человека и не просит нажать. */
+  .av{width:42px;height:42px;border-radius:50%;font-weight:600;
+    color:#fff;border:0;font-size:14px;letter-spacing:-.01em;
     /* Фото приезжает своего размера — у Telegram это 640 на 640, у
        Instagram бывает больше. Без этих трёх строк браузер кладёт его
-       в кружок как есть, и в 38 пикселях видно случайный кусок щеки.
+       в кружок как есть, и в 42 пикселях видно случайный кусок щеки.
        Размер задаётся после сокращения background: сокращение сбрасывает
        его в auto, и порядок здесь не косметический. */
     background-size:cover;background-position:center;background-repeat:no-repeat}
-  .conv .nm{font-size:13.5px}
+  .avwrap{width:42px;height:42px}
+  /* Значок сети сидит в углу аватарки и почти целиком снаружи: сдвинь
+     его внутрь на пару точек — и он ляжет на вторую букву инициалов. */
+  .chico.sm{width:18px;height:18px;right:-3px;bottom:-3px;border-width:2px}
+  .chico.sm svg{width:10px;height:10px}
+  .conv .nm{font-size:14px;font-weight:600}
+  .conv.unread .nm{font-weight:700}
+  .conv .tm{font-size:12px;color:var(--t3)}
+  .conv.unread .tm{color:var(--accent);font-weight:600}
+  .conv .pv{font-size:13px;color:var(--t2);line-height:1.45;margin-top:3px}
+  .conv.unread .pv{color:var(--t1);font-weight:500}
+  .conv .r2{display:flex;gap:8px;align-items:flex-start}
+  .conv .r2 .pv{flex:1 1 0;min-width:0}
+  .conv .r3{margin-top:7px}
+  /* Счётчик синий, а не красный: непрочитанное — это работа, а не
+     поломка. Красный в списке из двадцати строк читается как двадцать
+     аварий. */
+  .badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--accent);
+    color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;
+    justify-content:center;flex:none;font-variant-numeric:tabular-nums}
+  /* Сколько ждут. Заменяет счётчик, когда ждут дольше четверти часа:
+     к этому времени «сколько сообщений» человеку уже неинтересно —
+     интересно, насколько он опоздал. */
+  .wait{display:inline-flex;gap:4px;align-items:center;height:20px;padding:0 8px;flex:none;
+    border-radius:999px;background:var(--warn-bg);color:var(--warn);font-size:11.5px;
+    font-weight:600;white-space:nowrap}
+  .wait svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round}
   .chip{border-radius:7px;padding:2px 7px;background:var(--panel2);color:var(--t2)}
   /* Свой статус — единственная цветная метка в строке, и цвет у неё
      заданный человеком. Белый текст поэтому жёстко: палитра подобрана
@@ -921,18 +1000,21 @@ export const INBOX_HTML = `<!DOCTYPE html>
     font-variant-numeric:tabular-nums;font-family:var(--font-display,var(--font))}
   .chico{width:38px;height:38px;border-radius:12px;flex:none;display:flex;align-items:center;
     justify-content:center;color:#fff;font-weight:700;font-size:12px}
+  /* Метка канала — плоский цвет сети, а не её логотип и не градиент.
+     Градиент в значке 18 точек виден как грязь, а рисовать чужой знак
+     мы права не имеем: узнаётся цвет плюс простая иконка. */
   .chico.telegram_bot,.chico.telegram_user,
-  .chico.telegram_business{background:linear-gradient(140deg,#37aee2,#1e96c8)}
-  .chico.instagram{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
-  .chico.messenger{background:linear-gradient(140deg,#00b2ff,#006aff)}
+  .chico.telegram_business{background:#229ED9}
+  .chico.instagram{background:#D6246E}
+  .chico.messenger{background:#0866FF}
   .chico.whatsapp,.chico.whatsapp_cloud,
-  .chico.whatsapp_user{background:linear-gradient(140deg,#5bd066,#1faa53)}
-  .chico.viber_business,.chico.viber_user{background:linear-gradient(140deg,#8f5db7,#665cac)}
-  .chico.webchat{background:linear-gradient(140deg,#2F6BFF,#7A3CF0);font-size:9px}
-  .chico.custom{background:linear-gradient(140deg,#4b5563,#111827);font-size:10px}
-  .chico.messenger_comments{background:linear-gradient(140deg,#00b2ff,#006aff)}
-  .chico.instagram_comments{background:linear-gradient(140deg,#f9a03f,#d92e7f 55%,#8a3ab9)}
-  .chico.email{background:linear-gradient(140deg,#64748b,#0f172a);font-size:15px}
+  .chico.whatsapp_user{background:#179A55}
+  .chico.viber_business,.chico.viber_user{background:#7360F2}
+  .chico.webchat{background:var(--accent);font-size:9px}
+  .chico.custom{background:#4B5563;font-size:10px}
+  .chico.messenger_comments{background:#0866FF}
+  .chico.instagram_comments{background:#D6246E}
+  .chico.email{background:#64748B;font-size:15px}
   .chico svg{width:21px;height:21px;display:block}
 
   /* Тот же значок на аватарке в списке и в шапке диалога. Классы те же,
@@ -1394,18 +1476,29 @@ export const INBOX_HTML = `<!DOCTYPE html>
 
   <div id="list">
     <div class="lhead">
-      <div class="top"><b data-t>Чати</b><button class="ghost mini" id="cardBtn" data-t>Клієнт</button></div>
-      <div class="filters">
+      <div class="top"><b data-t>Чати</b>
+        <div class="lacts">
+          <button class="iq" id="fToggle" data-icon="filter"
+            aria-label="Фільтри" data-ta></button>
+          <button class="iq" id="cardBtn" data-icon="side"
+            aria-label="Картка клієнта" data-ta></button>
+        </div>
+      </div>
+      <label class="lsearch" data-icon="search">
+        <input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off">
+        <span class="kbd" id="kQ"></span>
+      </label>
+      <div class="seg" role="tablist" aria-label="Зріз діалогів">
+        <button role="tab" data-seg="open" data-t>Відкриті<span class="n" id="nOpen"></span></button>
+        <button role="tab" data-seg="mine" data-t>Мої<span class="n" id="nMine"></span></button>
+        <button role="tab" data-seg="free" data-t>Вільні<span class="n" id="nFree"></span></button>
+        <button role="tab" data-seg="closed" data-t>Закриті<span class="n" id="nClosed"></span></button>
+      </div>
+      <div class="filters" id="filters">
         <button class="fbtn" id="fCh"></button>
         <button class="fbtn" id="fAs"></button>
         <button class="fbtn" id="fTag"></button>
         <button class="fbtn" id="fSt"></button>
-      </div>
-      <div class="search"><input id="fQ" placeholder="Пошук за імʼям або телефоном" data-tp autocomplete="off"></div>
-      <div class="tabs">
-        <button class="tab on" data-status="open" data-t>Відкриті<span class="n" id="nOpen"></span></button>
-        <button class="tab" data-status="closed" data-t>Закриті<span class="n" id="nClosed"></span></button>
-        <button class="tab" data-status="all" data-t>Усі</button>
       </div>
       <div class="drill" id="drill" style="display:none"></div>
     </div>
@@ -1651,11 +1744,21 @@ function initials(name){
 }
 
 /* Цвет аватара выводится из имени, а не назначается случайно: один
-   и тот же клиент всегда одного цвета, и список читается взглядом. */
-function avatarColor(seed){
+   и тот же клиент всегда одного цвета, и список читается взглядом.
+   Тон светлый, буквы — тот же тон, только тёмный: два десятка плотных
+   цветных кружков в списке спорили с синим, цветом действия, и первым
+   в строке замечался кружок, а не имя. */
+function avatarHue(seed){
   var s = String(seed || ''), sum = 0;
   for (var i = 0; i < s.length; i++) sum = (sum * 31 + s.charCodeAt(i)) % 360;
-  return 'hsl(' + sum + ' 45% 42%)';
+  return sum;
+}
+
+function avatarColor(seed){ return 'hsl(' + avatarHue(seed) + ' 64% 92%)' }
+
+function avStyle(seed){
+  var h = avatarHue(seed);
+  return 'background-color:hsl(' + h + ' 64% 92%);color:hsl(' + h + ' 52% 30%)';
 }
 
 /* ══════════════ Список диалогов ══════════════ */
@@ -1663,7 +1766,11 @@ function avatarColor(seed){
 var lastList = null;
 
 function query(){
-  var p = ['status=' + encodeURIComponent(F.status)];
+  /* Ищем во всех диалогах, а не в выбранном срезе: человек ищет
+     разговор, а не разговор среди открытых, и «ничего не знайдено»
+     при закрытой неделю назад переписке — это неправда. Срез на время
+     поиска гаснет, чтобы не обещать обратного. */
+  var p = ['status=' + encodeURIComponent(F.q ? 'all' : F.status)];
   if (F.assignee.length) p.push('assignee=' + encodeURIComponent(F.assignee.join(',')));
   if (F.channelId.length) p.push('channelId=' + encodeURIComponent(F.channelId.join(',')));
   if (F.tag.length) p.push('tag=' + encodeURIComponent(F.tag.join(',')));
@@ -1671,6 +1778,36 @@ function query(){
   if (DRILL) p.push('id=' + encodeURIComponent(DRILL));
   if (F.q) p.push('q=' + encodeURIComponent(F.q));
   return '/conversations?' + p.join('&');
+}
+
+/*
+ * Правый знак в строке: сколько непрочитано или сколько ждут.
+ *
+ * До четверти часа человеку важно «сколько сообщений», после —
+ * «насколько я опоздал»: счётчик 3 рядом с диалогом, который лежит
+ * сорок минут, говорит не о том. Непрочитанное здесь и значит
+ * «никто даже не открыл»: как только диалог открыли, счётчик гаснет.
+ */
+var WAIT_FROM = 15 * 60000;
+
+function waitedFor(c){
+  if (!(c.unread_count > 0) || !c.last_message_at) return 0;
+  var ms = Date.now() - new Date(c.last_message_at).getTime();
+  return ms > WAIT_FROM ? ms : 0;
+}
+
+function waitWord(ms){
+  var m = Math.round(ms / 60000);
+  if (m < 60) return m + L(' хв');
+  var h = Math.floor(m / 60);
+  return h < 24 ? h + L(' год') : Math.floor(h / 24) + L(' дн');
+}
+
+function mark(c){
+  var w = waitedFor(c);
+  if (w) return '<span class="wait" title="' + L('Клієнт чекає на відповідь') + '">' +
+    icon('clock') + waitWord(w) + '</span>';
+  return c.unread_count > 0 ? '<span class="badge">' + c.unread_count + '</span>' : '';
 }
 
 function renderList(){
@@ -1685,29 +1822,31 @@ function renderList(){
   var html = convs.map(function(c){
     var unread = c.unread_count > 0;
     var who = c.assignee_name || c.assignee_email;
+    /* Третья строка — только когда в ней есть что сказать. Пустая
+       строка меток в каждом диалоге забирала по десять точек высоты
+       на списке из тридцати строк: полтора диалога. */
+    var chips =
+      statusChip(c) +
+      /* Название сети ушло в значок на аватарке. Остаётся то, чего
+         значком не сказать: комментарии под постом — это не личная
+         переписка, и оператор должен видеть это до того, как ответит
+         всем сразу. */
+      (isComments(c.channel_type) ? L('<span class="chip">коментарі</span>') : '') +
+      (who ? '<span class="chip who">' + esc(who) + '</span>' : '') +
+      (c.tags || []).map(function(t){ return '<span class="chip">' + esc(t) + '</span>' }).join('');
+    var marks = chips ? '<div class="r3">' + chips + '</div>' : '';
     return '<div class="conv' + (current === c.id ? ' on' : '') + (unread ? ' unread' : '') +
       '" data-id="' + c.id + '">' +
       '<div class="avwrap">' +
-        '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
-          avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+        '<div class="av" data-av="' + c.contact_id + '" style="' +
+          avStyle(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
         chBadge(c.channel_type) +
       '</div>' +
       '<div class="body">' +
         '<div class="r1"><span class="nm">' + esc(c.display_name || L('Без імені')) + '</span>' +
         '<span class="tm">' + esc(fmtTime(c.last_message_at)) + '</span></div>' +
-        '<div class="pv">' + esc(c.preview || '') + '</div>' +
-        '<div class="r3">' +
-          '<span class="dot ' + (c.status === 'resolved' ? 'closed' : 'open') + '"></span>' +
-          statusChip(c) +
-          /* Название сети ушло в значок на аватарке. Остаётся то, чего
-             значком не сказать: комментарии под постом — это не личная
-             переписка, и оператор должен видеть это до того, как
-             ответит всем сразу. */
-          (isComments(c.channel_type) ? L('<span class="chip">коментарі</span>') : '') +
-          (who ? '<span class="chip who">' + esc(who) + '</span>' : '') +
-          (c.tags || []).map(function(t){ return '<span class="chip">' + esc(t) + '</span>' }).join('') +
-          (unread ? '<span class="badge">' + c.unread_count + '</span>' : '') +
-        '</div>' +
+        '<div class="r2"><span class="pv">' + esc(c.preview || '') + '</span>' + mark(c) + '</div>' +
+        marks +
       '</div></div>';
   }).join('');
 
@@ -1765,8 +1904,12 @@ function renderList(){
 }
 
 function renderCounts(){
-  el('nOpen').textContent = COUNTS.open ? ' ' + COUNTS.open : '';
-  el('nClosed').textContent = COUNTS.closed ? ' ' + COUNTS.closed : '';
+  /* Ноль не пишем: «Вільні 0» и «Вільні» говорят одно и то же, но
+     первое выглядит как найденное число, а второе — как пустая полка. */
+  var n = { nOpen:COUNTS.open, nMine:COUNTS.mine, nFree:COUNTS.unassigned, nClosed:COUNTS.closed };
+  Object.keys(n).forEach(function(k){
+    if (el(k)) el(k).textContent = Number(n[k]) > 0 ? n[k] : '';
+  });
   var u = Number(COUNTS.unread || 0);
   el('railCnt').style.display = u > 0 ? 'block' : 'none';
   el('railCnt').textContent = u > 99 ? '99+' : u;
@@ -1847,8 +1990,8 @@ function renderHead(){
     L('<button class="ghost mini back" id="aBack" title="До списку чатів">← Чати</button>') +
     '<div class="who" id="aCard">' +
       '<div class="avwrap">' +
-        '<div class="av" data-av="' + c.contact_id + '" style="background-color:' +
-          avatarColor(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+        '<div class="av" data-av="' + c.contact_id + '" style="' +
+          avStyle(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
         chBadge(c.channel_type) +
       '</div>' +
       '<div style="min-width:0"><div class="nm">' + esc(c.display_name || L('Без імені')) + '</div>' +
@@ -2838,8 +2981,8 @@ function renderCard(){
   el('card').innerHTML =
     '<div style="display:flex;gap:11px;align-items:center;margin-bottom:14px">' +
       '<div class="av" data-av="' + ct.id + '" ' +
-        'style="width:44px;height:44px;font-size:15px;background-color:' +
-        avatarColor(ct.display_name || ct.id) + '">' + esc(initials(ct.display_name)) + '</div>' +
+        'style="width:44px;height:44px;font-size:15px;' +
+        avStyle(ct.display_name || ct.id) + '">' + esc(initials(ct.display_name)) + '</div>' +
       '<div style="min-width:0"><div style="font-weight:700;font-size:14.5px">' +
         esc(ct.display_name || L('Без імені')) + '</div>' +
       L('<div class="dim" style="font-size:12px">клієнт з ') + esc(fmtDate(ct.created_at)) + '</div></div>' +
@@ -4570,7 +4713,7 @@ function tabProfile(){
       pageHead(L('Профіль'), L('Ваші дані і дані організації.')) +
 
       '<div class="prof">' +
-      '<div class="prof-av" style="background-color:' + avatarColor(u.full_name || u.email || 'x') + '">' +
+      '<div class="prof-av" style="' + avStyle(u.full_name || u.email || 'x') + '">' +
         esc(initials(u.full_name || u.email)) + '</div>' +
       '<div style="min-width:0">' +
       '<div class="prof-nm" id="pfName">' + esc(u.full_name || L('Без імені')) + '</div>' +
@@ -9562,6 +9705,10 @@ function tabReplies(){
 var ICONS = {
   chat:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l1.9-4.6a8.4 8.4 0 0 1-.9-3.9 8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"/>',
   bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8M9 14h.01M15 14h.01"/>',
+  filter:'<path d="M3 6h18M6 12h12M10 18h4"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   flow:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a3 3 0 0 0 3 3H14"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
@@ -9859,6 +10006,7 @@ function paintFilters(){
       openFilter(b, x[1], x[2]);
     };
   });
+  paintFilterBox();
 }
 
 /**
@@ -9900,6 +10048,7 @@ function openFilter(anchor, key, all){
   pickMany(anchor, filterOptions(key), F[key], all, function(out){
     F[key] = out;
     paintFilters();
+    paintSeg();
     lastList = null;
     refresh();
   });
@@ -11612,18 +11761,97 @@ el('page').addEventListener('click', function(e){
   if (b) setView(b.dataset.set);
 });
 
-Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(b){
+/*
+ * Срез диалогов.
+ *
+ * Это не пятый фильтр, а один переключатель поверх двух полей: статуса
+ * и ответственного. «Мої» и «Вільні» и раньше были в фильтре
+ * ответственных — но именно эти два среза человек переключает весь
+ * день, а остальных людей выбирает раз в неделю, и лежать они должны
+ * не рядом.
+ *
+ * Выбранный срез не хранится отдельно, а выводится из фильтров: иначе
+ * выбор человека в фильтре ответственных оставлял бы подсвеченным
+ * «Мої», показывая чужие диалоги.
+ */
+function segNow(){
+  if (F.status === 'closed') return 'closed';
+  if (F.status !== 'open') return '';
+  if (!F.assignee.length) return 'open';
+  if (F.assignee.length === 1 && F.assignee[0] === 'me') return 'mine';
+  if (F.assignee.length === 1 && F.assignee[0] === 'none') return 'free';
+  return '';
+}
+
+function paintSeg(){
+  var now = segNow();
+  var box = document.querySelector('.seg');
+  if (!box) return;
+  // Пока ищут, ни один срез не выбран: поиск идёт по всем диалогам.
+  box.classList.toggle('q', !!F.q);
+  Array.prototype.forEach.call(box.querySelectorAll('[data-seg]'), function(b){
+    var on = b.dataset.seg === now;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+Array.prototype.forEach.call(document.querySelectorAll('[data-seg]'), function(b){
   b.onclick = function(){
-    F.status = b.dataset.status;
-    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(x){
-      x.classList.toggle('on', x === b);
-    });
+    var k = b.dataset.seg;
+    F.status = k === 'closed' ? 'closed' : 'open';
+    F.assignee = k === 'mine' ? ['me'] : k === 'free' ? ['none'] : [];
+    paintSeg();
+    paintFilters();
     lastList = null;
     refresh();
   };
 });
 
+/* Панель фильтров. Раскрыта, пока в ней что-то выбрано: свёрнутый
+   фильтр со значением — это срез, о котором человек не знает. */
+function paintFilterBox(){
+  var box = el('filters'), set = F.channelId.length + F.tag.length + F.statusId.length;
+  // Ответственный входит в срез: «Мої» не должно раскрывать панель.
+  if (!segNow()) set += F.assignee.length;
+  var open = box.classList.contains('on');
+  box.classList.toggle('on', open || set > 0);
+  el('fToggle').classList.toggle('on', set > 0);
+}
+
+el('fToggle').onclick = function(){
+  el('filters').classList.toggle('on');
+  paintFilterBox();
+};
+
+/* ⌘K — в поиск с любого места кабинета. Подпись на клавише своя для
+   Mac и для всех остальных: ⌘ на Windows не нажимается. */
+var MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+el('kQ').textContent = MAC ? '\u2318K' : 'Ctrl K';
+
+document.addEventListener('keydown', function(e){
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    // Поиск живёт в чатах: из отчётов нажатие сперва возвращает туда,
+    // иначе курсор встаёт в поле, которого на экране нет.
+    if (el('app').dataset.view !== 'chats') setView('chats');
+    var q = el('fQ');
+    q.focus();
+    q.select();
+  }
+});
+
+/* Escape очищает поиск и возвращает список: выйти из выдачи нечем,
+   если поле пустеет только пробелами. */
+el('fQ').addEventListener('keydown', function(e){
+  if (e.key !== 'Escape') return;
+  if (el('fQ').value) { el('fQ').value = ''; el('fQ').dispatchEvent(new Event('input')) }
+  else el('fQ').blur();
+});
+
+paintSeg();
 paintFilters();
+paintFilterBox();
 
 // Поиск с задержкой: без неё каждый набранный символ уходил бы
 // отдельным запросом к базе.
@@ -11631,7 +11859,7 @@ var qTimer = null;
 el('fQ').oninput = function(){
   var v = this.value;
   clearTimeout(qTimer);
-  qTimer = setTimeout(function(){ F.q = v; lastList = null; refresh() }, 350);
+  qTimer = setTimeout(function(){ F.q = v; paintSeg(); lastList = null; refresh() }, 350);
 };
 
 el('cardBtn').onclick = function(){ el('app').classList.toggle('no-card') };
