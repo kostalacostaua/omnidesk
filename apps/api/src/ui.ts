@@ -989,7 +989,55 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .replybar,.fileprev,.tplbox{border-radius:12px}
 
   /* ─── Карточка клиента и настройки ─────────────────────────────── */
-  #card{background:var(--panel);border-left:1px solid var(--line);padding:16px;
+  /* Карточка клиента — не форма, а справка. Разделы отбиты линиями и
+     подписаны заглавными: так видно, где кончается контакт и начинается
+     CRM, не читая содержимого. */
+  #card{padding:0}
+  #card .chead{padding:24px;display:flex;flex-direction:column;align-items:center;gap:4px;
+    border-bottom:1px solid var(--line);text-align:center}
+  #card .chead .av{width:64px;height:64px;font-size:22px;border-radius:50%;margin-bottom:6px}
+  #card .chead .cnm{font-size:17px;font-weight:700;letter-spacing:-.015em}
+  #card .chead .csub{font-size:13px;color:var(--t3)}
+  #card .sec{padding:20px 24px;border-bottom:1px solid var(--line);
+    display:flex;flex-direction:column;gap:12px}
+  #card .sec:last-child{border-bottom:0;padding-bottom:32px}
+  #card .sh{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--t3)}
+  /* Пара «название — значение» в строку. Значение редактируется прямо
+     здесь: отдельная форма ради телефона — это переход туда и обратно
+     ради двенадцати цифр. */
+  #card .fld{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0}
+  #card .fld label{margin:0;font-size:13px;color:var(--t3);flex:none;display:block}
+  #card .fld input,#card .fld input:hover{padding:2px 6px;border:0;background:transparent;
+    box-shadow:none;border-radius:6px;font-size:13px;text-align:right;height:26px;
+    flex:1 1 0;min-width:0;color:var(--t1)}
+  #card .fld input:hover{background:var(--hover)}
+  #card .fld input:focus{background:var(--panel2);box-shadow:none;border:0}
+  /* Пустое значение предлагает себя заполнить, а не молчит серым. */
+  #card .fld input::placeholder{color:var(--accent);opacity:1}
+  #card .fld input#cPh{font-family:var(--mono);font-size:12px}
+  /* Блок CRM — чужие данные: они не наши и здесь не меняются. Своя
+     подложка отделяет их от полей, которые править можно. */
+  #card .kv2{font-size:13px;gap:8px 12px;background:var(--panel3);border-radius:12px;
+    padding:14px}
+  #card .tag{height:26px;padding:0 10px;border-radius:999px;background:var(--accent-soft);
+    color:var(--accent);font-size:12px;font-weight:500}
+  /* Кнопки в карточке — по левому краю и по содержимому: растянутая на
+     всю колонку «Зберегти» выглядела главным действием экрана, хотя
+     это правка почты. */
+  #card .sec button{align-self:flex-start}
+  #card .sec .row2 button{align-self:auto}
+  /* «+ мітка» пунктиром: это не кнопка действия, а место, куда можно
+     дописать. Поле ввода появляется по нажатию — постоянное поле в
+     разделе, где обычно ничего не меняют, забирало строку зря. */
+  .tagadd{height:26px;padding:0 10px;border-radius:999px;background:transparent;
+    border:1px dashed var(--line2);color:var(--t2);font-size:12px;font-weight:500;
+    box-shadow:none;align-self:flex-start}
+  .tagadd:hover{border-color:var(--accent);color:var(--accent);background:transparent}
+  #card .note{align-self:stretch;max-width:none;font-size:13px;line-height:1.55;
+    color:var(--t2)}
+  #card .note .who{margin-top:6px}
+  #card{background:var(--panel);border-left:1px solid var(--line);
     backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
     box-shadow:var(--shadow);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
@@ -3214,52 +3262,51 @@ function renderCard(){
   var ct = d.contact, c = currentConv();
 
   el('card').innerHTML =
-    '<div style="display:flex;gap:11px;align-items:center;margin-bottom:14px">' +
-      '<div class="av" data-av="' + ct.id + '" ' +
-        'style="width:44px;height:44px;font-size:15px;' +
+    '<div class="chead">' +
+      '<div class="av" data-av="' + ct.id + '" style="' +
         avStyle(ct.display_name || ct.id) + '">' + esc(initials(ct.display_name)) + '</div>' +
-      '<div style="min-width:0"><div style="font-weight:700;font-size:14.5px">' +
-        esc(ct.display_name || L('Без імені')) + '</div>' +
-      L('<div class="dim" style="font-size:12px">клієнт з ') + esc(fmtDate(ct.created_at)) + '</div></div>' +
+      '<div class="cnm">' + esc(ct.display_name || L('Без імені')) + '</div>' +
+      L('<div class="csub">клієнт з ') + esc(fmtDate(ct.created_at)) + '</div>' +
     '</div>' +
 
-    L('<h4>Контакт</h4>') +
-    L('<div class="fld"><label>Імʼя</label><input id="cNm" value="') + esc(ct.display_name || '') + '"></div>' +
-    L('<div class="fld"><label>Телефон</label><input id="cPh" value="') + esc(ct.phone_e164 || '') + '"></div>' +
-    L('<div class="fld"><label>Пошта</label><input id="cEm" value="') + esc(ct.email || '') + '"></div>' +
+    L('<div class="sec"><div class="sh">Контакт</div>') +
+    L('<div class="fld"><label>Імʼя</label><input id="cNm" placeholder="+ додати" value="') + esc(ct.display_name || '') + '"></div>' +
+    L('<div class="fld"><label>Телефон</label><input id="cPh" placeholder="+ додати" value="') + esc(ct.phone_e164 || '') + '"></div>' +
+    L('<div class="fld"><label>Пошта</label><input id="cEm" placeholder="+ додати" value="') + esc(ct.email || '') + '"></div>' +
     L('<button class="ghost mini" id="cSave">Зберегти</button>') +
-    '<span class="ok" id="cOk" style="margin-left:8px"></span>' +
+    '<span class="ok" id="cOk"></span>' +
 
-    L('<h4>Канали клієнта</h4>') +
+    L('</div><div class="sec"><div class="sh">Канали клієнта</div>') +
     '<div class="kv2">' + (d.identities || []).map(function(i){
       var p = i.raw_profile || {};
       return '<div class="k">' + esc(CH[i.channel_type] || i.channel_type) + '</div>' +
         '<div>' + esc(p.username ? '@' + p.username : i.external_id) + '</div>';
     }).join('') + '</div>' +
 
-    L('<h4>Мітки</h4>') +
+    L('</div><div class="sec"><div class="sh">Мітки</div>') +
     '<div class="tags" id="cTags">' +
       ((c && c.tags) || []).map(function(t){
         return '<span class="tag">' + esc(t) + '<span class="x" data-tag="' + esc(t) + '">×</span></span>';
       }).join('') +
+      L('<button class="tagadd" id="cTagOpen">+ мітка</button>') +
     '</div>' +
-    '<div class="row2" style="margin-top:8px">' +
+    '<div class="row2" id="cTagRow" style="display:none">' +
       L('<input id="cTag" placeholder="нова мітка" style="font-size:12.5px;padding:6px 9px">') +
       L('<button class="ghost mini" id="cTagAdd">Додати</button>') +
     '</div>' +
 
-    L('<h4>Нотатки</h4>') +
+    L('</div><div class="sec"><div class="sh">Нотатки команди</div>') +
     L('<textarea id="cNote" rows="2" placeholder="Видно тільки вашій команді"></textarea>') +
     L('<button class="ghost mini" id="cNoteAdd" style="margin-top:7px">Додати</button>') +
     '<div style="margin-top:12px">' +
       ((d.notes || []).length ? d.notes.map(function(n){
         return '<div class="note">' + esc(n.body) +
           '<div class="who">' + esc(n.author_name || L('хтось')) + ' · ' + esc(fmtTime(n.created_at)) +
-          ' <span class="x" data-note="' + n.id + L('" style="cursor:pointer">видалити</span></div></div>');
+          ' · <span class="x" data-note="' + n.id + L('" style="cursor:pointer">видалити</span></div></div>');
       }).join('') : L('<div class="dim" style="font-size:12.5px">Поки немає.</div>')) +
     '</div>' +
 
-    '<h4>CRM</h4>' +
+    '</div><div class="sec"><div class="sh">CRM</div>' +
     /* Битрикс: карточка та же, а вокруг неё другое. Компания у сделки
        не обязательна, лида конвертировать не нужно — сделка умеет
        ссылаться и на него. Поэтому здесь своя короткая ветка, а не
@@ -3268,7 +3315,7 @@ function renderCard(){
       ? L('<div class="kv2"><div class="k">Картка</div>') +
         '<div><a href="' + esc(d.crmUrl) + L('" target="_blank" rel="noopener">відкрити в Бітріксі</a></div></div>') +
         L('<button class="ghost mini" id="cUnlink" style="margin-top:6px">Відвʼязати від CRM</button>') +
-        L('<h4>Замовлення</h4>') +
+        L('</div><div class="sec"><div class="sh">Замовлення</div>') +
         L('<button class="ghost mini" id="oOpen">Зібрати замовлення</button>') +
         '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
         '<span class="ok" id="oDone"></span>' +
@@ -3289,7 +3336,7 @@ function renderCard(){
 
         /* Заказ. Стоит под CRM, а не отдельной страницей: заказ
            собирается в разговоре, глядя на то, что человек пишет. */
-        L('<h4>Замовлення</h4>') +
+        L('</div><div class="sec"><div class="sh">Замовлення</div>') +
         (ct.crm_module === 'Contacts'
           ? L('<button class="ghost mini" id="oOpen">Зібрати замовлення</button>') +
             '<span class="dim" id="oCnt" style="margin-left:8px;font-size:12.5px"></span>' +
@@ -3317,12 +3364,12 @@ function renderCard(){
         L('а якщо такого клієнта ще немає — створимо лід.</div>') +
         '<div class="err" id="cCrmErr"></div>') +
 
-    L('<h4>Діалог</h4>') +
+    L('</div><div class="sec"><div class="sh">Діалог</div>') +
     '<div class="kv2">' +
       L('<div class="k">Повідомлень</div><div>') + esc((d.stats && d.stats.messages) || 0) + '</div>' +
       L('<div class="k">Перше</div><div>') + esc(fmtDate(d.stats && d.stats.first_at)) + '</div>' +
       L('<div class="k">Останнє</div><div>') + esc(fmtDate(d.stats && d.stats.last_at)) + '</div>' +
-    '</div>';
+    '</div></div>';
 
   paintAvatars();
   ORD.crm = d.crmKind === 'bitrix24' ? 'bitrix24' : 'zoho';
@@ -3429,6 +3476,14 @@ function renderCard(){
       });
   };
 
+  el('cTagOpen').onclick = function(){
+    el('cTagOpen').style.display = 'none';
+    el('cTagRow').style.display = '';
+    el('cTag').focus();
+  };
+  // Enter в поле метки — то же, что «Додати»: тянуться мышью к кнопке
+  // после каждого слова никто не станет.
+  el('cTag').onkeydown = function(e){ if (e.key === 'Enter') el('cTagAdd').click() };
   el('cTagAdd').onclick = function(){
     var t = el('cTag').value.trim();
     if (t) patchConv({ addTag: t }).then(renderCard);
