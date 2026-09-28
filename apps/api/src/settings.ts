@@ -95,6 +95,16 @@ export interface SettingsDeps {
   resendApiKey?: string;
   resendRoot?: string;
   /**
+   * Можно ли подключать существующий ящик по IMAP и SMTP.
+   *
+   * Способность не наша, а площадки: на нашем тарифе Railway
+   * исходящие почтовые порты закрыты, и подключение ящика
+   * заканчивается молчанием сервера. Форма убрана из интерфейса, а
+   * здесь остаётся выключатель: на тарифе, где порты открыты, это одна
+   * переменная окружения, а не возвращение удалённого кода.
+   */
+  mailboxSmtp?: boolean;
+  /**
    * Кто смотрит: владелец платформы и не под клиентом ли он сейчас.
    *
    * Отдаётся в /me, потому что интерфейс решает по этому два вопроса:
@@ -1033,6 +1043,7 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     async (req, reply) => {
       const auth = requireAuth(req);
       if (!auth) return reply.code(401).send(auth401);
+      if (!deps.mailboxSmtp) return reply.code(503).send({ error: 'mailbox_unavailable' });
 
       const parsed = parseMailbox(req.body);
       if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
