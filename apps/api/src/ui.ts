@@ -844,6 +844,50 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Значок сети сидит в углу аватарки и почти целиком снаружи: сдвинь
      его внутрь на пару точек — и он ляжет на вторую букву инициалов. */
   .chico.sm{width:18px;height:18px;right:-3px;bottom:-3px;border-width:2px}
+
+  /* ─── Канал карточкой ──────────────────────────────────────────── */
+  /* Одинаковые карточки в ряд: канал — это не запись в списке, а вещь,
+     у которой есть имя, состояние и выключатель. */
+  .chgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(296px,1fr));gap:16px}
+  .chcard{background:var(--solid);border:1px solid var(--line);border-radius:16px;padding:20px;
+    display:flex;flex-direction:column;gap:18px}
+  .chcard .top{display:flex;gap:14px;align-items:flex-start}
+  .chcard .chico{width:44px;height:44px;border-radius:12px}
+  .chcard .chico svg{width:22px;height:22px}
+  .chcard .nm{font-size:15px;font-weight:700;letter-spacing:-.01em;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .chcard .sub{font-size:13px;color:var(--t3);margin-top:2px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .chcard .foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding-top:14px;border-top:1px solid var(--line)}
+  .chcard .st{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;
+    color:var(--t2);min-width:0}
+  .chcard .st.ok{color:var(--good)}
+  .chcard .st.bad{color:var(--warn)}
+  .chcard .st .d{width:7px;height:7px;border-radius:50%;background:var(--t3);flex:none}
+  .chcard .st.ok .d{background:var(--good-dot)}
+  .chcard .st.bad .d{background:var(--warn-dot)}
+  .chcard .go{background:transparent;border:0;box-shadow:none;padding:0;color:var(--accent);
+    font-size:13px;font-weight:600;flex:none}
+  .chcard .go:hover{background:transparent;color:var(--accent-h)}
+  /* Выключатель, а не кнопка «Вимкнути»: у канала два состояния, и
+     переключатель показывает оба сразу — кнопка показывала только то,
+     что случится, и прочитать по ней текущее состояние было нельзя. */
+  .sw{appearance:none;-webkit-appearance:none;width:36px;height:20px;flex:none;margin:2px 0 0;
+    border-radius:10px;background:var(--line2);position:relative;cursor:pointer;
+    transition:background-color .16s ease}
+  .sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
+    border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(14,21,48,.3);
+    transition:transform .16s cubic-bezier(.2,.8,.3,1)}
+  .sw:checked{background:var(--accent)}
+  .sw:checked::after{transform:translateX(16px)}
+  .sw:disabled{opacity:.5;cursor:default}
+  /* Сводка над сеткой: сколько всего и сколько из них работает. */
+  .chsum{display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap}
+  .chsum .sep{color:var(--t3)}
+  .chsum b{font-weight:600}
+  .chsum .ok{color:var(--good);font-weight:500}
+  .chsum .bad{color:var(--warn);font-weight:500}
   .chico.sm svg{width:10px;height:10px}
   .conv .nm{font-size:14px;font-weight:600}
   .conv.unread .nm{font-weight:700}
@@ -1138,6 +1182,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Колонка уже прежней: строка длиной во весь экран читается плохо,
      а на широком мониторе содержимое расползалось по краям. */
   .pg{max-width:900px;margin:0 auto;padding:38px 28px 70px}
+  /* Страницы-сетки — каналы, отчёты — живут во всю ширину: колонка в
+     900 точек нужна тексту, а не плиткам, и на широком мониторе она
+     оставляла справа пустое поле шириной в ещё одну страницу. */
+  .pg.wide{max-width:1180px;padding:36px 48px 72px}
+  @media(max-width:760px){.pg.wide{padding:20px 16px 50px}}
   .pg-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
     margin-bottom:22px;flex-wrap:wrap}
   .pg-head h2{margin:0;font-size:30px;font-weight:600;letter-spacing:-.028em;line-height:1.15;
@@ -6302,20 +6351,39 @@ function tabChannels(){
     CHANNELS = d.channels || [];
     fillChannelFilter();
 
+    /* Состояние канала одной строкой: точка, слово и сколько в нём
+       разговоров. Отдельная пилюля «працює» и отдельный счётчик
+       диалогов занимали две строки, чтобы сказать одно. */
     var tiles = CHANNELS.map(function(c){
-      return '<div class="tile click" data-open="' + c.id + '">' +
-        '<div class="t1"><div class="chico ' + esc(c.type) + '">' + chIcon(c.type) + '</div>' +
-        '<div style="min-width:0"><div class="ttl">' + esc(c.display_name) + '</div>' +
-        '<div class="sub">' + esc(chSub(c)) + '</div></div></div>' +
-        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + chPill(c) +
-        (c.last_error ? '<span class="pill crit">' + esc(errLabel(c.last_error)) + '</span>' : '') +
-        '</div>' +
-        '<div class="stat"><div><b>' + esc(c.conversations) + L('</b>діалогів</div></div>') +
-        '<div class="acts"><button class="ghost mini" data-open2="' + c.id + L('">Налаштувати</button>') +
-        '<button class="ghost mini" data-toggle="' + c.id + '" data-to="' +
-          (c.status === 'active' ? 'disconnected' : 'active') + '">' +
-          (c.status === 'active' ? L('Вимкнути') : L('Увімкнути')) + '</button></div></div>';
+      var on = c.status === 'active';
+      var bad = c.status === 'degraded' || !!c.last_error;
+      var word = bad ? errLabel(c.last_error) || L('потрібно перепідключити')
+        : on ? L('Працює') : L('Вимкнено');
+      var talks = Number(c.conversations || 0);
+      return '<div class="chcard">' +
+        '<div class="top"><div class="chico ' + esc(c.type) + '">' + chIcon(c.type) + '</div>' +
+        '<div style="flex:1 1 0;min-width:0"><div class="nm">' + esc(c.display_name) + '</div>' +
+        '<div class="sub">' + esc(chSub(c)) + '</div></div>' +
+        '<input type="checkbox" class="sw" role="switch" data-toggle="' + c.id + '" data-to="' +
+          (on ? 'disconnected' : 'active') + '"' + (on ? ' checked' : '') +
+          ' aria-label="' + (on ? L('Вимкнути канал') : L('Увімкнути канал')) + '"></div>' +
+        '<div class="foot"><span class="st ' + (bad ? 'bad' : on ? 'ok' : '') + '">' +
+          '<span class="d"></span>' + esc(word) +
+          (talks ? ' · ' + talks + L(' діал.') : '') + '</span>' +
+        '<button class="go" data-open2="' + c.id + L('">Налаштувати</button></div></div>');
     }).join('');
+
+    /* Сводка. Отвечает на вопрос, ради которого сюда заходят: всё ли
+       на месте. «Потребують уваги» пишем, только когда есть о чём: ноль
+       рядом с надписью читается как найденная проблема. */
+    var live = CHANNELS.filter(function(c){ return c.status === 'active' && !c.last_error }).length;
+    var sick = CHANNELS.filter(function(c){ return c.status === 'degraded' || c.last_error }).length;
+    var summary = CHANNELS.length
+      ? '<div class="chsum"><b>' + CHANNELS.length + L(' підключено</b>') +
+        '<span class="sep">·</span><span class="ok">' + live + L(' працюють</span>') +
+        (sick ? '<span class="sep">·</span><span class="bad">' + sick + L(' потребують уваги</span>') : '') +
+        '</div>'
+      : '';
 
     var connect =
       '<div class="tile"><div class="t1"><div class="chico telegram_bot">' + chIcon('telegram_bot') + '</div>' +
@@ -6427,14 +6495,22 @@ function tabChannels(){
           L('<div class="acts"><button class="ghost mini" disabled>Скоро</button></div></div>');
       }).join('');
 
-    pageBox().innerHTML = '<div class="pg">' +
+    pageBox().innerHTML = '<div class="pg wide">' +
       pageHead(L('Канали'), L('Месенджери, з яких надходять повідомлення. У кожного каналу свої налаштування: ') +
-        L('привітання, автовідповіді і робочі години.')) +
+        L('привітання, автовідповіді і робочі години.'),
+        L('<button id="chAdd">Підключити канал</button>')) +
+      summary +
       (CHANNELS.length
-        ? L('<div class="pg-sec"><h3>Підключено · ') + CHANNELS.length + '</h3><div class="grid">' + tiles + '</div></div>'
+        ? '<div class="pg-sec"><div class="chgrid">' + tiles + '</div></div>'
         : '') +
-      L('<div class="pg-sec"><h3>Підключити канал</h3><div class="grid">') + connect + '</div></div>' +
+      L('<div class="pg-sec" id="chNew"><h3>Підключити канал</h3><div class="grid">') + connect + '</div></div>' +
       '</div>';
+
+    /* Кнопка в шапке не открывает окно, а ведёт к разделу ниже: форм
+       подключения девять, и выбор из них — это и есть тот раздел. */
+    if (el('chAdd')) el('chAdd').onclick = function(){
+      el('chNew').scrollIntoView({ behavior:'smooth', block:'start' });
+    };
 
     el('uqr').onclick = function(){ startTgUser(el('uname').value.trim()) };
 
