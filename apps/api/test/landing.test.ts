@@ -132,6 +132,33 @@ describe('адреса страницы для поиска', () => {
     expect(page).toContain('<meta property="og:image" content="https://www.rozmovio.com/og.png">');
     expect(page).toContain('twitter:card" content="summary_large_image"');
   });
+
+  /*
+   * Тот, кто рисует карточку ссылки, читает не весь документ, а
+   * первые несколько десятков килобайт. Стили на этой странице
+   * занимают около 38 КБ, и один раз og:image, поставленный после
+   * них, до Telegram не доехал: в HTML всё было, а ссылка приходила
+   * голой. Восемь килобайт — с запасом ниже самого скупого предела,
+   * какой встречается.
+   */
+  it('теги для карточки стоят до стилей, в первых 8 КБ', () => {
+    for (const lang of ['uk', 'en']) {
+      const page = landingPage('', lang, 'https://www.rozmovio.com');
+      const at = (s: string) => Buffer.byteLength(page.slice(0, page.indexOf(s)));
+      expect(page.indexOf('<style')).toBeGreaterThan(page.indexOf('og:image'));
+      for (const tag of ['<title>', 'og:image', 'canonical', 'ld+json']) {
+        expect(at(tag), `${lang}: ${tag}`).toBeLessThan(8192);
+      }
+    }
+  });
+
+  // Голова встаёт после этой строки. Изменись она в разметке —
+  // замена молча не сработала бы, и теги уехали бы в конец.
+  it('место для вставки в разметке есть ровно одно', () => {
+    const at = LANDING_HTML.indexOf('<meta name="viewport"');
+    expect(at).toBeGreaterThan(0);
+    expect(LANDING_HTML.indexOf('<meta name="viewport"', at + 1)).toBe(-1);
+  });
 });
 
 describe('факты о продукте для поисковика', () => {

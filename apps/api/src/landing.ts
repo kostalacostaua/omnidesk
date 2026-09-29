@@ -1043,6 +1043,15 @@ const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"
 const esc = (v: string): string => v.replace(/[&<>"]/g, (c) => ESC[c] as string);
 
 /** Заголовок вкладки и описание для поиска — у каждого языка свои. */
+/**
+ * Строка, после которой встаёт собранная голова.
+ *
+ * Взята из самой разметки, а не написана заново: разойдись они хоть
+ * одним пробелом, замена молча не сработает и голова уедет в конец —
+ * то есть ровно туда, откуда её и убирали. Ниже стоит проверка.
+ */
+const VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1">';
+
 const META: Record<string, { title: string; desc: string; ogTitle: string; ogDesc: string }> = {
   uk: {
     title: 'Rozmovio — всі переписки з клієнтами в одному вікні',
@@ -1143,7 +1152,15 @@ export function landingPage(webchatKey: string, lang = 'uk', origin = 'https://w
     lang === 'en' ? '<html lang="en" data-srv="en">' : '<html lang="uk">',
   );
 
-  // 4. Голова: свои заголовки, адреса и факты.
+  /* 4. Голова: свои заголовки, адреса и факты.
+
+        Всё это встаёт первой же строкой после viewport, до стилей.
+        Порядок здесь не косметика: тот, кто рисует карточку ссылки —
+        Telegram, Viber, соцсеть — читает не весь документ, а первые
+        несколько десятков килобайт. Стили на этой странице занимают
+        около 38 КБ, и og:image, поставленный после них, до читателя
+        просто не доезжает: ссылка выходит без картинки, хотя в HTML
+        всё написано. */
   const head =
     `<title>${esc(m.title)}</title>` + NL +
     `<meta name="description" content="${esc(m.desc)}">` + NL +
@@ -1169,7 +1186,7 @@ export function landingPage(webchatKey: string, lang = 'uk', origin = 'https://w
     .replace(/<meta property="og:title"[^>]*>\n/, '')
     .replace(/<meta property="og:description"[^>]*>\n/, '')
     .replace(/<meta property="og:type"[^>]*>\n/, '')
-    .replace('</head>', head + NL + '</head>');
+    .replace(VIEWPORT, VIEWPORT + NL + head);
 
   const tag = widgetTag(webchatKey);
   return tag ? html.replace('</body>', tag + NL + '</body>') : html;
