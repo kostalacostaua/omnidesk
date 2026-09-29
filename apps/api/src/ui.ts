@@ -35,7 +35,15 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="omnidesk-build" content="${UI_BUILD}">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Щипок и двойное касание не увеличивают кабинет.
+
+     Это не забота о красоте: увеличенный экран здесь ломается. Лента,
+     список и рейл прокручиваются каждый сам по себе, страница
+     закреплена — и приблизив её, человек получает кусок интерфейса
+     без возможности вернуться: обратно масштаб сам не сходится, а
+     жеста «уменьшить» на закреплённой странице нет. Читать мелкое тут
+     нечего: всё, что важно, и так набрано не меньше 13 точек. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <!-- Кабинет из поиска закрыт. За формой входа нет ни одной страницы,
      которую имело бы смысл показать в выдаче, а домен app.rozmovio.com
      в результатах рядом с витриной только путает: человек попадает на
@@ -145,12 +153,60 @@ export const INBOX_HTML = `<!DOCTYPE html>
     .thead .who{cursor:pointer}}
   @keyframes cardIn{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
   @media(prefers-reduced-motion:reduce){#app.card-open #card{animation:none}}
+  /* ─── Рейл на телефоне ────────────────────────────────────────────
+     Постоянной колонки нет. Шестьдесят шесть точек из трёхсот
+     девяноста — это шестая часть ширины, занятая навсегда восемью
+     кнопками, из которых за смену нажимают одну. Переписке они стоили
+     полтора слова в каждой строке.
+
+     Рейл выезжает по ☰ поверх экрана и закрывается сразу, как раздел
+     выбран: это не вторая колонка, а разовое действие. Закрыть можно
+     тремя способами — выбрав раздел, коснувшись затемнения и клавишей
+     Escape: на телефоне промахиваются, и выход должен быть везде.
+
+     Подписи в выехавшем рейле идут строкой справа от значка, а не под
+     ним: места теперь хватает, а колонка из восьми переносов по два
+     слова читается хуже простого списка. */
+  /* Умолчание для широкого экрана стоит до медиазапроса, а не после:
+     сила у правил одинаковая, и стоявшее ниже победило бы — кнопка
+     разделов не показывалась бы и на телефоне. */
+  #railVeil{display:none}
+  .burg{display:none;width:34px;height:34px;padding:0;flex:none;
+    align-items:center;justify-content:center;border-radius:8px;
+    background:transparent;border:0;box-shadow:none;color:var(--t2)}
+  .burg svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round}
+  .burg:hover{background:var(--hover);color:var(--t1)}
+
   @media(max-width:820px){
-    /* Рейл на телефоне уже: 76 точек забирают у переписки полтора
-       слова в строке, а подписи помещаются и в 66. */
-    #app{grid-template-columns:66px minmax(0,1fr)}
+    #app{grid-template-columns:minmax(0,1fr)}
     #app.thread-open #list{display:none}
-    #app:not(.thread-open) #thread{display:none}}
+    #app:not(.thread-open) #thread{display:none}
+
+    /* Селектор двойной не случайно: основное описание рейла стоит в
+       файле ниже и при равной силе побеждало бы — рейл оставался
+       колонкой по центру, а подписи жались к середине. */
+    #app #rail{position:fixed;top:0;left:0;bottom:0;z-index:92;width:min(252px,78vw);
+      align-items:stretch;padding:calc(14px + env(safe-area-inset-top)) 10px
+        calc(14px + env(safe-area-inset-bottom));gap:2px;
+      border-right:1px solid var(--glass-line);box-shadow:var(--lift2);
+      transform:translateX(-100%);visibility:hidden;
+      transition:transform var(--calm) var(--ease),visibility var(--calm)}
+    #app.rail-open #rail{transform:none;visibility:visible}
+    @media(prefers-reduced-motion:reduce){#app #rail{transition:none}}
+    #app #rail .logo{align-self:flex-start;margin:0 0 14px 10px}
+    /* Нижние значки — тема, звук, выход — в строку, а не столбиком:
+       в выехавшем рейле ширина есть, а высоту забирать незачем. */
+    #app #rail .grow{min-height:14px}
+    #app #rail .rmini{width:44px;flex:none}
+    #app #railStrip{display:flex;gap:2px;align-items:center}
+    #app.rail-open #railVeil{display:block;position:fixed;inset:0;z-index:91;
+      background:rgba(11,16,34,.4);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+
+    /* Кнопка ☰ стоит в шапке списка и в шапке раздела — там, где на
+       телефоне вообще есть шапка. В переписке её нет: оттуда выходят
+       стрелкой «назад», и две кнопки выхода рядом сбивают с толку. */
+    .burg{display:inline-flex}}
 
   /* ─── Панель разделов ──────────────────────────────────────────────
      Прокручивается. У владельца разделов на два больше, и на телефоне
@@ -845,7 +901,7 @@ export const INBOX_HTML = `<!DOCTYPE html>
        Размер задаётся после сокращения background: сокращение сбрасывает
        его в auto, и порядок здесь не косметический. */
     background-size:cover;background-position:center;background-repeat:no-repeat}
-  .avwrap{width:42px;height:42px}
+  .avwrap{width:42px;height:42px;box-sizing:border-box}
   /* Значок сети сидит в углу аватарки и почти целиком снаружи: сдвинь
      его внутрь на пару точек — и он ляжет на вторую букву инициалов. */
   .chico.sm{width:18px;height:18px;right:-3px;bottom:-3px;border-width:2px}
@@ -1263,6 +1319,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
   @media(max-width:760px){.pg.wide{padding:20px 16px 50px}}
   .pg-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
     margin-bottom:22px;flex-wrap:wrap}
+  /* Кнопка разделов и заголовок — одна строка. На широком экране
+     кнопки нет, и обёртка ничего не меняет. */
+  .pg-ttl{display:flex;align-items:flex-start;gap:8px;min-width:0}
+  .pg-ttl .burg{margin-top:2px}
   .pg-head h2{margin:0;font-size:30px;font-weight:600;letter-spacing:-.028em;line-height:1.15;
     font-family:var(--font-display,var(--font))}
   /* Строка описания короче колонки: длинная строка читается хуже, а
@@ -1312,8 +1372,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
   /* Обёртке нужны собственные размеры и свой край: в строке списка она
      флекс-ребёнок и без этого растянулась бы на всю высоту строки —
      значок уехал бы вниз, к меткам, вместо угла аватарки. */
-  .avwrap{position:relative;flex:none;align-self:flex-start;
-    width:38px;height:38px;line-height:0}
+  /* Размер обёртки не задаётся здесь заново. Он стоял тут — 38 точек
+     против 42 у самой аватарки, — и значок канала, который считает
+     свой угол от обёртки, уезжал на четыре точки внутрь круга и
+     ложился прямо на вторую букву инициалов. «ВК» читалось как «В».
+     Обёртка обязана быть ровно по аватарке, какого бы та ни была
+     размера: в карточке клиента она вдвое больше. */
+  .avwrap{position:relative;flex:none;align-self:flex-start;line-height:0;
+    display:inline-flex}
   .chico.sm{position:absolute;right:-3px;bottom:-3px;width:17px;height:17px;
     border-radius:50%;border:2px solid var(--panel);box-sizing:content-box}
   .chico.sm svg{width:11px;height:11px}
@@ -1504,6 +1570,12 @@ export const INBOX_HTML = `<!DOCTYPE html>
        внутри неё. Без этого Safari, показывая поле ввода, уводит весь
        документ вверх — и поле уезжает под клавиатуру вместе с ним. */
     html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+    /* Ничто не ездит вбок. Экран уводило вправо-влево движение пальца
+       по любой полосе, которая прокручивается горизонтально: шапка
+       диалога, срезы, фильтры. Прокрутка внутри полосы остаётся,
+       наружу она больше не передаётся, а сама страница вбок не
+       двигается вовсе. */
+    html,body{overflow-x:hidden;overscroll-behavior-x:none;touch-action:pan-y}
     /* Строка сетки обязана считаться от высоты окна, а не от
        содержимого: иначе переписка «выталкивает» поле ответа за
        нижний край, и высота, выставленная под клавиатуру, ничего не
@@ -1514,40 +1586,124 @@ export const INBOX_HTML = `<!DOCTYPE html>
          снизу — черта жеста. В браузере они нулевые, в приложении на
          домашнем экране — нет, и без этого отступа логотип оказывался
          под «островом». */
-      padding-top:env(safe-area-inset-top);box-sizing:border-box}
-    #rail{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+      padding-top:env(safe-area-inset-top);box-sizing:border-box;max-width:100%}
     #convs,#page,#bots{padding-bottom:env(safe-area-inset-bottom)}
+    /* Лента вбок не прокручивается вовсе: всё, что шире экрана, —
+       это картинка или длинная ссылка, и её место в пределах пузыря,
+       а не за краем. */
+    #msgs{overflow-x:hidden;overscroll-behavior:contain}
+    /* «Відповісти» и «Реакція» стояли сбоку от пузыря и выходили за
+       край экрана на девятнадцать точек в обе стороны — это и был тот
+       самый ход ленты вправо-влево.
+
+       Наведения пальцем не бывает, поэтому кнопки открываются
+       касанием самого сообщения и закрываются повторным — как
+       долгое нажатие в мессенджере, только без ожидания. Показывать
+       их у всех сразу нельзя: под каждой репликой стояло бы
+       «Відповісти», и лента превращалась в столбик одинаковых
+       кнопок, среди которых не видно переписки. */
+    .mtools{position:static;margin:3px 0 0;flex-wrap:wrap;display:none}
+    .mwrap.act .mtools{display:flex;opacity:1}
+    .mwrap.out .mtools{margin-right:0;justify-content:flex-end}
+    .mwrap.in .mtools{margin-left:0}
+    /* Отступ сверху: первое сообщение упиралось в размытую полосу
+       шапки и читалось наполовину сквозь неё. */
+    #msgs{padding:20px 12px 12px}
+    .mwrap{max-width:86%}
+    /* Все полосы, которые ездят вбок, держат движение в себе. */
+    .seg,.filters,.setnav,.rptabs{overscroll-behavior-x:contain}
+    /* Подсказка о сочетании клавиш на телефоне — обещание того, чего
+       там нет: клавиатуры с Ctrl. Место в строке поиска она занимала
+       настоящее. */
+    .kbd{display:none}
+    /* Автоувеличение при фокусе. Safari приближает экран, когда поле
+       мельче шестнадцати точек, и обратно уже не отдаляет — человек
+       остаётся с куском интерфейса. Касается любого поля, а не только
+       поля ответа: поиск по чатам и настройки те же шестнадцать. */
+    input,textarea,select{font-size:16px}
     /* Вход — исключение: с открытой клавиатурой форма выше экрана,
        и закреплённая страница спрятала бы поле ввода кода. */
     #gate{height:100dvh;overflow-y:auto;align-items:flex-start;padding-top:8vh}
 
-    /* Длинные подписи вроде «Налаштування» в узком рейле одной
-       строкой не влезают: переносим слово, а не обрезаем его. */
-    .rbtn{width:58px;font-size:10px;padding:8px 2px;white-space:normal;
-      overflow-wrap:anywhere;line-height:1.15}
-    .rmini{width:40px;padding:0}
-    .thead{flex-wrap:wrap;row-gap:8px;padding:10px 12px}
+    /* В выехавшем рейле подпись идёт строкой справа от значка:
+       ширина есть, а столбик из восьми переносов по два слова
+       читался хуже обычного списка. */
+    #app .rbtn{width:auto;flex-direction:row;justify-content:flex-start;gap:12px;
+      font-size:14px;font-weight:500;padding:11px 12px;border-radius:10px;
+      white-space:nowrap;line-height:1.2;min-height:44px}
+    #app .rbtn svg{width:20px;height:20px}
+    #app .rbtn .cnt{position:static;margin-left:auto}
+    #app .rmini{width:44px;padding:0;justify-content:center}
+
+    /* ── Шапка переписки ──────────────────────────────────────────
+       Раньше здесь стояла высота в 72 точки, а содержимое переносом
+       занимало 101: двадцать девять точек шапки лежали поверх ленты,
+       и время первого сообщения печаталось прямо по имени клиента.
+       Высота теперь считается по содержимому.
+
+       Две строки вместо трёх: «назад», имя и канал — первая, кнопки
+       и списки — вторая. Имя стоит рядом со стрелкой, как в любом
+       мессенджере, а не под кнопками. */
+    .thead{height:auto;min-height:0;flex-wrap:wrap;row-gap:7px;padding:9px 10px;
+      align-items:center}
     .thead .back{order:1;flex:none}
-    /* Действия сжимаются и прокручиваются вбок, а не переносятся:
-       перенос забирал третью строку у переписки. */
-    .thead .acts{order:2;flex:1 1 0;min-width:0;justify-content:flex-start;
-      overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+    .thead .who{order:2;flex:1 1 0;min-width:0}
+    .thead .nm{font-size:15px}
+    /* Канал и номер — одной строкой с многоточием. Перенос забирал у
+       ленты ещё строку, а номер целиком тут никому не нужен: он есть
+       в карточке. */
+    .thead .sub{font-size:11.5px;display:flex;white-space:nowrap}
+    .thead .sub>span{overflow:hidden;text-overflow:ellipsis}
+    /* Действия прокручиваются вбок, а не переносятся: перенос забирал
+       у переписки третью строку. Прокрутка не передаётся наружу —
+       иначе движение пальца по этой полосе уводило вбок весь экран. */
+    .thead .acts{order:3;flex:1 1 100%;min-width:0;justify-content:flex-start;
+      overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+      overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
     .thead .acts::-webkit-scrollbar{display:none}
+    .thead .acts button.mini,.thead .acts .asel{height:34px;font-size:12.5px}
     /* Списки в этой строке ужимались до одной стрелки, и «відповідальний»
        с «статусом» становились двумя одинаковыми уголками. Раз строка
        всё равно прокручивается, пусть лучше она будет длиннее. */
     .thead .acts .asel{flex:none;min-width:128px}
-    .thead .who{order:3;flex:1 1 100%;min-width:0}
 
-    .composer{padding:9px 12px calc(9px + env(safe-area-inset-bottom))}
+    /* ── Поле ответа ──────────────────────────────────────────────
+       Занимало 219 точек из 844 — четверть экрана под кнопки, пока
+       переписке, ради которой сюда пришли, оставалось чуть больше
+       половины. Три шаблона ушли: на телефоне их вызывают косой
+       чертой прямо в тексте, а кнопка «Шаблони» в нижнем ряду
+       открывает весь список. Предложение ШІ осталось — это не
+       ярлык, а работа, которую иначе руками не сделать. */
+    .composer{padding:8px 10px calc(6px + env(safe-area-inset-bottom))}
+    .composer .cchips .cchip:not(.ai){display:none}
     .composer .row{flex-wrap:wrap;gap:6px}
     .composer .row textarea{order:-1;flex:1 1 100%;width:100%}
     .composer .row #send{margin-left:auto}
     /* 16 пикселей — не про вкус. При меньшем размере Safari на iOS
        увеличивает страницу при фокусе в поле, и вёрстка разъезжается
        уже необратимо: обратно он её не уменьшает. */
-    .composer textarea,.composer input{font-size:16px}
-    .composer textarea{min-height:46px;max-height:30vh}
+    /* Наведение и фокус перечислены не для красоты: основное правило
+       задаёт высоту тремя селекторами сразу, и один из них сильнее
+       простого. Оставь его без пары — и поле, стоило коснуться его
+       пальцем, вырастало обратно до прежней высоты. */
+    .composer textarea,.composer textarea:hover,.composer textarea:focus,
+    .composer input{font-size:16px}
+    .composer textarea,.composer textarea:hover,.composer textarea:focus{
+      min-height:42px;max-height:26vh}
+    /* Подбородок: между нижним рядом кнопок и краем экрана лежало
+       двадцать шесть точек пустоты, и поле выглядело приподнятым
+       над краем без причины. */
+    .composer .cchips{padding:8px 10px 0}
+    /* Нижний ряд не переносится и не обрезается. «Надіслати» уезжала
+       за правый край: пять кнопок и подпись «Нотатка для команди» в
+       390 точек не встают. Подпись у заметки на телефоне прячется —
+       перо рядом с четырьмя такими же значками узнаётся, а место она
+       занимала больше, чем главная кнопка. */
+    .composer .crow{padding:0 8px 6px;flex-wrap:nowrap;gap:0}
+    .composer .cnote{padding:0 8px}
+    .composer .cnote span{display:none}
+    .composer .cnote.on span{display:inline}
+    .composer .csend{flex:none}
 
     /* Список шаблонов занимал треть экрана и почти весь был пустым. */
     .tplbox{max-height:152px}
@@ -1757,16 +1913,25 @@ export const INBOX_HTML = `<!DOCTYPE html>
     <button class="rbtn" data-view="owner" data-icon="chart" data-owner="1" style="display:none" data-t>Власник</button>
     <button class="rbtn" data-view="billing" data-icon="card" data-owner="1" style="display:none" data-t>Гроші</button>
     <div class="grow"></div>
-    <button class="rbtn rmini" id="themeTitle" data-icon="sun" aria-label="Тема" data-ta></button>
-    <button class="rbtn rmini" id="bell" data-icon="bell" aria-label="Звук" data-ta></button>
-    <button class="rbtn rmini" id="out" data-icon="exit" aria-label="Вийти" title="Вийти" data-tt data-ta></button>
-    <button class="rav" id="ravBtn" data-view="profile"
-      aria-label="Налаштування" data-ta>··</button>
+    <!-- Обёртка нужна только телефону: там эти четыре значка идут
+         строкой, а не столбиком. На широком экране она ничего не
+         меняет — обычный блок в колонке. -->
+    <div id="railStrip">
+      <button class="rbtn rmini" id="themeTitle" data-icon="sun" aria-label="Тема" data-ta></button>
+      <button class="rbtn rmini" id="bell" data-icon="bell" aria-label="Звук" data-ta></button>
+      <button class="rbtn rmini" id="out" data-icon="exit" aria-label="Вийти" title="Вийти" data-tt data-ta></button>
+      <button class="rav" id="ravBtn" data-view="profile"
+        aria-label="Налаштування" data-ta>··</button>
+    </div>
   </nav>
+  <!-- Затемнение под выехавшим рейлом. Лежит рядом с ним, а не внутри:
+       внутри оно попало бы под сдвиг рейла и уехало вместе с ним. -->
+  <div id="railVeil"></div>
 
   <div id="list">
     <div class="lhead">
-      <div class="top"><b data-t>Чати</b>
+      <div class="top"><button class="burg" id="burgList" data-icon="menu"
+          aria-label="Розділи" data-ta></button><b data-t>Чати</b>
         <div class="lacts">
           <button class="iq" id="fToggle" data-icon="filter"
             aria-label="Фільтри" data-ta></button>
@@ -3212,6 +3377,31 @@ function bindMessageTools(){
     };
   });
 }
+
+/*
+ * Касание сообщения открывает его кнопки.
+ *
+ * На широком экране их показывает наведение, и этот обработчик там
+ * ничего не меняет: стили держат кнопки видимыми по :hover, а класс
+ * читается только в телефонных правилах.
+ *
+ * Слушаем ленту целиком: сообщения перерисовываются при каждом
+ * обновлении, и привязка к самим пузырям терялась бы вместе с ними.
+ * Открыт всегда один: две открытые строки кнопок подряд читаются как
+ * часть переписки.
+ */
+el('msgs').addEventListener('click', function(e){
+  var t = e.target;
+  if (!t || !t.closest) return;
+  // Нажали кнопку, ссылку или вложение — это их дело, а не наше.
+  if (t.closest('.mtools, a, button, .att')) return;
+  var wrap = t.closest('.mwrap');
+  var was = wrap && wrap.classList.contains('act');
+  Array.prototype.forEach.call(el('msgs').querySelectorAll('.mwrap.act'), function(w){
+    w.classList.remove('act');
+  });
+  if (wrap && !was) wrap.classList.add('act');
+});
 
 /**
  * Всплывающее окошко у элемента.
@@ -5116,8 +5306,15 @@ function armDelete(nodes, action){
 /* Разделы рисуются в одном контейнере #page. Заголовок страницы
    задаётся здесь, чтобы каждый раздел не собирал его заново. */
 function pageHead(title, sub, right){
-  return '<div class="pg-head"><div><h2>' + esc(title) + '</h2>' +
-    (sub ? '<p>' + sub + '</p>' : '') + '</div>' + (right || '') + '</div>';
+  /* Кнопка разделов стоит перед заголовком: на телефоне рейла на
+     экране нет, и без неё из «Каналів» некуда уйти, кроме как назад
+     кнопкой браузера — а в приложении с домашнего экрана её тоже
+     нет. На широком экране кнопка скрыта стилями. */
+  return '<div class="pg-head"><div class="pg-ttl">' +
+    '<button class="burg" data-burg="1" aria-label="' + esc(L('Розділи')) + '">' +
+    icon('menu') + '</button>' +
+    '<div><h2>' + esc(title) + '</h2>' +
+    (sub ? '<p>' + sub + '</p>' : '') + '</div></div>' + (right || '') + '</div>';
 }
 
 /*
@@ -10295,6 +10492,8 @@ var ICONS = {
   chat:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l1.9-4.6a8.4 8.4 0 0 1-.9-3.9 8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"/>',
   bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8M9 14h.01M15 14h.01"/>',
   filter:'<path d="M3 6h18M6 12h12M10 18h4"/>',
+  // Три ровные черты — не то же, что «фильтр»: у того они сходятся.
+  menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -11996,6 +12195,9 @@ function restoreView(){
 
 function setView(view){
   el('app').dataset.view = view;
+  // Раздел выбран — меню своё дело сделало. Оставить его открытым
+  // значило бы закрыть половину того, ради чего его открывали.
+  railClose();
   rememberView(view);
   if (view === 'chats') { backToList(); }
   Array.prototype.forEach.call(document.querySelectorAll('#rail [data-view]'), function(b){
@@ -12345,6 +12547,25 @@ Array.prototype.forEach.call(document.querySelectorAll('#rail [data-view]'), fun
   b.onclick = function(){ CRM_OPEN = null; setView(b.dataset.view) };
 });
 el('logo').onclick = function(){ setView('chats') };
+
+/*
+ * Выдвижной рейл на телефоне.
+ *
+ * Класс висит на кабинете, а не на самом рейле: затемнение лежит
+ * рядом с ним и обязано появляться тем же движением. Разбери их — и
+ * закрытие пришлось бы делать в двух местах, а промах между ними
+ * оставлял бы экран затемнённым без меню.
+ *
+ * На широком экране класс ничего не значит: там рейл — обычная
+ * колонка сетки, и правила выезда стоят внутри медиазапроса.
+ */
+function railOpen(){ el('app').classList.add('rail-open') }
+function railClose(){ el('app').classList.remove('rail-open') }
+function railToggle(){ el('app').classList.toggle('rail-open') }
+
+el('burgList').onclick = railToggle;
+el('railVeil').onclick = railClose;
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') railClose() });
 el('supBtn').onclick = supToggle;
 
 /* Переключатель страниц настроек. Слушаем раздел целиком, а не кнопки:
@@ -12353,6 +12574,9 @@ el('supBtn').onclick = supToggle;
 el('page').addEventListener('click', function(e){
   var b = e.target && e.target.closest ? e.target.closest('[data-set]') : null;
   if (b) setView(b.dataset.set);
+  // Кнопка разделов рисуется вместе с заголовком страницы и живёт
+  // ровно до следующей перерисовки — поэтому слушаем раздел, а не её.
+  if (e.target && e.target.closest && e.target.closest('[data-burg]')) railToggle();
 });
 
 /*
