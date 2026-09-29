@@ -95,6 +95,9 @@ export const LANDING_HTML = `<!DOCTYPE html>
   html{scroll-behavior:smooth}
   body{overflow-x:hidden}
   .wrap{max-width:1140px;margin:0 auto;padding:0 20px}
+  /* Правило поверхностей то же, что в кабинете: тень — только у того,
+     что лежит поверх страницы. На промо это снимок продукта, и всё. */
+  .card,.tile{box-shadow:none;background:var(--solid);border-color:var(--line)}
   section{position:relative}
 
   /* Фон здесь общий с рабочим местом — он приходит темой. Раньше
@@ -105,9 +108,8 @@ export const LANDING_HTML = `<!DOCTYPE html>
   /* ─── Шапка ────────────────────────────────────────────────────
      Липкая и полупрозрачная: на длинной странице кнопка «спробувати»
      должна быть под рукой в любой момент, но не закрывать текст. */
-  header{position:sticky;top:0;z-index:50;background:var(--glass);
-    border-bottom:1px solid var(--line);backdrop-filter:var(--blur);
-    -webkit-backdrop-filter:var(--blur)}
+  header{position:sticky;top:0;z-index:50;background:var(--solid);
+    border-bottom:1px solid var(--line)}
   header .in{display:flex;align-items:center;gap:var(--s4);height:62px}
   .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);
     font-weight:800;font-size:17px;letter-spacing:-.025em;color:var(--t1);text-decoration:none}
@@ -155,12 +157,12 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* Показ продукта. Это не картинка, а настоящая разметка: она
      переживает смену темы и не размывается на плотных экранах. */
-  .shot{border-radius:var(--r4);border:1px solid var(--glass-line);background:var(--glass);
-    backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
-    box-shadow:var(--lift2);overflow:hidden;transform:perspective(1400px) rotateY(-7deg) rotateX(2deg);
-    transition:transform var(--slow) var(--ease)}
-  .shot:hover{transform:perspective(1400px) rotateY(-3deg) rotateX(1deg)}
-  @media(max-width:980px){.shot{transform:none}}
+  /* Показ продукта стоит прямо. Разворот в перспективе — приём с
+     чужих страниц: он делает снимок нарядным ровно настолько,
+     насколько мешает разглядеть, что там нарисовано, а разглядеть —
+     единственное, зачем он здесь. */
+  .shot{border-radius:var(--r4);border:1px solid var(--line);background:var(--solid);
+    box-shadow:var(--lift2);overflow:hidden}
   .shot .bar{display:flex;align-items:center;gap:6px;padding:9px 12px;
     border-bottom:1px solid var(--line);background:var(--panel2)}
   .shot .bar i{width:9px;height:9px;border-radius:50%;background:var(--line2);display:block}
@@ -168,15 +170,17 @@ export const LANDING_HTML = `<!DOCTYPE html>
   .shot .body{display:grid;grid-template-columns:40px 132px minmax(0,1fr);height:330px}
   .shot .rl{border-right:1px solid var(--line);padding:10px 0;display:flex;
     flex-direction:column;align-items:center;gap:9px;background:var(--rail)}
-  .shot .rl b{width:22px;height:22px;border-radius:6px;background:var(--grad);display:block}
+  .shot .rl b{width:22px;height:22px;border-radius:6px;background:var(--accent);display:block}
   .shot .rl i{width:18px;height:18px;border-radius:5px;background:var(--line);display:block}
   .shot .rl i.on{background:var(--accent-soft)}
   .shot .ls{border-right:1px solid var(--line);padding:9px;display:flex;
     flex-direction:column;gap:9px;overflow:hidden}
   .shot .lr{display:flex;gap:7px;align-items:center}
-  .shot .lr .a{width:24px;height:24px;border-radius:6px;flex:none;background:var(--grad)}
-  .shot .lr .a.g{background:linear-gradient(120deg,#0ea5e9,#22d3ee)}
-  .shot .lr .a.p{background:linear-gradient(120deg,#f43f5e,#f59e0b)}
+  /* Кружки собеседников — светлые, как аватарки в списке кабинета:
+     на странице показан он, и показывать его другим было бы обманом. */
+  .shot .lr .a{width:24px;height:24px;border-radius:50%;flex:none;background:hsl(214 64% 92%)}
+  .shot .lr .a.g{background:hsl(150 64% 92%)}
+  .shot .lr .a.p{background:hsl(340 64% 93%)}
   .shot .lr .t{flex:1}
   .shot .lr .t b{display:block;height:6px;border-radius:3px;background:var(--line2);
     width:62%;margin-bottom:5px}
@@ -202,9 +206,11 @@ export const LANDING_HTML = `<!DOCTYPE html>
   .sec{padding:clamp(44px,6vw,80px) 0}
   /* Чередование секций держится на краях, а не на заливке: сплошной
      цвет поверх обоев гасит их ровно на треть страницы. */
-  .sec.tint{background:linear-gradient(180deg,transparent,var(--panel2) 12%,
-    var(--panel2) 88%,transparent);
-    border-top:1px solid var(--edge2);border-bottom:1px solid var(--edge2)}
+  /* Чередование секций — ровной заливкой и чертой. Растяжка из
+     прозрачного в серый и обратно оставляла у стыка полосу, которую
+     глаз читает как край чего-то, чего там нет. */
+  .sec.tint{background:var(--panel2);
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
   .shd{max-width:640px;margin-bottom:clamp(24px,3vw,40px)}
   .shd .h2{margin-bottom:var(--s3)}
   .grid{display:grid;gap:var(--s3)}
@@ -235,19 +241,19 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* Шаг. Номер крупный и бледный: он помогает считать, но не должен
      перетягивать внимание с текста. */
-  .step{padding:var(--s4);background:var(--glass);border:1px solid var(--glass-line);
-    border-radius:var(--r3);position:relative;overflow:hidden;
-    -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-    box-shadow:var(--sheen),var(--lift)}
-  .step .n{font-family:var(--font-display);font-size:46px;font-weight:800;line-height:1;
-    letter-spacing:-.04em;background:var(--grad);-webkit-background-clip:text;
-    background-clip:text;color:transparent;opacity:.5;margin-bottom:var(--s2)}
+  .step{padding:var(--s5);background:var(--solid);border:1px solid var(--line);
+    border-radius:var(--r4);position:relative;overflow:hidden;box-shadow:none}
+  /* Номер шага — моноширинным и мелким. Полупрозрачная цифра в сорок
+     шесть точек была самым крупным на карточке и читалась украшением,
+     хотя это всего лишь «первый, второй, третий». */
+  .step .n{font-family:var(--mono);font-size:13px;font-weight:500;line-height:1;
+    letter-spacing:0;color:var(--accent);margin-bottom:var(--s3)}
   .step .h4{margin-bottom:6px}
   .step p{margin:0;font-size:12.5px;line-height:1.6;color:var(--t2)}
 
   /* Возможности: плотная сетка коротких фактов. Длинный список
      продающих обещаний никто не читает, короткие факты — читают. */
-  .feat{padding:var(--s4);background:var(--glass);border:1px solid var(--glass-line);
+  .feat{padding:var(--s5);background:var(--solid);border:1px solid var(--line);
     border-radius:var(--r3);
     -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
     box-shadow:var(--sheen),var(--lift)}
@@ -284,10 +290,12 @@ export const LANDING_HTML = `<!DOCTYPE html>
 
   /* Цена. Одна карточка: выбор из трёх тарифов на этом этапе только
      мешает — человек начинает сравнивать вместо того, чтобы пробовать. */
-  .price{max-width:440px;margin:0 auto;padding:var(--s5);border-radius:var(--r4);
-    background:var(--glass);border:1px solid var(--glass-line);backdrop-filter:var(--blur);
-    -webkit-backdrop-filter:var(--blur);box-shadow:var(--lift2);text-align:center}
-  .price .amt{font-family:var(--font-display);font-size:54px;font-weight:800;line-height:1;
+  /* Единственная рамка с 2 точками — та, которую мы рекомендуем, и
+     рекомендуем мы одну. Тень убрана: карточка лежит в странице, а не
+     поверх неё, и на промо-странице это правило то же, что в кабинете. */
+  .price{max-width:440px;margin:0 auto;padding:var(--s6) var(--s5);border-radius:var(--r4);
+    background:var(--solid);border:2px solid var(--accent);box-shadow:none;text-align:center}
+  .price .amt{font-family:var(--font-display);font-size:54px;font-weight:700;line-height:1;
     letter-spacing:-.04em;margin:var(--s3) 0 4px}
   .price .per{font-size:13px;color:var(--t3);margin-bottom:var(--s4)}
   .price ul{list-style:none;margin:0 0 var(--s5);padding:0;text-align:left;

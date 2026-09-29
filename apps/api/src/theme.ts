@@ -221,9 +221,14 @@ export const BASE_CSS = `
   button.quiet:hover{background:var(--hover);color:var(--t1);border-color:transparent}
   button.danger{background:var(--crit);border-color:var(--crit);color:#fff}
   button.danger:hover{filter:brightness(1.08)}
-  button.grad{background:var(--grad);border-color:transparent;color:#fff;
-    box-shadow:0 8px 24px -10px var(--glow)}
-  button.grad:hover{background:var(--grad);filter:brightness(1.07)}
+  /* Главная кнопка — один синий, а не переливание из синего в
+     фиолетовый. Градиент на кнопке действия ничего не значит: он не
+     говорит ни про состояние, ни про важность, — он просто нарядный,
+     и от этого страница выглядит шаблоном, а не продуктом. Фиолетовый
+     в этом кабинете занят: он означает ШИ. */
+  button.grad{background:var(--accent);border-color:transparent;color:var(--on-accent);
+    box-shadow:0 8px 24px -12px var(--glow)}
+  button.grad:hover{background:var(--accent-h);filter:none}
   button.big{padding:14px 26px;font-size:14.5px}
   .mini{padding:7px 13px;font-size:12px}
 
@@ -256,15 +261,17 @@ export const KIT_CSS = `
 
   /* Заголовки. Размеры не «на глаз», а шкала: каждая следующая
      ступень примерно в 1.25 раза больше предыдущей. */
-  .h1{font-family:var(--font-display);font-size:clamp(30px,4.6vw,54px);line-height:1.06;
-    letter-spacing:-.03em;font-weight:800;margin:0}
-  .h2{font-family:var(--font-display);font-size:clamp(22px,2.6vw,32px);line-height:1.15;
-    letter-spacing:-.025em;font-weight:700;margin:0}
+  .h1{font-family:var(--font-display);font-size:clamp(34px,5.6vw,72px);line-height:1.06;
+    letter-spacing:-.035em;font-weight:700;margin:0}
+  .h2{font-family:var(--font-display);font-size:clamp(24px,2.8vw,36px);line-height:1.15;
+    letter-spacing:-.028em;font-weight:700;margin:0}
   .h3{font-size:17px;line-height:1.3;letter-spacing:-.021em;font-weight:600;margin:0}
   .h4{font-size:14px;line-height:1.35;letter-spacing:-.014em;font-weight:600;margin:0}
   .lead{font-size:clamp(14px,1.5vw,17px);line-height:1.6;color:var(--t2);margin:0}
-  .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;
-    color:transparent}
+  /* Выделенная часть заголовка — просто синяя. Текст градиентом
+     читается хуже обычного и на половине экранов выглядит грязным
+     пятном, а обещает он ровно столько же, сколько цвет. */
+  .grad-text{background:none;color:var(--accent)}
 
   /* Карточка — единица содержимого. Всё остальное складывается из неё. */
   /* Карточка — единица содержимого и главная стеклянная поверхность:
