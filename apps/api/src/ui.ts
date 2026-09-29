@@ -929,6 +929,31 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .card .numbox:first-child{padding-left:0}
   .card .numbox + .numbox{border-left:1px solid var(--line)}
   .card .numbox .n{font-size:26px}
+
+  /* ─── Одинаковые поверхности на всех страницах ─────────────────── */
+  /* Карточка — белая с рамкой и без тени. Тень в кабинете означает «это
+     лежит поверх»: окно, поповер, поле ответа. У карточки, которая
+     лежит в странице, она обещала слой, которого нет. */
+  .card,.tile{border-radius:16px;box-shadow:none;border-color:var(--line);
+    background:var(--solid)}
+  .tile.click:hover{box-shadow:none;transform:none;border-color:var(--line2);
+    background:var(--hover)}
+  /* Название страницы — как в макетах: чуть мельче и жирнее. Тонкие 30
+     точек читались заголовком статьи, а это рабочий экран. */
+  .pg-head h2{font-size:28px;font-weight:700;letter-spacing:-.025em}
+  .pg-head p{font-size:14px}
+  /* Подпись раздела — одна на весь кабинет: заглавные вразрядку. Так же
+     подписаны разделы в карточке клиента, и второй способ подписывать
+     то же самое был бы просто вторым способом. */
+  .pg-sec h3{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--t3);margin:0 0 14px}
+  /* Переключатель страниц настроек — те же вкладки, что и в отчётах:
+     подчёркивание тёмным, 14 точек, одинаковый отступ. Разные вкладки
+     на соседних экранах человек читает как разные вещи. */
+  .setnav{gap:28px;margin-bottom:22px;border-bottom:1px solid var(--line2)}
+  .snav{font-size:14px;font-weight:500;padding:0 0 12px;margin-bottom:-1px;color:var(--t3)}
+  .snav:hover{border-color:transparent;color:var(--t1)}
+  .snav.on{font-weight:600;border-color:var(--rail);color:var(--t1)}
   @media(max-width:760px){
     .card .numbox{padding:0}
     .card .numbox + .numbox{border-left:0;margin-top:14px}}
