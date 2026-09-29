@@ -293,8 +293,26 @@ export const LANDING_HTML = `<!DOCTYPE html>
   /* Единственная рамка с 2 точками — та, которую мы рекомендуем, и
      рекомендуем мы одну. Тень убрана: карточка лежит в странице, а не
      поверх неё, и на промо-странице это правило то же, что в кабинете. */
-  .price{max-width:440px;margin:0 auto;padding:var(--s6) var(--s5);border-radius:var(--r4);
-    background:var(--solid);border:2px solid var(--accent);box-shadow:none;text-align:center}
+  /* Два тарифа рядом. Рамкой выделен один — тот, который берут: без
+     этого выбор из двух одинаковых карточек означает, что выбирать
+     придётся, сравнивая построчно. */
+  .prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4);
+    max-width:840px;margin:0 auto;align-items:stretch}
+  @media(max-width:820px){.prices{grid-template-columns:minmax(0,1fr)}}
+  .price{padding:var(--s6) var(--s5);border-radius:var(--r4);position:relative;
+    background:var(--solid);border:1px solid var(--line);box-shadow:none;text-align:center;
+    display:flex;flex-direction:column;height:100%}
+  .price.pick{border:2px solid var(--accent)}
+  /* Значок сидит на самой рамке: ярлык внутри карточки занимал строку,
+     а прилепленный сверху — ровно то место, где рамка и так есть. */
+  .price .badge{position:absolute;top:0;left:50%;transform:translate(-50%,-50%);
+    background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;padding:4px 12px;border-radius:999px;
+    white-space:nowrap}
+  /* «За домовленістю» — не число, и кеглем числа оно выглядело бы
+     ценой, которой нет. */
+  .price .amt.deal{font-size:28px;letter-spacing:-.02em;line-height:1.2}
+  .price ul{flex:1 1 auto}
   .price .amt{font-family:var(--font-display);font-size:54px;font-weight:700;line-height:1;
     letter-spacing:-.04em;margin:var(--s3) 0 4px}
   .price .per{font-size:13px;color:var(--t3);margin-bottom:var(--s4)}
@@ -505,21 +523,38 @@ export const LANDING_HTML = `<!DOCTYPE html>
       <h2 class="h2" data-t="pr.h"></h2>
       <p class="lead" data-t="pr.lead"></p>
     </div>
-    <div class="price rise">
-      <div class="h3" data-t="pr.plan"></div>
-      <div class="amt">50 $</div>
-      <div class="per" data-t="pr.per"></div>
-      <div class="alt" data-t="pr.alt"></div>
-      <ul>
-        <li data-t="pr.i1"></li>
-        <li data-t="pr.i2"></li>
-        <li data-t="pr.i3"></li>
-        <li data-t="pr.i4"></li>
-        <li data-t="pr.i5"></li>
-      </ul>
-      <button class="grad big" id="priceGo" type="button" data-t="pr.go"></button>
-      <p class="note" data-t="pr.note"></p>
-      <p class="note" data-t="pr.ent"></p>
+    <div class="prices rise">
+      <div class="price pick">
+        <div class="badge" data-t="pr.pick"></div>
+        <div class="h3" data-t="pr.plan"></div>
+        <div class="amt">50 $</div>
+        <div class="per" data-t="pr.per"></div>
+        <div class="alt" data-t="pr.alt"></div>
+        <ul>
+          <li data-t="pr.i1"></li>
+          <li data-t="pr.i2"></li>
+          <li data-t="pr.i3"></li>
+          <li data-t="pr.i4"></li>
+          <li data-t="pr.i5"></li>
+        </ul>
+        <button class="grad big" id="priceGo" type="button" data-t="pr.go"></button>
+        <p class="note" data-t="pr.note"></p>
+      </div>
+
+      <div class="price">
+        <div class="h3" data-t="pr.eplan"></div>
+        <div class="amt deal" data-t="pr.eamt"></div>
+        <div class="per" data-t="pr.eper"></div>
+        <div class="alt" data-t="pr.ealt"></div>
+        <ul>
+          <li data-t="pr.e1"></li>
+          <li data-t="pr.e2"></li>
+          <li data-t="pr.e3"></li>
+          <li data-t="pr.e4"></li>
+        </ul>
+        <button class="ghost big" id="entGo" type="button" data-t="pr.ego"></button>
+        <p class="note" data-t="pr.enote"></p>
+      </div>
     </div>
   </div>
 </section>
@@ -632,14 +667,21 @@ var T = {
     'zh.l4':'У Zoho вхід у віджет — за користувачем CRM: окремих паролів немає.',
     'zh.crm':'Zoho CRM · Контакт','zh.f1':'Ім’я','zh.f2':'Телефон','zh.f3':'Джерело','zh.f3v':'Instagram Direct',
     'zh.m1':'Доброго дня, чи є доставка?','zh.m2':'Так, відправляємо Новою поштою',
-    'pr.h':'Ціна','pr.lead':'Один тариф, без прихованих доплат за канал чи за оператора.',
+    'pr.h':'Ціна','pr.lead':'Два тарифи. Ціна не залежить ані від кількості каналів, ані від кількості повідомлень.',
     'pr.plan':'Компанія','pr.per':'за місяць при оплаті за рік',
     'pr.alt':'або 60 $ на місяць при щомісячній оплаті — за рік виходить на два місяці дешевше',
     'pr.i1':'Усі доступні канали','pr.i2':'10 операторів у команді, далі 5 $ за місце',
     'pr.i3':'Віджет у Zoho CRM і замовлення просто з переписки',
     'pr.i4':'Штучний інтелект, шаблони, сценарії','pr.i5':'Підтримка українською',
     'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата карткою або рахунком. Скасувати можна будь-коли — доступ триває до кінця оплаченого періоду.',
-    'pr.ent':'Велика команда — корпоративний тариф: ціна за кожного користувача, рахунок і договір. Напишіть нам.',
+    'pr.pick':'Більшості підходить',
+    'pr.eplan':'Корпоративний','pr.eamt':'Ціна за домовленістю','pr.eper':'за кожного користувача, від 15 місць',
+    'pr.ealt':'без базової плати: скільки людей у команді — стільки й місць',
+    'pr.e1':'Усе з тарифу «Компанія»','pr.e2':'Ціна за місце окремо для вашої команди',
+    'pr.e3':'Оплата рахунком, договір і закривні документи',
+    'pr.e4':'Від 15 місць — менша команда бере тариф «Компанія»',
+    'pr.ego':'Написати нам','pr.enote':'Розкажіть, скільки людей і які канали — порахуємо й надішлемо рахунок.',
+    'pr.eseed':'Корпоративний тариф. Людей у команді: ',
     'tr.h':'Заявка на тестування','tr.lead':'Залиште пошту — надішлю доступ і допоможу підключити перший канал.',
     'tr.name':'Ім’я','tr.company':'Компанія','tr.mail':'Робоча пошта','tr.phone':'Телефон або Telegram',
     'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
@@ -692,14 +734,21 @@ var T = {
     'zh.l4':'In Zoho, access follows the CRM user: no separate passwords.',
     'zh.crm':'Zoho CRM · Contact','zh.f1':'Name','zh.f2':'Phone','zh.f3':'Source','zh.f3v':'Instagram Direct',
     'zh.m1':'Hello, do you deliver?','zh.m2':'Yes, we ship the same day',
-    'pr.h':'Pricing','pr.lead':'One plan, no hidden charges per channel or per seat.',
+    'pr.h':'Pricing','pr.lead':'Two plans. The price depends on neither the number of channels nor the number of messages.',
     'pr.plan':'Company','pr.per':'per month, billed yearly',
     'pr.alt':'or 60 $ per month billed monthly — a year costs two months less',
     'pr.i1':'All available channels','pr.i2':'10 agents included, 5 $ per extra seat',
     'pr.i3':'Widget in Zoho CRM and orders straight from the chat',
     'pr.i4':'AI replies, templates, scenarios','pr.i5':'Support in English and Ukrainian',
     'pr.go':'Start 14 days free','pr.note':'Pay by card or by invoice. Cancel at any time — access lasts until the end of the period already paid for.',
-    'pr.ent':'Large team — enterprise plan: a price per user, invoice and contract. Write to us.',
+    'pr.pick':'Right for most',
+    'pr.eplan':'Enterprise','pr.eamt':'Price on request','pr.eper':'per user, from 15 seats',
+    'pr.ealt':'no base fee: as many seats as people on the team',
+    'pr.e1':'Everything in the Company plan','pr.e2':'A seat price set for your team',
+    'pr.e3':'Payment by invoice, a contract and closing documents',
+    'pr.e4':'From 15 seats — a smaller team takes the Company plan',
+    'pr.ego':'Write to us','pr.enote':'Tell us how many people and which channels — we will do the maths and send an invoice.',
+    'pr.eseed':'Enterprise plan. People on the team: ',
     'tr.h':'Request a trial','tr.lead':'Leave your email — I will send access and help connect the first channel.',
     'tr.name':'Name','tr.company':'Company','tr.mail':'Work email','tr.phone':'Phone or Telegram',
     'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',
@@ -856,6 +905,15 @@ el('themeBtn').onclick = function(){ themeCycle(); paintThemeBtn() };
 el('signin').onclick = function(){ location.href = '/app' };
 el('top-try').onclick = function(){ goForm('') };
 el('priceGo').onclick = function(){ goForm('') };
+/* Корпоративный ведёт в ту же форму, но заявка приходит подписанной:
+   иначе она ничем не отличается от обычной, и первым письмом в ответ
+   идёт вопрос «а вам какой тариф». Поле не затираем — человек мог уже
+   что-то написать. */
+el('entGo').onclick = function(){
+  var n = el('lNote');
+  if (n && !n.value.trim()) n.value = t('pr.eseed');
+  goForm('');
+};
 el('heroGo').onclick = function(){
   var v = el('heroMail').value.trim();
   if (v && !okMail(v)){ toast(t('e.mail')); el('heroMail').focus(); return }
