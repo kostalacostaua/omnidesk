@@ -115,3 +115,67 @@ describe('что не уезжает за край', () => {
     expect(phone).toContain('overscroll-behavior-x:none');
   });
 });
+
+describe('шапка переписки: что снаружи, что под «Ще»', () => {
+  /*
+   * Пять действий в строку на 390 точках не встают. Снаружи остались
+   * «Взяти собі» и статус, остальное — под «…». На широком экране
+   * обёртка прозрачна, и порядок задан числами: разметка сгруппирована
+   * ради телефона, а шапка должна была остаться прежней.
+   */
+  it('на широком экране порядок задан числами, а не разметкой', () => {
+    expect(css).toContain('.thead .amore{display:contents}');
+    for (const [id, n] of [['aWho', 1], ['aSt', 2], ['aBot', 3], ['aClose', 4], ['aTake', 5]]) {
+      expect(css, id).toContain('.thead .acts #' + id + '{order:' + n + '}');
+    }
+  });
+
+  /*
+   * Кнопка «…» носит и класс mini, а `.thead .acts button.mini`
+   * объявлен с тем же весом: правило полегче она перебивала, и «…»
+   * висела на широком экране, где прятать нечего. Прячется тем же
+   * весом и строкой ниже.
+   */
+  it('«…» спрятана весом не меньше, чем у соседей по строке', () => {
+    const hide = at('.thead .acts button.amorebtn{display:none');
+    const mini = at('.thead .acts button.mini{display:inline-flex');
+    expect(hide).toBeGreaterThan(-1);
+    expect(mini).toBeGreaterThan(-1);
+    expect(hide).toBeGreaterThan(mini);
+    const phone = css.slice(at('@media(max-width:820px){'));
+    expect(phone).toContain('.thead .acts button.amorebtn{display:inline-flex');
+  });
+
+  /*
+   * В строке галочка «закрити чат» узнаётся по соседям и обходится без
+   * слова. В столбце из трёх строк безымянный квадрат не читается
+   * ничем, поэтому подпись есть в разметке всегда, а прячется стилем.
+   */
+  it('у галочки есть имя, которое видно только в списке', () => {
+    expect(css).toContain('.thead .acts .iq span{display:none}');
+    expect(css.slice(at('@media(max-width:820px){'))).toContain('.thead .amore .iq span{display:inline}');
+  });
+});
+
+describe('подбородок под полем ответа', () => {
+  /*
+   * Под карточкой поля набегало под семьдесят точек серого: отступ
+   * поля, безопасная зона под чертой жеста и скруглённый край — всё
+   * ниже последней кнопки. Поле стало полосой во всю ширину, а
+   * безопасная зона ушла внутрь, под нижний ряд.
+   */
+  it('поле ответа — полоса во всю ширину, зона внутри неё', () => {
+    const phone = css.slice(at('@media(max-width:820px){'));
+    expect(phone).toContain('.composer{padding:0}');
+    expect(phone).toContain('.composer .cbox{border-radius:0');
+    expect(phone).toContain('.composer .crow{padding:0 10px calc(6px + env(safe-area-inset-bottom))');
+  });
+
+  /*
+   * Полоса для ошибки отправки держала под кнопками десять точек
+   * пустоты всё время, пока ошибки нет, — то есть всегда.
+   */
+  it('пустая строка ошибки места не занимает', () => {
+    expect(css).toContain('#sendErr:empty{display:none}');
+  });
+});

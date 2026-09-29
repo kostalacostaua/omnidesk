@@ -373,6 +373,10 @@ export const INBOX_HTML = `<!DOCTYPE html>
     box-sizing:border-box;min-height:64px;max-height:180px;border:0;background:transparent;
     box-shadow:none;border-radius:0;padding:12px 16px;font-size:14px;line-height:1.5;resize:none}
   .crow{display:flex;align-items:center;gap:2px;padding:0 10px 10px}
+  /* Полоса для ошибки отправки держала под кнопками десять точек
+     пустоты всё время, пока ошибки нет, — то есть всегда. Появится
+     ошибка — полоса вернётся вместе с ней. */
+  #sendErr:empty{display:none}
   /* Значки в нижнем ряду — без рамок: рамка вокруг каждого делала из
      ряда пять одинаковых кнопок, среди которых не видно синей. */
   .crow .icob{width:34px;height:34px;border:0;background:transparent;color:var(--t2);
@@ -1063,9 +1067,28 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .chico.xs{width:14px;height:14px;border-radius:50%;flex:none}
   .chico.xs svg{width:8px;height:8px}
   .thead .acts{gap:8px;align-items:center}
+  /* На широком экране обёртки как будто нет: её дети становятся
+     такими же кнопками строки, что и остальные. Порядок задан
+     числами, а не разметкой, — в разметке они лежат группой, потому
+     что на телефоне уезжают под «…» одним куском. */
+  .thead .amore{display:contents}
+  .thead .acts #aWho{order:1}
+  .thead .acts #aSt{order:2}
+  .thead .acts #aBot{order:3}
+  .thead .acts #aClose{order:4}
+  .thead .acts #aTake{order:5}
+  /* Подпись у галочки написана в разметке, но в строке не видна: там
+     значок узнаётся по соседям, а слово заняло бы место синей кнопки.
+     Она понадобится в списке «Ще», где значок остался бы безымянным
+     квадратом. */
+  .thead .acts .iq span{display:none}
   .thead .acts button.mini,.thead .acts .asel{height:36px;border-radius:9px;
     font-size:13px;font-weight:500;padding:0 12px}
   .thead .acts button.mini{display:inline-flex;align-items:center;gap:8px}
+  /* Кнопка «…» носит и класс mini, поэтому прячется таким же тяжёлым
+     селектором и строкой ниже: правило полегче она перебивала, и «…»
+     висела на широком экране, где прятать нечего. */
+  .thead .acts button.amorebtn{display:none;order:6}
   .thead .acts button svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;
     stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
   /* Одна синяя кнопка на экран — «Взяти собі». Всё остальное в шапке
@@ -1662,6 +1685,25 @@ export const INBOX_HTML = `<!DOCTYPE html>
       overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
     .thead .acts::-webkit-scrollbar{display:none}
     .thead .acts button.mini,.thead .acts .asel{height:34px;font-size:12.5px}
+    /* Пять действий в строку на 390 точках не встают, и «Взяти собі»
+       уезжала за край. Снаружи остались два: взять диалог себе и
+       поставить статус. Остальное — ответственный, бот, закрытие —
+       под «…» списком, где у каждого есть подпись и ширина. */
+    .thead{position:relative}
+    .thead .amore{display:none;position:absolute;right:10px;top:100%;z-index:60;
+      flex-direction:column;align-items:stretch;gap:6px;
+      min-width:min(232px,calc(100vw - 32px));padding:8px;
+      background:var(--solid);border:1px solid var(--line);border-radius:12px;
+      box-shadow:var(--lift2)}
+    .thead.more-on .amore{display:flex}
+    .thead .amore .asel,.thead .amore button.mini{width:100%;min-width:0;height:38px}
+    .thead .amore button.mini{justify-content:flex-start}
+    /* В списке у галочки появляется имя: значок узнаётся среди
+       соседей по строке, а в столбце из трёх строк безымянный
+       квадрат не читается ничем. */
+    .thead .amore .iq{width:100%;gap:8px}
+    .thead .amore .iq span{display:inline}
+    .thead .acts button.amorebtn{display:inline-flex;flex:none}
     /* Списки в этой строке ужимались до одной стрелки, и «відповідальний»
        с «статусом» становились двумя одинаковыми уголками. Раз строка
        всё равно прокручивается, пусть лучше она будет длиннее. */
@@ -1674,7 +1716,20 @@ export const INBOX_HTML = `<!DOCTYPE html>
        чертой прямо в тексте, а кнопка «Шаблони» в нижнем ряду
        открывает весь список. Предложение ШІ осталось — это не
        ярлык, а работа, которую иначе руками не сделать. */
-    .composer{padding:8px 10px calc(6px + env(safe-area-inset-bottom))}
+    /* ── Подбородок ──────────────────────────────────────────────
+       Под карточкой поля оставалась пустая полоса: сначала отступ
+       самого поля, потом безопасная зона под чертой жеста, потом
+       скруглённый край карточки — и всё это ниже последней кнопки.
+       На домашнем экране набегало под семьдесят точек серого ни для
+       чего.
+
+       Поле стало полосой во всю ширину, как в любом мессенджере:
+       отступов вокруг нет, нижние углы не скруглены, а безопасная
+       зона ушла внутрь — под нижний ряд кнопок. Черта жеста лежит
+       теперь на самой полосе, а не на пустоте под ней. */
+    .composer{padding:0}
+    .composer .cbox{border-radius:0;border-left:0;border-right:0;border-bottom:0;
+      box-shadow:none}
     .composer .cchips .cchip:not(.ai){display:none}
     .composer .row{flex-wrap:wrap;gap:6px}
     .composer .row textarea{order:-1;flex:1 1 100%;width:100%}
@@ -1693,13 +1748,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
     /* Подбородок: между нижним рядом кнопок и краем экрана лежало
        двадцать шесть точек пустоты, и поле выглядело приподнятым
        над краем без причины. */
-    .composer .cchips{padding:8px 10px 0}
+    .composer .cchips{padding:8px 12px 0}
     /* Нижний ряд не переносится и не обрезается. «Надіслати» уезжала
        за правый край: пять кнопок и подпись «Нотатка для команди» в
        390 точек не встают. Подпись у заметки на телефоне прячется —
        перо рядом с четырьмя такими же значками узнаётся, а место она
        занимала больше, чем главная кнопка. */
-    .composer .crow{padding:0 8px 6px;flex-wrap:nowrap;gap:0}
+    .composer .crow{padding:0 10px calc(6px + env(safe-area-inset-bottom));
+      flex-wrap:nowrap;gap:0}
     .composer .cnote{padding:0 8px}
     .composer .cnote span{display:none}
     .composer .cnote.on span{display:inline}
@@ -2495,11 +2551,19 @@ function renderHead(){
       '</div></div>' +
     '</div>' +
     '<div class="acts">' +
+      /* На телефоне в строку помещается два действия, а их пять. В эту
+         обёртку убрано то, к чему тянутся реже; на широком экране она
+         прозрачна, и порядок там задан числами в стилях — шапка
+         осталась ровно прежней.
+
+         Снаружи остаются «Взяти собі» и статус: первое — самое частое
+         действие смены, второе — то, что меняют сразу после него.
+         Спрячь статус за вторым касанием, и его перестанут ставить
+         вовсе. */
+      '<div class="amore" id="aMore">' +
       /* Передача конкретному человеку. Списком, а не поиском: операторов
          в смене единицы, и выпадающий список честнее показывает, что
-         выбор невелик. «Взяти собі» рядом остаётся: это самое частое
-         действие, и прятать его в список из десяти имён — значит делать
-         из одного щелчка три. */
+         выбор невелик. */
       '<select class="asel" id="aWho" title="' + L('Відповідальний') + '">' +
         L('<option value="">Без відповідального</option>') +
         MATES.map(function(u){
@@ -2507,19 +2571,6 @@ function renderHead(){
             '>' + esc(u.name) + '</option>';
         }).join('') +
       '</select>' +
-      /* Свой статус. Списком рядом с ответственным, а не в меню: это
-         то, что оператор меняет чаще всего остального в шапке, и прятать
-         его за вторым щелчком значит, что статусы не будут ставить.
-         Когда статусов не завели — списка нет вовсе. */
-      (STATUSES.length
-        ? '<select class="asel" id="aSt" title="' + L('Статус діалогу') + '">' +
-            L('<option value="">Без статусу</option>') +
-            STATUSES.map(function(t){
-              return '<option value="' + esc(t.id) + '"' +
-                (c.status_id === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-            }).join('') +
-          '</select>'
-        : '') +
       /* Под постом бот молчит всегда: автоответ на глазах у всей ленты —
          не та неожиданность, которую включают переключателем. Кнопки нет
          вовсе: выключатель, который ничего не выключает, хуже её отсутствия. */
@@ -2535,9 +2586,36 @@ function renderHead(){
       (closed
         ? L('<button class="ghost mini" id="aClose">Відкрити заново</button>')
         : '<button class="ghost mini iq" id="aClose" title="' + L('Закрити чат') +
-          '" aria-label="' + L('Закрити чат') + '">' + icon('check') + '</button>') +
+          '" aria-label="' + L('Закрити чат') + '">' + icon('check') +
+          L('<span>Закрити чат</span>') + '</button>') +
+      '</div>' +
+      /* Свой статус. Списком, а не в меню: это то, что оператор меняет
+         чаще всего остального в шапке, и прятать его за вторым щелчком
+         значит, что статусы не будут ставить. Когда статусов не
+         завели — списка нет вовсе. */
+      (STATUSES.length
+        ? '<select class="asel" id="aSt" title="' + L('Статус діалогу') + '">' +
+            L('<option value="">Без статусу</option>') +
+            STATUSES.map(function(t){
+              return '<option value="' + esc(t.id) + '"' +
+                (c.status_id === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+            }).join('') +
+          '</select>'
+        : '') +
       (mine ? '' : L('<button class="mini take" id="aTake">Взяти собі</button>')) +
+      '<button class="ghost mini iq amorebtn" id="aMoreBtn" title="' + L('Ще') +
+        '" aria-label="' + L('Ще') + '">' + icon('dots') + '</button>' +
     '</div>';
+
+  /* «…» открывает список и закрывает его же. Закрывается он и сам:
+     касанием мимо и клавишей Escape — как любое окошко поверх
+     страницы. Слушатель на документе один и живёт всё время: шапка
+     перерисовывается при каждом обновлении, и слушатель, повешенный
+     здесь, копился бы с каждой перерисовкой. */
+  if (el('aMoreBtn')) el('aMoreBtn').onclick = function(e){
+    e.stopPropagation();
+    el('thead').classList.toggle('more-on');
+  };
 
   if (el('aTake')) el('aTake').onclick = function(){
     if (ME && ME.user) patchConv({ assigneeId: ME.user.id });
@@ -3395,6 +3473,7 @@ el('msgs').addEventListener('click', function(e){
   if (!t || !t.closest) return;
   // Нажали кнопку, ссылку или вложение — это их дело, а не наше.
   if (t.closest('.mtools, a, button, .att')) return;
+  moreClose();
   var wrap = t.closest('.mwrap');
   var was = wrap && wrap.classList.contains('act');
   Array.prototype.forEach.call(el('msgs').querySelectorAll('.mwrap.act'), function(w){
@@ -10494,6 +10573,11 @@ var ICONS = {
   filter:'<path d="M3 6h18M6 12h12M10 18h4"/>',
   // Три ровные черты — не то же, что «фильтр»: у того они сходятся.
   menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+  /* Три точки в ряд: «здесь есть ещё», общее место любого интерфейса.
+     Точки нарисованы отрезками нулевой длины с круглым концом, а не
+     кружками: значки в кабинете рисуются обводкой без заливки, и
+     кружок вышел бы тремя колечками. */
+  dots:'<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -12565,7 +12649,20 @@ function railToggle(){ el('app').classList.toggle('rail-open') }
 
 el('burgList').onclick = railToggle;
 el('railVeil').onclick = railClose;
-document.addEventListener('keydown', function(e){ if (e.key === 'Escape') railClose() });
+
+/* Список «Ще» в шапке переписки. Закрытие живёт здесь, а не рядом с
+   самой шапкой: шапка перерисовывается при каждом обновлении, а
+   слушатель документа должен остаться один на всё время. */
+function moreClose(){ var h = el('thead'); if (h) h.classList.remove('more-on') }
+document.addEventListener('click', function(e){
+  if (e.target && e.target.closest && e.target.closest('#thead')) return;
+  moreClose();
+});
+document.addEventListener('keydown', function(e){
+  if (e.key !== 'Escape') return;
+  railClose();
+  moreClose();
+});
 el('supBtn').onclick = supToggle;
 
 /* Переключатель страниц настроек. Слушаем раздел целиком, а не кнопки:
