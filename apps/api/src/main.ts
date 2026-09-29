@@ -77,7 +77,7 @@ import { crmPhoneReader, registerCrm } from './crm.js';
 import { registerBitrix, registerBitrixOrders } from './bitrix.js';
 import { denial, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
-import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG } from './brand.js';
+import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG, OG_IMAGE } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -1062,8 +1062,20 @@ registerLanding(app, {
  * Список доменов промо задаётся переменной, а не зашит в код: на
  * проверочных стендах домены другие, и менять из-за этого код нельзя.
  */
+/**
+ * Адрес витрины — тот, что стоит в canonical и в карте сайта.
+ *
+ * Берётся из первого домена списка: страница отдаётся с нескольких
+ * (rozmovio.com и www.rozmovio.com — уже два), а канонический адрес у
+ * неё обязан быть один, иначе поисковик считает их разными страницами
+ * с одинаковым содержимым и сам выбирает, какую показывать.
+ */
+const SITE_ORIGIN =
+  'https://' + (SITE_HOSTS.find((h) => h.startsWith('www.')) ?? SITE_HOSTS[0] ?? 'www.rozmovio.com');
+
 /** Та же страница, что по /promo: собирается один раз вместе с виджетом. */
-const SITE_PAGE = landingPage(process.env['WEBCHAT_SITE_KEY'] ?? '');
+const SITE_PAGE = landingPage(process.env['WEBCHAT_SITE_KEY'] ?? '', 'uk', SITE_ORIGIN);
+const SITE_PAGE_EN = landingPage(process.env['WEBCHAT_SITE_KEY'] ?? '', 'en', SITE_ORIGIN);
 
 
 function isSiteHost(req: { headers: Record<string, unknown> }): boolean {
@@ -1081,6 +1093,61 @@ app.get('/', async (req, reply) => {
   return sendUi(req, reply);
 });
 app.get('/app', sendUi);
+
+/**
+ * Английская страница живёт по своему адресу.
+ *
+ * Раньше оба языка делили один адрес и переключались скриптом: в
+ * индекс попадал один из них — какой успел отрисоваться, — а второго
+ * в поиске не существовало. Теперь у каждого свой адрес, canonical и
+ * пара hreflang, и они ссылаются друг на друга.
+ */
+app.get('/en', async (req, reply) => {
+  if (!isSiteHost(req as never)) return sendUi(req, reply);
+  return reply
+    .type('text/html; charset=utf-8')
+    .header('cache-control', 'public, max-age=300')
+    .send(SITE_PAGE_EN);
+});
+
+/**
+ * robots.txt и карта сайта.
+ *
+ * На витрине — открыто и со ссылкой на карту. На домене кабинета —
+ * закрыто целиком: там за формой входа нет ни одной страницы, которую
+ * имело бы смысл показать в поиске, а вот попасть туда роботом и
+ * намолотить запросов к базе — вполне.
+ */
+app.get('/robots.txt', async (req, reply) => {
+  const site = isSiteHost(req as never);
+  const body = site
+    ? ['User-agent: *', 'Allow: /', 'Disallow: /app', '', `Sitemap: ${SITE_ORIGIN}/sitemap.xml`, ''].join('\n')
+    : ['User-agent: *', 'Disallow: /', ''].join('\n');
+  return reply
+    .type('text/plain; charset=utf-8')
+    .header('cache-control', 'public, max-age=3600')
+    .send(body);
+});
+
+app.get('/sitemap.xml', async (req, reply) => {
+  if (!isSiteHost(req as never)) return reply.code(404).send({ error: 'not_found' });
+  const page = (loc: string, uk: string, en: string) =>
+    `  <url>\n    <loc>${loc}</loc>\n` +
+    `    <xhtml:link rel="alternate" hreflang="uk" href="${uk}"/>\n` +
+    `    <xhtml:link rel="alternate" hreflang="en" href="${en}"/>\n` +
+    `    <changefreq>weekly</changefreq>\n  </url>`;
+  const uk = `${SITE_ORIGIN}/`;
+  const en = `${SITE_ORIGIN}/en`;
+  const body =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" ' +
+    'xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' +
+    page(uk, uk, en) + '\n' + page(en, uk, en) + '\n</urlset>\n';
+  return reply
+    .type('application/xml; charset=utf-8')
+    .header('cache-control', 'public, max-age=3600')
+    .send(body);
+});
 
 // Браузер всегда просит favicon. Без этой строки в консоли висит 404,
 // который потом маскирует настоящие ошибки при отладке.
@@ -1108,6 +1175,10 @@ app.get('/icon-192.png', async (_req, reply) => png(reply, APP_ICON_192));
 app.get('/icon-512.png', async (_req, reply) => png(reply, APP_ICON_512));
 app.get('/apple-touch-icon.png', async (_req, reply) => png(reply, APP_ICON_180));
 app.get('/apple-touch-icon-precomposed.png', async (_req, reply) => png(reply, APP_ICON_180));
+
+// Картинка для карточки ссылки: её тянут мессенджеры и соцсети по
+// og:image, а не браузер, поэтому размер и адрес постоянны.
+app.get('/og.png', async (_req, reply) => png(reply, OG_IMAGE));
 
 app.get('/manifest.webmanifest', async (_req, reply) =>
   reply

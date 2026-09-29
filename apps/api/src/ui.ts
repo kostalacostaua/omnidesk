@@ -36,6 +36,11 @@ export const INBOX_HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="omnidesk-build" content="${UI_BUILD}">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Кабинет из поиска закрыт. За формой входа нет ни одной страницы,
+     которую имело бы смысл показать в выдаче, а домен app.rozmovio.com
+     в результатах рядом с витриной только путает: человек попадает на
+     вход вместо рассказа о продукте. -->
+<meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#0E1530">
 <!-- Значок и режим приложения на телефоне. На iOS раздел «Поделиться →
      На экран Домой» после этого открывает инбокс без адресной строки. -->

@@ -71,6 +71,155 @@ function chCard(icon: string, key: string, state: ChState = 'ready'): string {
   </div>`;
 }
 
+/**
+ * Словарь страницы.
+ *
+ * Лежит здесь, а не внутри её скрипта, по одной причине: страница
+ * теперь собирается с текстом на сервере. Поисковику и — что важнее —
+ * читалкам ИИ мы отдаём готовый HTML, а не пустые узлы, которые
+ * наполнит JavaScript: они его в большинстве своём не выполняют, и до
+ * сих пор видели страницу из полутора сотен символов.
+ *
+ * Оба языка рядом, ключ к ключу: так сразу видно пропущенный перевод,
+ * и правка формулировки делается в одном месте, а не в двух файлах.
+ */
+export const LAND_T: Record<string, Record<string, string>> = {
+  uk: {
+    'nav.channels':'Канали','nav.how':'Як працює','nav.zoho':'CRM','nav.price':'Ціна',
+    'nav.signin':'Увійти','nav.try':'Спробувати',
+    'hero.badge':'Спільна скринька: у браузері та у вашій CRM',
+    'hero.h1a':'Усі переписки з клієнтами —','hero.h1b':'в одному вікні',
+    'hero.lead':'Telegram, Instagram Direct, Messenger, WhatsApp і чат на сайті приходять в одну скриньку. Вона працює у браузері сама по собі, а за потреби вбудовується у Zoho CRM, Pipedrive чи Бітрікс24 — і тоді листування стоїть поруч з карткою клієнта.',
+    'hero.mail':'Ваша робоча пошта','hero.go':'Спробувати 14 днів',
+    'hero.note':'Без картки. Перший канал підключається за 10 хвилин.',
+    'strip.tg':'Telegram-бот','strip.ph':'Telegram за номером',
+    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Чат на сайті',
+    'shot.m1':'Добрий день! Ще є в наявності?','shot.m2':'Так, є. Відкладу на вас до вечора',
+    'shot.m3':'Дякую, буду за годину',
+    'ch.h':'Канали, які вже працюють','ch.lead':'Кожен канал підключається у налаштуваннях: чат на сайті — рядком коду, бот — токеном, номер — входом по QR, Instagram і Messenger — входом через Facebook.',
+    'ch.wc.t':'Чат на сайті','ch.wc.s':'Один рядок коду — і кнопка чату на ваших сторінках. Переписка одразу в скриньці.',
+    'ch.tgbot.t':'Telegram-бот','ch.tgbot.s':'Клієнти пишуть боту компанії. Фото, файли, голосові, реакції.',
+    'ch.tgph.t':'Telegram за номером','ch.tgph.s':'Ваш особистий номер як канал: вхід по QR, переписки приходять у скриньку.',
+    'ch.ig.t':'Instagram Direct','ch.ig.s':'Повідомлення бізнес-акаунту, відповіді з імені акаунта, історії та реакції.',
+    'ch.ms.t':'Facebook Messenger','ch.ms.s':'Повідомлення сторінці. Відповідь оператора доходить і через добу.',
+    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Номер компанії через Cloud API. Поза вікном 24 годин — погоджені шаблони.',
+    'ch.vb.t':'Viber для бізнесу','ch.vb.s':'Клієнти пишуть на назву компанії. Підключення через офіційного партнера.',
+    'ch.vbn.t':'Viber номерний','ch.vbn.s':'У роботі.',
+    'ready':'працює','soon':'скоро','beta':'закритий тест',
+    'ch.beta':'Instagram, Messenger і WhatsApp Business зараз у закритому тесті: застосунок проходить перевірку Meta, і до її завершення підключити ці канали можуть лише запрошені акаунти. Напишіть нам — додамо вас у тестувальники. Решта каналів працює без обмежень.',
+    'how.h':'Три кроки до першого повідомлення','how.lead':'Нічого встановлювати не треба: сервіс працює у браузері та всередині Zoho CRM.',
+    'how.s1t':'Реєстрація','how.s1p':'Вводите робочу пошту й код із листа. Пароль вигадувати не потрібно.',
+    'how.s2t':'Підключення каналів','how.s2p':'Токен бота, вхід по QR для номера, вхід через Facebook для Instagram і Messenger.',
+    'how.s3t':'Робота у CRM','how.s3p':'Віджет стає у картку клієнта Zoho. Команда відповідає звідти, історія зберігається.',
+    'ft.h':'Що всередині',
+    'ft.f1t':'Одна скринька на команду','ft.f1p':'Діалоги, відповідальні, відкриті й закриті, непрочитане, пошук за іменем і номером.',
+    'ft.f2t':'Шаблони відповідей','ft.f2p':'Швидкі відповіді з підстановкою імені — без переписування одного й того ж двадцять разів на день.',
+    'ft.f3t':'Сценарії та автовідповіді','ft.f3p':'Привітання, відповідь поза графіком, передача оператору. Налаштовується для кожного каналу.',
+    'ft.f4t':'Вкладення','ft.f4p':'Фото, документи, голосові й відео в обидва боки. Файли зберігаються разом з діалогом.',
+    'ft.f5t':'Дані у Європі','ft.f5p':'Токени каналів зашифровані окремим ключем на кожного клієнта. Дані компаній розділені на рівні бази.',
+    'ft.f6t':'Темна тема й дві мови','ft.f6p':'Українська й англійська, світла й темна — переключається у будь-який момент.',
+    'zh.badge':'Вбудовується у CRM',
+    'zh.h':'Переписка поруч з карткою клієнта','zh.lead':'Rozmovio стає віджетом усередині CRM — Zoho, Pipedrive або Бітрікс24. Менеджер бачить листування там, де й так працює: у картці угоди чи контакту.',
+    'zh.l1':'Вхідне повідомлення знаходить контакт за номером або створює новий лід.',
+    'zh.l2':'Відповідь з віджета йде у той самий канал, з якого написав клієнт.',
+    'zh.l3':'Історія листування залишається у картці, навіть якщо менеджер змінився.',
+    'zh.l4':'У Zoho вхід у віджет — за користувачем CRM: окремих паролів немає.',
+    'zh.crm':'Zoho CRM · Контакт','zh.f1':'Ім’я','zh.f2':'Телефон','zh.f3':'Джерело','zh.f3v':'Instagram Direct',
+    'zh.m1':'Доброго дня, чи є доставка?','zh.m2':'Так, відправляємо Новою поштою',
+    'pr.h':'Ціна','pr.lead':'Два тарифи. Ціна не залежить ані від кількості каналів, ані від кількості повідомлень.',
+    'pr.plan':'Компанія','pr.per':'за місяць при оплаті за рік',
+    'pr.alt':'або 60 $ на місяць при щомісячній оплаті — за рік виходить на два місяці дешевше',
+    'pr.i1':'Усі доступні канали','pr.i2':'10 операторів у команді, далі 5 $ за місце',
+    'pr.i3':'Віджет у Zoho CRM і замовлення просто з переписки',
+    'pr.i4':'Штучний інтелект, шаблони, сценарії','pr.i5':'Підтримка українською',
+    'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата карткою або рахунком. Скасувати можна будь-коли — доступ триває до кінця оплаченого періоду.',
+    'pr.pick':'Більшості підходить',
+    'pr.eplan':'Корпоративний','pr.eamt':'Ціна за домовленістю','pr.eper':'за кожного користувача, від 15 місць',
+    'pr.ealt':'без базової плати: скільки людей у команді — стільки й місць',
+    'pr.e1':'Усе з тарифу «Компанія»','pr.e2':'Ціна за місце окремо для вашої команди',
+    'pr.e3':'Оплата рахунком, договір і закривні документи',
+    'pr.e4':'Від 15 місць — менша команда бере тариф «Компанія»',
+    'pr.ego':'Написати нам','pr.enote':'Розкажіть, скільки людей і які канали — порахуємо й надішлемо рахунок.',
+    'pr.eseed':'Корпоративний тариф. Людей у команді: ',
+    'tr.h':'Заявка на тестування','tr.lead':'Залиште пошту — надішлю доступ і допоможу підключити перший канал.',
+    'tr.name':'Ім’я','tr.company':'Компанія','tr.mail':'Робоча пошта','tr.phone':'Телефон або Telegram',
+    'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
+    'tr.go':'Надіслати заявку','tr.small':'Напишу протягом робочого дня. Пошту не передаю нікому.',
+    'tr.okh':'Заявку отримано','tr.okp':'Дякую! Напишу вам на вказану пошту протягом робочого дня.',
+    'f.privacy':'Конфіденційність','f.terms':'Умови','f.refunds':'Повернення коштів','f.deletion':'Видалення даних','f.legal':'KL Systems, ФОП Сластін Костянтин Віталійович · Україна',
+    'e.mail':'Вкажіть коректну пошту','e.net':'Не вдалося надіслати. Спробуйте ще раз або напишіть на support@rozmovio.com',
+    'e.rate':'Заявку з цієї пошти вже отримано. Я відповім найближчим часом.',
+    'th.auto':'Тема як у системі','th.light':'Світла тема','th.dark':'Темна тема'
+  },
+  en: {
+    'nav.channels':'Channels','nav.how':'How it works','nav.zoho':'CRM','nav.price':'Pricing',
+    'nav.signin':'Sign in','nav.try':'Try it',
+    'hero.badge':'Shared inbox: in your browser and in your CRM',
+    'hero.h1a':'Every customer conversation —','hero.h1b':'in one window',
+    'hero.lead':'Telegram, Instagram Direct, Messenger, WhatsApp and the chat on your website arrive in a single inbox. It works in the browser on its own, and embeds into Zoho CRM, Pipedrive or Bitrix24 when you want the thread next to the customer record.',
+    'hero.mail':'Your work email','hero.go':'Start 14-day trial',
+    'hero.note':'No card required. First channel connects in 10 minutes.',
+    'strip.tg':'Telegram bot','strip.ph':'Telegram by number',
+    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Website chat',
+    'shot.m1':'Hi! Is it still in stock?','shot.m2':'Yes, it is. I will hold it for you till tonight',
+    'shot.m3':'Thanks, I will be there in an hour',
+    'ch.h':'Channels that already work','ch.lead':'Each channel is connected in settings: website chat by a line of code, a bot by token, a phone number by QR sign-in, Instagram and Messenger by Facebook login.',
+    'ch.wc.t':'Website chat','ch.wc.s':'One line of code puts a chat button on your pages. Messages land in the same inbox.',
+    'ch.tgbot.t':'Telegram bot','ch.tgbot.s':'Customers write to your company bot. Photos, files, voice notes, reactions.',
+    'ch.tgph.t':'Telegram by number','ch.tgph.s':'Your personal number as a channel: QR sign-in, chats land in the inbox.',
+    'ch.ig.t':'Instagram Direct','ch.ig.s':'Messages to the business account, replies as the account, story replies and reactions.',
+    'ch.ms.t':'Facebook Messenger','ch.ms.s':'Messages to the Page. An agent reply is delivered even after 24 hours.',
+    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Your company number via Cloud API. Outside the 24-hour window — approved templates.',
+    'ch.vb.t':'Viber for Business','ch.vb.s':'Customers write to your company name. Connected through an official partner.',
+    'ch.vbn.t':'Viber by number','ch.vbn.s':'In progress.',
+    'ready':'live','soon':'soon','beta':'closed beta',
+    'ch.beta':'Instagram, Messenger and WhatsApp Business are in closed beta: the app is under review by Meta, and until that is done only invited accounts can connect these channels. Write to us and we will add you as a tester. Every other channel works without limits.',
+    'how.h':'Three steps to the first message','how.lead':'Nothing to install: it runs in the browser and inside Zoho CRM.',
+    'how.s1t':'Sign up','how.s1p':'Enter your work email and the code from the letter. No password to invent.',
+    'how.s2t':'Connect channels','how.s2p':'Bot token, QR sign-in for a phone number, Facebook login for Instagram and Messenger.',
+    'how.s3t':'Work inside the CRM','how.s3p':'The widget appears on the Zoho record. Your team replies from there and the history stays.',
+    'ft.h':'What is inside',
+    'ft.f1t':'One inbox for the team','ft.f1p':'Conversations, assignees, open and closed, unread counts, search by name and number.',
+    'ft.f2t':'Reply templates','ft.f2p':'Quick replies with the name filled in — instead of retyping the same answer twenty times a day.',
+    'ft.f3t':'Scenarios and auto-replies','ft.f3p':'Greeting, out-of-hours reply, hand-off to an agent. Configured per channel.',
+    'ft.f4t':'Attachments','ft.f4p':'Photos, documents, voice notes and video both ways. Files are kept with the conversation.',
+    'ft.f5t':'Data in the EU','ft.f5p':'Channel tokens are encrypted with a separate key per customer. Companies are separated at the database level.',
+    'ft.f6t':'Dark theme, two languages','ft.f6p':'Ukrainian and English, light and dark — switched at any moment.',
+    'zh.badge':'Embedded in the CRM',
+    'zh.h':'The thread next to the customer record','zh.lead':'Rozmovio becomes a widget inside your CRM — Zoho, Pipedrive or Bitrix24. The manager sees the conversation where they already work: on the deal or contact record.',
+    'zh.l1':'An incoming message finds the contact by phone number or creates a new lead.',
+    'zh.l2':'A reply from the widget goes back to the channel the customer wrote from.',
+    'zh.l3':'The history stays on the record even when the manager changes.',
+    'zh.l4':'In Zoho, access follows the CRM user: no separate passwords.',
+    'zh.crm':'Zoho CRM · Contact','zh.f1':'Name','zh.f2':'Phone','zh.f3':'Source','zh.f3v':'Instagram Direct',
+    'zh.m1':'Hello, do you deliver?','zh.m2':'Yes, we ship the same day',
+    'pr.h':'Pricing','pr.lead':'Two plans. The price depends on neither the number of channels nor the number of messages.',
+    'pr.plan':'Company','pr.per':'per month, billed yearly',
+    'pr.alt':'or 60 $ per month billed monthly — a year costs two months less',
+    'pr.i1':'All available channels','pr.i2':'10 agents included, 5 $ per extra seat',
+    'pr.i3':'Widget in Zoho CRM and orders straight from the chat',
+    'pr.i4':'AI replies, templates, scenarios','pr.i5':'Support in English and Ukrainian',
+    'pr.go':'Start 14 days free','pr.note':'Pay by card or by invoice. Cancel at any time — access lasts until the end of the period already paid for.',
+    'pr.pick':'Right for most',
+    'pr.eplan':'Enterprise','pr.eamt':'Price on request','pr.eper':'per user, from 15 seats',
+    'pr.ealt':'no base fee: as many seats as people on the team',
+    'pr.e1':'Everything in the Company plan','pr.e2':'A seat price set for your team',
+    'pr.e3':'Payment by invoice, a contract and closing documents',
+    'pr.e4':'From 15 seats — a smaller team takes the Company plan',
+    'pr.ego':'Write to us','pr.enote':'Tell us how many people and which channels — we will do the maths and send an invoice.',
+    'pr.eseed':'Enterprise plan. People on the team: ',
+    'tr.h':'Request a trial','tr.lead':'Leave your email — I will send access and help connect the first channel.',
+    'tr.name':'Name','tr.company':'Company','tr.mail':'Work email','tr.phone':'Phone or Telegram',
+    'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',
+    'tr.go':'Send request','tr.small':'I reply within a business day. Your email goes nowhere else.',
+    'tr.okh':'Request received','tr.okp':'Thank you! I will write to the email you left within a business day.',
+    'f.privacy':'Privacy','f.terms':'Terms','f.refunds':'Refunds','f.deletion':'Data deletion','f.legal':'KL Systems, FOP Kostiantyn Slastin · Ukraine',
+    'e.mail':'Enter a valid email','e.net':'Could not send. Try again or write to support@rozmovio.com',
+    'e.rate':'A request from this email is already in. I will get back to you shortly.',
+    'th.auto':'System theme','th.light':'Light theme','th.dark':'Dark theme'
+  }
+};
+
 export const LANDING_HTML = `<!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -624,145 +773,15 @@ export const LANDING_HTML = `<!DOCTYPE html>
 /* ── Тексты ───────────────────────────────────────────────────────
    Оба языка рядом, ключ к ключу: так сразу видно пропущенный перевод,
    и правка формулировки делается в одном месте, а не в двух файлах. */
-var T = {
-  uk: {
-    'nav.channels':'Канали','nav.how':'Як працює','nav.zoho':'CRM','nav.price':'Ціна',
-    'nav.signin':'Увійти','nav.try':'Спробувати',
-    'hero.badge':'Спільна скринька: у браузері та у вашій CRM',
-    'hero.h1a':'Усі переписки з клієнтами —','hero.h1b':'в одному вікні',
-    'hero.lead':'Telegram, Instagram Direct, Messenger, WhatsApp і чат на сайті приходять в одну скриньку. Вона працює у браузері сама по собі, а за потреби вбудовується у Zoho CRM, Pipedrive чи Бітрікс24 — і тоді листування стоїть поруч з карткою клієнта.',
-    'hero.mail':'Ваша робоча пошта','hero.go':'Спробувати 14 днів',
-    'hero.note':'Без картки. Перший канал підключається за 10 хвилин.',
-    'strip.tg':'Telegram-бот','strip.ph':'Telegram за номером',
-    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Чат на сайті',
-    'shot.m1':'Добрий день! Ще є в наявності?','shot.m2':'Так, є. Відкладу на вас до вечора',
-    'shot.m3':'Дякую, буду за годину',
-    'ch.h':'Канали, які вже працюють','ch.lead':'Кожен канал підключається у налаштуваннях: чат на сайті — рядком коду, бот — токеном, номер — входом по QR, Instagram і Messenger — входом через Facebook.',
-    'ch.wc.t':'Чат на сайті','ch.wc.s':'Один рядок коду — і кнопка чату на ваших сторінках. Переписка одразу в скриньці.',
-    'ch.tgbot.t':'Telegram-бот','ch.tgbot.s':'Клієнти пишуть боту компанії. Фото, файли, голосові, реакції.',
-    'ch.tgph.t':'Telegram за номером','ch.tgph.s':'Ваш особистий номер як канал: вхід по QR, переписки приходять у скриньку.',
-    'ch.ig.t':'Instagram Direct','ch.ig.s':'Повідомлення бізнес-акаунту, відповіді з імені акаунта, історії та реакції.',
-    'ch.ms.t':'Facebook Messenger','ch.ms.s':'Повідомлення сторінці. Відповідь оператора доходить і через добу.',
-    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Номер компанії через Cloud API. Поза вікном 24 годин — погоджені шаблони.',
-    'ch.vb.t':'Viber для бізнесу','ch.vb.s':'Клієнти пишуть на назву компанії. Підключення через офіційного партнера.',
-    'ch.vbn.t':'Viber номерний','ch.vbn.s':'У роботі.',
-    'ready':'працює','soon':'скоро','beta':'закритий тест',
-    'ch.beta':'Instagram, Messenger і WhatsApp Business зараз у закритому тесті: застосунок проходить перевірку Meta, і до її завершення підключити ці канали можуть лише запрошені акаунти. Напишіть нам — додамо вас у тестувальники. Решта каналів працює без обмежень.',
-    'how.h':'Три кроки до першого повідомлення','how.lead':'Нічого встановлювати не треба: сервіс працює у браузері та всередині Zoho CRM.',
-    'how.s1t':'Реєстрація','how.s1p':'Вводите робочу пошту й код із листа. Пароль вигадувати не потрібно.',
-    'how.s2t':'Підключення каналів','how.s2p':'Токен бота, вхід по QR для номера, вхід через Facebook для Instagram і Messenger.',
-    'how.s3t':'Робота у CRM','how.s3p':'Віджет стає у картку клієнта Zoho. Команда відповідає звідти, історія зберігається.',
-    'ft.h':'Що всередині',
-    'ft.f1t':'Одна скринька на команду','ft.f1p':'Діалоги, відповідальні, відкриті й закриті, непрочитане, пошук за іменем і номером.',
-    'ft.f2t':'Шаблони відповідей','ft.f2p':'Швидкі відповіді з підстановкою імені — без переписування одного й того ж двадцять разів на день.',
-    'ft.f3t':'Сценарії та автовідповіді','ft.f3p':'Привітання, відповідь поза графіком, передача оператору. Налаштовується для кожного каналу.',
-    'ft.f4t':'Вкладення','ft.f4p':'Фото, документи, голосові й відео в обидва боки. Файли зберігаються разом з діалогом.',
-    'ft.f5t':'Дані у Європі','ft.f5p':'Токени каналів зашифровані окремим ключем на кожного клієнта. Дані компаній розділені на рівні бази.',
-    'ft.f6t':'Темна тема й дві мови','ft.f6p':'Українська й англійська, світла й темна — переключається у будь-який момент.',
-    'zh.badge':'Вбудовується у CRM',
-    'zh.h':'Переписка поруч з карткою клієнта','zh.lead':'Rozmovio стає віджетом усередині CRM — Zoho, Pipedrive або Бітрікс24. Менеджер бачить листування там, де й так працює: у картці угоди чи контакту.',
-    'zh.l1':'Вхідне повідомлення знаходить контакт за номером або створює новий лід.',
-    'zh.l2':'Відповідь з віджета йде у той самий канал, з якого написав клієнт.',
-    'zh.l3':'Історія листування залишається у картці, навіть якщо менеджер змінився.',
-    'zh.l4':'У Zoho вхід у віджет — за користувачем CRM: окремих паролів немає.',
-    'zh.crm':'Zoho CRM · Контакт','zh.f1':'Ім’я','zh.f2':'Телефон','zh.f3':'Джерело','zh.f3v':'Instagram Direct',
-    'zh.m1':'Доброго дня, чи є доставка?','zh.m2':'Так, відправляємо Новою поштою',
-    'pr.h':'Ціна','pr.lead':'Два тарифи. Ціна не залежить ані від кількості каналів, ані від кількості повідомлень.',
-    'pr.plan':'Компанія','pr.per':'за місяць при оплаті за рік',
-    'pr.alt':'або 60 $ на місяць при щомісячній оплаті — за рік виходить на два місяці дешевше',
-    'pr.i1':'Усі доступні канали','pr.i2':'10 операторів у команді, далі 5 $ за місце',
-    'pr.i3':'Віджет у Zoho CRM і замовлення просто з переписки',
-    'pr.i4':'Штучний інтелект, шаблони, сценарії','pr.i5':'Підтримка українською',
-    'pr.go':'Почати 14 днів безкоштовно','pr.note':'Оплата карткою або рахунком. Скасувати можна будь-коли — доступ триває до кінця оплаченого періоду.',
-    'pr.pick':'Більшості підходить',
-    'pr.eplan':'Корпоративний','pr.eamt':'Ціна за домовленістю','pr.eper':'за кожного користувача, від 15 місць',
-    'pr.ealt':'без базової плати: скільки людей у команді — стільки й місць',
-    'pr.e1':'Усе з тарифу «Компанія»','pr.e2':'Ціна за місце окремо для вашої команди',
-    'pr.e3':'Оплата рахунком, договір і закривні документи',
-    'pr.e4':'Від 15 місць — менша команда бере тариф «Компанія»',
-    'pr.ego':'Написати нам','pr.enote':'Розкажіть, скільки людей і які канали — порахуємо й надішлемо рахунок.',
-    'pr.eseed':'Корпоративний тариф. Людей у команді: ',
-    'tr.h':'Заявка на тестування','tr.lead':'Залиште пошту — надішлю доступ і допоможу підключити перший канал.',
-    'tr.name':'Ім’я','tr.company':'Компанія','tr.mail':'Робоча пошта','tr.phone':'Телефон або Telegram',
-    'tr.chan':'Які канали цікавлять','tr.tgph':'Telegram за номером','tr.note':'Коротко про задачу',
-    'tr.go':'Надіслати заявку','tr.small':'Напишу протягом робочого дня. Пошту не передаю нікому.',
-    'tr.okh':'Заявку отримано','tr.okp':'Дякую! Напишу вам на вказану пошту протягом робочого дня.',
-    'f.privacy':'Конфіденційність','f.terms':'Умови','f.refunds':'Повернення коштів','f.deletion':'Видалення даних','f.legal':'KL Systems, ФОП Сластін Костянтин Віталійович · Україна',
-    'e.mail':'Вкажіть коректну пошту','e.net':'Не вдалося надіслати. Спробуйте ще раз або напишіть на support@rozmovio.com',
-    'e.rate':'Заявку з цієї пошти вже отримано. Я відповім найближчим часом.',
-    'th.auto':'Тема як у системі','th.light':'Світла тема','th.dark':'Темна тема'
-  },
-  en: {
-    'nav.channels':'Channels','nav.how':'How it works','nav.zoho':'CRM','nav.price':'Pricing',
-    'nav.signin':'Sign in','nav.try':'Try it',
-    'hero.badge':'Shared inbox: in your browser and in your CRM',
-    'hero.h1a':'Every customer conversation —','hero.h1b':'in one window',
-    'hero.lead':'Telegram, Instagram Direct, Messenger, WhatsApp and the chat on your website arrive in a single inbox. It works in the browser on its own, and embeds into Zoho CRM, Pipedrive or Bitrix24 when you want the thread next to the customer record.',
-    'hero.mail':'Your work email','hero.go':'Start 14-day trial',
-    'hero.note':'No card required. First channel connects in 10 minutes.',
-    'strip.tg':'Telegram bot','strip.ph':'Telegram by number',
-    'strip.ig':'Instagram Direct','strip.ms':'Messenger','strip.wc':'Website chat',
-    'shot.m1':'Hi! Is it still in stock?','shot.m2':'Yes, it is. I will hold it for you till tonight',
-    'shot.m3':'Thanks, I will be there in an hour',
-    'ch.h':'Channels that already work','ch.lead':'Each channel is connected in settings: website chat by a line of code, a bot by token, a phone number by QR sign-in, Instagram and Messenger by Facebook login.',
-    'ch.wc.t':'Website chat','ch.wc.s':'One line of code puts a chat button on your pages. Messages land in the same inbox.',
-    'ch.tgbot.t':'Telegram bot','ch.tgbot.s':'Customers write to your company bot. Photos, files, voice notes, reactions.',
-    'ch.tgph.t':'Telegram by number','ch.tgph.s':'Your personal number as a channel: QR sign-in, chats land in the inbox.',
-    'ch.ig.t':'Instagram Direct','ch.ig.s':'Messages to the business account, replies as the account, story replies and reactions.',
-    'ch.ms.t':'Facebook Messenger','ch.ms.s':'Messages to the Page. An agent reply is delivered even after 24 hours.',
-    'ch.wa.t':'WhatsApp Business','ch.wa.s':'Your company number via Cloud API. Outside the 24-hour window — approved templates.',
-    'ch.vb.t':'Viber for Business','ch.vb.s':'Customers write to your company name. Connected through an official partner.',
-    'ch.vbn.t':'Viber by number','ch.vbn.s':'In progress.',
-    'ready':'live','soon':'soon','beta':'closed beta',
-    'ch.beta':'Instagram, Messenger and WhatsApp Business are in closed beta: the app is under review by Meta, and until that is done only invited accounts can connect these channels. Write to us and we will add you as a tester. Every other channel works without limits.',
-    'how.h':'Three steps to the first message','how.lead':'Nothing to install: it runs in the browser and inside Zoho CRM.',
-    'how.s1t':'Sign up','how.s1p':'Enter your work email and the code from the letter. No password to invent.',
-    'how.s2t':'Connect channels','how.s2p':'Bot token, QR sign-in for a phone number, Facebook login for Instagram and Messenger.',
-    'how.s3t':'Work inside the CRM','how.s3p':'The widget appears on the Zoho record. Your team replies from there and the history stays.',
-    'ft.h':'What is inside',
-    'ft.f1t':'One inbox for the team','ft.f1p':'Conversations, assignees, open and closed, unread counts, search by name and number.',
-    'ft.f2t':'Reply templates','ft.f2p':'Quick replies with the name filled in — instead of retyping the same answer twenty times a day.',
-    'ft.f3t':'Scenarios and auto-replies','ft.f3p':'Greeting, out-of-hours reply, hand-off to an agent. Configured per channel.',
-    'ft.f4t':'Attachments','ft.f4p':'Photos, documents, voice notes and video both ways. Files are kept with the conversation.',
-    'ft.f5t':'Data in the EU','ft.f5p':'Channel tokens are encrypted with a separate key per customer. Companies are separated at the database level.',
-    'ft.f6t':'Dark theme, two languages','ft.f6p':'Ukrainian and English, light and dark — switched at any moment.',
-    'zh.badge':'Embedded in the CRM',
-    'zh.h':'The thread next to the customer record','zh.lead':'Rozmovio becomes a widget inside your CRM — Zoho, Pipedrive or Bitrix24. The manager sees the conversation where they already work: on the deal or contact record.',
-    'zh.l1':'An incoming message finds the contact by phone number or creates a new lead.',
-    'zh.l2':'A reply from the widget goes back to the channel the customer wrote from.',
-    'zh.l3':'The history stays on the record even when the manager changes.',
-    'zh.l4':'In Zoho, access follows the CRM user: no separate passwords.',
-    'zh.crm':'Zoho CRM · Contact','zh.f1':'Name','zh.f2':'Phone','zh.f3':'Source','zh.f3v':'Instagram Direct',
-    'zh.m1':'Hello, do you deliver?','zh.m2':'Yes, we ship the same day',
-    'pr.h':'Pricing','pr.lead':'Two plans. The price depends on neither the number of channels nor the number of messages.',
-    'pr.plan':'Company','pr.per':'per month, billed yearly',
-    'pr.alt':'or 60 $ per month billed monthly — a year costs two months less',
-    'pr.i1':'All available channels','pr.i2':'10 agents included, 5 $ per extra seat',
-    'pr.i3':'Widget in Zoho CRM and orders straight from the chat',
-    'pr.i4':'AI replies, templates, scenarios','pr.i5':'Support in English and Ukrainian',
-    'pr.go':'Start 14 days free','pr.note':'Pay by card or by invoice. Cancel at any time — access lasts until the end of the period already paid for.',
-    'pr.pick':'Right for most',
-    'pr.eplan':'Enterprise','pr.eamt':'Price on request','pr.eper':'per user, from 15 seats',
-    'pr.ealt':'no base fee: as many seats as people on the team',
-    'pr.e1':'Everything in the Company plan','pr.e2':'A seat price set for your team',
-    'pr.e3':'Payment by invoice, a contract and closing documents',
-    'pr.e4':'From 15 seats — a smaller team takes the Company plan',
-    'pr.ego':'Write to us','pr.enote':'Tell us how many people and which channels — we will do the maths and send an invoice.',
-    'pr.eseed':'Enterprise plan. People on the team: ',
-    'tr.h':'Request a trial','tr.lead':'Leave your email — I will send access and help connect the first channel.',
-    'tr.name':'Name','tr.company':'Company','tr.mail':'Work email','tr.phone':'Phone or Telegram',
-    'tr.chan':'Channels you need','tr.tgph':'Telegram by number','tr.note':'A line about your case',
-    'tr.go':'Send request','tr.small':'I reply within a business day. Your email goes nowhere else.',
-    'tr.okh':'Request received','tr.okp':'Thank you! I will write to the email you left within a business day.',
-    'f.privacy':'Privacy','f.terms':'Terms','f.refunds':'Refunds','f.deletion':'Data deletion','f.legal':'KL Systems, FOP Kostiantyn Slastin · Ukraine',
-    'e.mail':'Enter a valid email','e.net':'Could not send. Try again or write to support@rozmovio.com',
-    'e.rate':'A request from this email is already in. I will get back to you shortly.',
-    'th.auto':'System theme','th.light':'Light theme','th.dark':'Dark theme'
-  }
-};
+var T = ${JSON.stringify(LAND_T)};
 
 function langGet(){
   try { var s = localStorage.getItem('rz.lang'); if (s && T[s]) return s } catch(e){}
+  /* Адрес /en открыли осознанно — это и есть выбор. Признак ставит
+     сервер только английской странице: на украинской его нет, и там
+     по-прежнему решает язык браузера. */
+  var srv = document.documentElement.getAttribute('data-srv');
+  if (srv && T[srv]) return srv;
   var n = (navigator.language || 'en').toLowerCase();
   // Русскоязычному посетителю украинский ближе английского: интерфейс
   // всё равно украинский, и показывать ему английский было бы странно.
@@ -1006,9 +1025,154 @@ export function widgetTag(siteKey: string): string {
  * обход вставки. Поэтому сырой LANDING_HTML остаётся материалом для
  * тестов, а наружу обе точки отдают результат этой функции.
  */
-export function landingPage(webchatKey: string): string {
+/* ══════════════ Страница с текстом, а не с пустыми узлами ══════════
+ *
+ * До этого страница приходила почти пустой: сто двадцать три узла без
+ * текста и скрипт, который их наполняет. Google так умеет — вторым
+ * проходом, с задержкой и без гарантий. Читалки ИИ — GPTBot, ClaudeBot,
+ * PerplexityBot — JavaScript в большинстве своём не выполняют вовсе, и
+ * видели страницу из полутора сотен символов: в ответах про такой
+ * продукт не рассказывают, потому что рассказывать нечего.
+ *
+ * Теперь тот же словарь раскрывается на сервере. Скрипт на странице
+ * остаётся — он переключает язык на лету, и переписывает текст тем же
+ * самым значением, так что видимой разницы нет.
+ */
+
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+const esc = (v: string): string => v.replace(/[&<>"]/g, (c) => ESC[c] as string);
+
+/** Заголовок вкладки и описание для поиска — у каждого языка свои. */
+const META: Record<string, { title: string; desc: string; ogTitle: string; ogDesc: string }> = {
+  uk: {
+    title: 'Rozmovio — всі переписки з клієнтами в одному вікні',
+    desc:
+      'Telegram, Instagram Direct, Messenger, WhatsApp і чат на сайті в одній скриньці. ' +
+      'Працює у браузері та вбудовується у Zoho CRM, Pipedrive чи Бітрікс24.',
+    ogTitle: 'Rozmovio — одна скринька для всіх переписок з клієнтами',
+    ogDesc: 'Месенджери і чат на сайті в одному вікні. У браузері або всередині вашої CRM. 14 днів безкоштовно.',
+  },
+  en: {
+    title: 'Rozmovio — every customer chat in one window',
+    desc:
+      'Telegram, Instagram Direct, Messenger, WhatsApp and website chat in one shared inbox. ' +
+      'Works in the browser and embeds into Zoho CRM, Pipedrive or Bitrix24.',
+    ogTitle: 'Rozmovio — one inbox for every customer conversation',
+    ogDesc: 'Messengers and website chat in one window. In the browser or inside your CRM. 14 days free.',
+  },
+};
+
+/**
+ * Что мы такое — машиночитаемо.
+ *
+ * Отсюда поисковик и ИИ берут факты: как называется, что делает,
+ * сколько стоит. Без этого блока цену приходится вычитывать из
+ * вёрстки, а её оттуда никто не вычитывает.
+ */
+function jsonLd(lang: string, origin: string): string {
+  const m = META[lang] ?? (META['uk'] as { title: string; desc: string });
+  const url = lang === 'en' ? `${origin}/en` : `${origin}/`;
+  const data = [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'Organization',
+      name: 'Rozmovio',
+      url: `${origin}/`,
+      logo: `${origin}/icon-512.png`,
+      email: 'support@rozmovio.com',
+      sameAs: [] as string[],
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'Rozmovio',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      url,
+      description: m.desc,
+      inLanguage: lang === 'en' ? 'en' : 'uk',
+      offers: {
+        '@type': 'Offer',
+        price: '50',
+        priceCurrency: 'USD',
+        // Цена за месяц при оплате за год — ровно то, что написано на
+        // карточке. Расходись они, поисковик показал бы чужую цифру.
+        description: lang === 'en' ? 'per month, billed yearly' : 'за місяць при оплаті за рік',
+        url: `${url}#price`,
+      },
+    },
+  ];
+  return `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
+}
+
+/**
+ * Сборка страницы на одном языке.
+ *
+ * Заполняются только пустые узлы: у тех, где текст уже написан руками,
+ * забирать его нечем и незачем.
+ */
+export function landingPage(webchatKey: string, lang = 'uk', origin = 'https://www.rozmovio.com'): string {
+  const dict = LAND_T[lang] ?? (LAND_T['uk'] as Record<string, string>);
+  const m = META[lang] ?? (META['uk'] as (typeof META)['uk']);
+  const url = lang === 'en' ? `${origin}/en` : `${origin}/`;
+
+  let html = LANDING_HTML;
+
+  // 1. Текст узлов.
+  html = html.replace(
+    /(<(\w+)\b[^>]*\bdata-t="([^"]+)"[^>]*>)<\/\2>/g,
+    (all, open: string, tagName: string, key: string) => {
+      const v = dict[key];
+      return v === undefined ? all : `${open}${esc(v)}</${tagName}>`;
+    },
+  );
+
+  // 2. Заглушки полей.
+  html = html.replace(/<(input|textarea)\b([^>]*\bdata-tp="([^"]+)")([^>]*)>/g, (all, tagName: string, a: string, _k: string, b: string) => {
+    const key = /data-tp="([^"]+)"/.exec(a)?.[1] ?? '';
+    const v = dict[key];
+    return v === undefined ? all : `<${tagName}${a}${b} placeholder="${esc(v)}">`;
+  });
+
+  /* 3. Язык. Признак data-srv стоит только у английской страницы: по
+        нему скрипт понимает, что адрес /en открыли осознанно, и не
+        переключает обратно по языку браузера. У украинской его нет —
+        там прежнее правило по языку системы остаётся. */
+  html = html.replace(
+    '<html lang="uk">',
+    lang === 'en' ? '<html lang="en" data-srv="en">' : '<html lang="uk">',
+  );
+
+  // 4. Голова: свои заголовки, адреса и факты.
+  const head =
+    `<title>${esc(m.title)}</title>` + NL +
+    `<meta name="description" content="${esc(m.desc)}">` + NL +
+    `<link rel="canonical" href="${url}">` + NL +
+    `<link rel="alternate" hreflang="uk" href="${origin}/">` + NL +
+    `<link rel="alternate" hreflang="en" href="${origin}/en">` + NL +
+    `<link rel="alternate" hreflang="x-default" href="${origin}/">` + NL +
+    `<meta property="og:title" content="${esc(m.ogTitle)}">` + NL +
+    `<meta property="og:description" content="${esc(m.ogDesc)}">` + NL +
+    `<meta property="og:type" content="website">` + NL +
+    `<meta property="og:url" content="${url}">` + NL +
+    `<meta property="og:site_name" content="Rozmovio">` + NL +
+    `<meta property="og:locale" content="${lang === 'en' ? 'en_US' : 'uk_UA'}">` + NL +
+    `<meta property="og:image" content="${origin}/og.png">` + NL +
+    `<meta property="og:image:width" content="1200">` + NL +
+    `<meta property="og:image:height" content="630">` + NL +
+    `<meta name="twitter:card" content="summary_large_image">` + NL +
+    jsonLd(lang, origin);
+
+  html = html
+    .replace(/<title>[^<]*<\/title>\n/, '')
+    .replace(/<meta name="description"[^>]*>\n/, '')
+    .replace(/<meta property="og:title"[^>]*>\n/, '')
+    .replace(/<meta property="og:description"[^>]*>\n/, '')
+    .replace(/<meta property="og:type"[^>]*>\n/, '')
+    .replace('</head>', head + NL + '</head>');
+
   const tag = widgetTag(webchatKey);
-  return tag ? LANDING_HTML.replace('</body>', tag + NL + '</body>') : LANDING_HTML;
+  return tag ? html.replace('</body>', tag + NL + '</body>') : html;
 }
 
 export function registerLanding(app: FastifyInstance, opts: LandingDeps): void {
