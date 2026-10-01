@@ -10,6 +10,7 @@ import {
   QUEUE_CRM_SYNC,
   QUEUE_SCENARIO,
   computeResponseWindow,
+  unreadMove,
   createPool,
   messageEventKey,
   recordEvent,
@@ -300,6 +301,7 @@ async function persistMessage(
 
     // 2. Диалог + окно ответа
     const window = computeResponseWindow(msg.channelType, msg.sentAt);
+    const move = unreadMove(msg.direction, msg.senderType);
 
     const { rows: convRows } = await db.query<{ id: string; created: boolean }>(
       `INSERT INTO conversations
@@ -311,7 +313,11 @@ async function persistMessage(
                                       ELSE conversations.window_expires_at END,
              window_type       = EXCLUDED.window_type,
              last_message_at   = EXCLUDED.last_message_at,
-             unread_count      = conversations.unread_count + $7::int,
+             -- Три случая, а не два; какой из них — решает unreadMove,
+             -- и там же написано почему.
+             unread_count      = CASE WHEN $7::int = 1 THEN conversations.unread_count + 1
+                                      WHEN $8::bool  THEN 0
+                                      ELSE conversations.unread_count END,
              status            = CASE WHEN $7::int = 1 AND conversations.status = 'resolved'
                                       THEN 'open' ELSE conversations.status END
        -- xmax = 0 у строки, которая только что вставлена: у изменённой
@@ -328,7 +334,12 @@ async function persistMessage(
         // Исходящее, написанное владельцем прямо с телефона (номерной
         // Telegram), не должно помечать диалог непрочитанным и открывать
         // закрытый: это ответ, а не обращение клиента.
-        msg.direction === 'in' ? 1 : 0,
+        move === 'add' ? 1 : 0,
+        /* Ответ живого человека, написанный мимо кабинета — из самого
+           Telegram или WhatsApp с телефона. Доходит до нас эхом; своё,
+           отправленное из кабинета, сюда не попадает — оно записано при
+           отправке, а эхо отсеивается по внешнему идентификатору. */
+        move === 'clear',
       ],
     );
     const conversationId = convRows[0]!.id;

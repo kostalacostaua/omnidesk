@@ -18,6 +18,7 @@ export * from './viber.js';
 export * from './gateway.js';
 export * from './whatsapp.js';
 export * from './outreach.js';
+export * from './unread.js';
 export * from './custom.js';
 export * from './webchat.js';
 export * from './workhours.js';

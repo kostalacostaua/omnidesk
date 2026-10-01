@@ -12666,6 +12666,49 @@ function railToggle(){ el('app').classList.toggle('rail-open') }
 el('burgList').onclick = railToggle;
 el('railVeil').onclick = railClose;
 
+/*
+ * Открыть меню движением от левого края.
+ *
+ * Привычка телефона: разделы в любом приложении выезжают пальцем от
+ * края, а не только по кнопке. Кнопка остаётся — движением и кнопкой
+ * пользуются разные люди.
+ *
+ * Начало засчитывается только в двадцати четырёх точках от края.
+ * Шире — и движение отбирало бы горизонтальную прокрутку у строки
+ * действий в шапке и у срезов списка, которые там же ездят вбок.
+ * Закрывается обратным движением по уже открытому меню.
+ *
+ * Жест читается один раз, на конце: следить за пальцем всю дорогу
+ * значило бы считать на каждом кадре прокрутки ленты.
+ */
+(function(){
+  var EDGE = 24;      // откуда движение считается «от края»
+  var FAR = 56;       // сколько надо пройти, чтобы это был жест
+  var SLOPE = 1.2;    // вбок должно быть заметно больше, чем вверх-вниз
+  var x0 = 0, y0 = 0, live = false;
+
+  document.addEventListener('touchstart', function(e){
+    if (window.innerWidth > 820 || e.touches.length !== 1) { live = false; return }
+    var t = e.touches[0];
+    x0 = t.clientX; y0 = t.clientY;
+    var open = el('app').classList.contains('rail-open');
+    // Открытое меню закрывают откуда угодно по нему; закрытое
+    // открывают только от самого края.
+    live = open || x0 <= EDGE;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e){
+    if (!live) return;
+    live = false;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
+    if (Math.abs(dx) < FAR || Math.abs(dx) < dy * SLOPE) return;
+    if (dx > 0 && x0 <= EDGE) railOpen();
+    else if (dx < 0) railClose();
+  }, { passive: true });
+})();
+
 /* Список «Ще» в шапке переписки. Закрытие живёт здесь, а не рядом с
    самой шапкой: шапка перерисовывается при каждом обновлении, а
    слушатель документа должен остаться один на всё время. */
