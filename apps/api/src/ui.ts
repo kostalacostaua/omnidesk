@@ -506,6 +506,13 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .replybar .t,.fileprev .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     color:var(--t2)}
   .replybar .c,.fileprev .c{cursor:pointer;color:var(--t3);font-size:15px;line-height:1}
+  /* Миниатюра вставленной картинки. Имя слева от неё сжимается, она
+     сама — нет: ради неё строку и показывают. */
+  .fileprev .th{width:38px;height:38px;flex:none;border-radius:6px;object-fit:cover;
+    background:var(--panel)}
+  .fileprev .t{flex:1 1 auto;min-width:0}
+  /* Файл тянут на поле ответа — поле говорит, что готово его принять. */
+  .cbox.drop{border-color:var(--accent);box-shadow:0 0 0 3px var(--ai-soft)}
 
   /* ─── Карточка клиента ─────────────────────────────────────────── */
   #card{border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:13px 14px}
@@ -2115,6 +2122,7 @@ var F = { status:'open', statusId:[], assignee:[], channelId:[], tag:[], q:'' };
 var S = { tab:'profile' };
 var replyTo = null;   // сообщение, на которое отвечаем
 var pendingFile = null; // выбранный, но ещё не отправленный файл
+var pendingUrl = null;  // ссылка на него для миниатюры; живёт ровно столько же
 var noteMode = false;   // поле пишет заметку для своих, а не ответ клиенту
 var el = function(id){ return document.getElementById(id) };
 
@@ -2499,7 +2507,7 @@ function openConv(id, fromHistory){
   msgSeen = {};
   threadFirst = true;
   replyTo = null;
-  pendingFile = null;
+  dropPending();
   noteMode = false;
   el('app').classList.add('thread-open');
   // Открытый диалог — это шаг в истории браузера. Без него жест «назад»
@@ -3092,8 +3100,13 @@ function renderComposer(force){
         (replyTo.mine ? L('на своє повідомлення') : L('клієнту')) + ':</b> ' +
         esc(replyTo.text || L('повідомлення')) + '</div><div class="c" id="rCancel">×</div></div>'
       : '') +
+    /* У картинки — миниатюра, а не одно имя файла. Снимков экрана за
+       смену вставляют десяток, и «screenshot-20261001-143012.png»
+       не отвечает на единственный вопрос: тот ли это снимок. */
     (pendingFile
-      ? '<div class="fileprev"><div class="t">' + esc(pendingFile.name) + ' · ' +
+      ? '<div class="fileprev">' +
+        (pendingUrl ? '<img class="th" src="' + pendingUrl + '" alt="">' : '') +
+        '<div class="t">' + esc(pendingFile.name) + ' · ' +
         Math.round(pendingFile.size / 1024) + L(' КБ</div><div class="c" id="fCancel">×</div></div>')
       : '') +
     '<div class="tplbox" id="tplBox" style="display:none"></div>' +
@@ -3146,18 +3159,58 @@ function renderComposer(force){
   if (keep) ta.value = keep;
 
   if (el('rCancel')) el('rCancel').onclick = function(){ replyTo = null; renderComposer(true) };
-  if (el('fCancel')) el('fCancel').onclick = function(){ pendingFile = null; renderComposer(true) };
+  if (el('fCancel')) el('fCancel').onclick = function(){ dropPending(); renderComposer(true) };
 
   if (el('clip')) el('clip').onclick = function(){ el('file').click() };
-  el('file').onchange = function(){
-    var f = this.files && this.files[0];
-    if (!f) return;
-    // Двадцать мегабайт — предел Telegram для бота. Проверяем здесь,
-    // чтобы человек узнал об этом до долгой загрузки, а не после.
-    if (f.size > 20 * 1024 * 1024){ alertLine(L('Файл більший за 20 МБ — Telegram не пропустить')); return }
-    pendingFile = f;
-    renderComposer(true);
+  el('file').onchange = function(){ takeFile(this.files && this.files[0]) };
+
+  /*
+   * Снимок экрана из буфера.
+   *
+   * Самый частый файл в поддержке — скриншот, и путь к нему был
+   * длинный: сохранить на диск, нажать скрепку, найти в папке
+   * «Загрузки», выбрать. Теперь он вставляется прямо в поле, как в
+   * любом мессенджере.
+   *
+   * Поле осталось обычным, без разметки внутри: для картинки из
+   * буфера она не нужна — браузер кладёт файл в событие вставки
+   * независимо от того, куда вставляют. А contenteditable принёс бы
+   * чужое оформление вместе с текстом, которое потом пришлось бы
+   * вычищать перед отправкой.
+   */
+  ta.onpaste = function(e){
+    var cd = e.clipboardData;
+    if (!cd) return;
+    var f = null;
+    // files есть не везде: Safari до недавнего отдавал только items.
+    if (cd.files && cd.files.length) f = cd.files[0];
+    else if (cd.items){
+      for (var i = 0; i < cd.items.length && !f; i++){
+        if (cd.items[i].kind === 'file') f = cd.items[i].getAsFile();
+      }
+    }
+    if (!f) return;            // обычный текст вставляется как обычно
+    e.preventDefault();        // иначе рядом ляжет имя файла или путь
+    takeFile(f);
   };
+
+  /*
+   * Перетаскивание на поле. Та же дорога, что у вставки: файл кладут
+   * туда, где пишут, а не ищут кнопку. Подсветка говорит, что
+   * отпустить можно именно здесь.
+   */
+  var cbox = box.querySelector('.cbox');
+  if (cbox){
+    var over = function(e){ e.preventDefault(); cbox.classList.add('drop') };
+    cbox.addEventListener('dragover', over);
+    cbox.addEventListener('dragenter', over);
+    cbox.addEventListener('dragleave', function(){ cbox.classList.remove('drop') });
+    cbox.addEventListener('drop', function(e){
+      e.preventDefault();
+      cbox.classList.remove('drop');
+      takeFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+  }
   ta.oninput = function(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,150)+'px' };
   ta.onkeydown = function(e){
     if (e.key === 'Enter' && !e.shiftKey){
@@ -3270,6 +3323,7 @@ function useTemplate(q){
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
   var f = (q.attachments || [])[0];
+  dropPending();
   pendingFile = f
     ? { qr: { id: q.id, index: 0 }, name: f.filename || L('файл'), size: f.size || 0, type: f.mime }
     : null;
@@ -3606,6 +3660,56 @@ function alertLine(text){
 }
 
 /** Тип вложения по MIME — от него зависит, как файл покажут у клиента. */
+/**
+ * Принять файл в поле ответа.
+ *
+ * Одна дорога на три входа: скрепка, вставка из буфера и
+ * перетаскивание. Раньше проверка размера стояла только у скрепки, и
+ * любой второй вход означал бы, что про двадцать мегабайт узнают уже
+ * после долгой загрузки — от сервера.
+ *
+ * У снимка экрана из буфера имени нет: браузер отдаёт файл, который
+ * называется «image.png» или не называется никак. Своё имя со
+ * временем лучше по двум причинам: в переписке видно, когда снимок
+ * сделан, и два снимка подряд не выглядят одним и тем же файлом.
+ */
+function takeFile(f){
+  if (!f) return;
+  // Двадцать мегабайт — предел Telegram для бота. Проверяем здесь,
+  // чтобы человек узнал об этом до долгой загрузки, а не после.
+  if (f.size > 20 * 1024 * 1024){
+    alertLine(L('Файл більший за 20 МБ — Telegram не пропустить'));
+    return;
+  }
+  var name = f.name || '';
+  if (!name || name === 'image.png'){
+    var d = new Date();
+    var p = function(n){ return (n < 10 ? '0' : '') + n };
+    var ext = (String(f.type || '').split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
+    name = 'screenshot-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.' + ext;
+    // File переименовать нельзя: имя у него только для чтения. Новый
+    // объект с тем же содержимым — единственный честный способ.
+    try { f = new File([f], name, { type: f.type }) } catch (e) { /* старый браузер — останется как есть */ }
+  }
+  dropPending();
+  pendingFile = f;
+  // Миниатюра нужна только картинке, и ссылка на неё живёт ровно
+  // столько же, сколько сам файл: иначе каждая перерисовка поля
+  // оставляла бы в памяти ещё одну.
+  if (fileKind(f.type, f.name) === 'image'){
+    try { pendingUrl = URL.createObjectURL(f) } catch (e) { pendingUrl = null }
+  }
+  renderComposer(true);
+}
+
+/** Забыть выбранный файл вместе со ссылкой на него. */
+function dropPending(){
+  if (pendingUrl){ try { URL.revokeObjectURL(pendingUrl) } catch (e) {} }
+  pendingUrl = null;
+  pendingFile = null;
+}
+
 function fileKind(mime, name){
   var m = String(mime || '');
   if (m.indexOf('image/') === 0) return 'image';
@@ -3659,7 +3763,7 @@ function send(){
     })
     .then(function(){
       ta.value = ''; ta.style.height = 'auto';
-      replyTo = null; pendingFile = null;
+      replyTo = null; dropPending();
       renderComposer(true);
       lastThread = null;
       loadThread();
