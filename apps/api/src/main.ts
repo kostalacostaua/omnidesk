@@ -1439,22 +1439,40 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
       // Цитата подтягивается тем же запросом. Отдельный поход за
       // каждым процитированным сообщением превратил бы открытие диалога
       // в двадцать запросов вместо одного.
-      `SELECT m.id, m.direction, m.sender_type, m.content, m.status, m.kind,
-              m.sent_at, m.failure, m.reactions, m.external_id,
-              u.full_name         AS author_name,
-              q.id                AS reply_to_id,
-              q.content->>'text'  AS reply_to_text,
-              q.direction         AS reply_to_direction
-         FROM messages m
-         JOIN conversations c ON c.id = m.conversation_id
-         LEFT JOIN users u ON u.id = m.sender_user_id
-         LEFT JOIN messages q
-                ON q.channel_id  = m.channel_id
-               AND q.external_id = m.content->>'replyToExternalId'
-        WHERE m.conversation_id = $1
-          AND ${channelScope('c.channel_id', '$2')}
-        ORDER BY m.sent_at ASC
-        LIMIT 200`,
+      //
+      // Двести последних, а не двести первых. Лимит здесь обязателен:
+      // переписка живёт годами, и отдавать её целиком при каждом опросе
+      // нельзя. Но отрезать его надо с начала разговора, а не с конца:
+      // `ORDER BY sent_at ASC LIMIT 200` оставляет двести самых старых
+      // сообщений и молча выбрасывает всё новое. В списке чатов при
+      // этом видно свежую строку — она читается из conversations, —
+      // а в самом окне разговор стоит на двухсотом сообщении навсегда.
+      //
+      // Поэтому берём хвост по убыванию во вложенном запросе и
+      // разворачиваем обратно: лента всегда рисуется от старых к новым.
+      // id в сортировке — не украшение: у сообщений, пришедших одной
+      // пачкой, время совпадает до миллисекунды, и без него порядок
+      // между ними каждый раз новый, а лента перерисовывается на
+      // каждом опросе впустую.
+      `SELECT * FROM (
+         SELECT m.id, m.direction, m.sender_type, m.content, m.status, m.kind,
+                m.sent_at, m.failure, m.reactions, m.external_id,
+                u.full_name         AS author_name,
+                q.id                AS reply_to_id,
+                q.content->>'text'  AS reply_to_text,
+                q.direction         AS reply_to_direction
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           LEFT JOIN users u ON u.id = m.sender_user_id
+           LEFT JOIN messages q
+                  ON q.channel_id  = m.channel_id
+                 AND q.external_id = m.content->>'replyToExternalId'
+          WHERE m.conversation_id = $1
+            AND ${channelScope('c.channel_id', '$2')}
+          ORDER BY m.sent_at DESC, m.id DESC
+          LIMIT 200
+       ) tail
+       ORDER BY sent_at ASC, id ASC`,
       [req.params.id, auth.userId],
     );
     return rows;
