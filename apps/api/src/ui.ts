@@ -2822,7 +2822,10 @@ function patchConv(body){
 function loadThread(){
   if (!current) return;
   api('/conversations/' + current + '/messages').then(function(d){
-    var wasBottom = isAtBottom();
+    /* Первая отрисовка — это открытие разговора: он открывается на
+       последнем сообщении независимо от того, где стояла прокрутка
+       предыдущего. Дальше решает то, держимся ли мы за конец. */
+    var wasBottom = threadFirst || isAtBottom();
     var list = d.messages || [];
     var html = list.map(function(m, i){
       var c = m.content || {};
@@ -2943,6 +2946,15 @@ function loadThread(){
       box.classList.add('swap');
     }
 
+    /* Вложения меняют высоту ленты, когда доедут. Картинка сообщает
+       об этом через load, видео и звук — через метаданные: до них
+       браузер не знает своей высоты и считает её нулевой. */
+    Array.prototype.forEach.call(el('msgs').querySelectorAll('.att img, .att video, .att audio'),
+      function(node){
+        node.addEventListener('load', keepEnd);
+        node.addEventListener('loadedmetadata', keepEnd);
+      });
+
     Array.prototype.forEach.call(el('msgs').querySelectorAll('.att img'), function(img){
       img.onclick = function(){
         var lb = document.createElement('div');
@@ -2953,7 +2965,9 @@ function loadThread(){
       };
     });
     bindMessageTools();
-    if (wasBottom) el('msgs').scrollTop = el('msgs').scrollHeight;
+    stickEnd = wasBottom;
+    if (first) pinEndUntil = Date.now() + 2500;
+    if (wasBottom) scrollEnd();
     renderComposer();
   }).catch(showErr);
 }
@@ -3035,6 +3049,46 @@ function isAtBottom(){
   var m = el('msgs');
   return m.scrollHeight - m.scrollTop - m.clientHeight < 60;
 }
+
+/*
+ * Держимся ли за конец ленты.
+ *
+ * Прокрутить в конец один раз после отрисовки недостаточно: картинки
+ * и голосовые едут отдельными запросами и встают в ленту уже после
+ * неё. Высота разом вырастает, и конец, на котором мы только что
+ * стояли, оказывается где-то в середине — именно так разговор и
+ * открывался не на последнем сообщении.
+ *
+ * Поэтому конец не «устанавливается», а удерживается: пока человек не
+ * тронул прокрутку сам, каждое подъехавшее вложение возвращает ленту
+ * вниз. Тронул — отпускаем и больше не дёргаем: читать старое,
+ * пока лента сама уезжает, невозможно.
+ */
+var stickEnd = true;
+
+/*
+ * Открытие разговора держится за конец по времени, а не только по
+ * флагу. Браузер при подросшей сверху высоте сам подправляет
+ * прокрутку, чтобы человек не потерял место чтения, — и это событие
+ * неотличимо от «человек прокрутил вверх». На открытии такая поправка
+ * означала бы ровно ту же середину вместо последнего сообщения,
+ * поэтому первые секунды конец удерживается несмотря ни на что.
+ */
+var pinEndUntil = 0;
+
+function scrollEnd(){
+  var m = el('msgs');
+  m.scrollTop = m.scrollHeight;
+}
+
+/** Вернуть ленту в конец, если мы за него держимся. */
+function keepEnd(){
+  if (stickEnd || Date.now() < pinEndUntil) scrollEnd();
+}
+
+el('msgs').addEventListener('scroll', function(){
+  stickEnd = isAtBottom();
+});
 
 /**
  * Поле ответа.
