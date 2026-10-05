@@ -5,6 +5,7 @@ import {
   bitrixLink,
   crmSource,
   decryptJson,
+  dropZohoToken,
   parseCrmSettings,
   pipedriveFindOrCreate,
   withSystem,
@@ -64,6 +65,26 @@ export function createCrmSync(deps: CrmDeps) {
     });
   }
 
+  /**
+   * Zoho ответила 401 на обычный запрос.
+   *
+   * Значит маркер в кэше больше не годится, хотя срок ещё не вышел.
+   * Держать его ещё сорок минут — значит сорок минут не заводить
+   * карточки и не оставить следа, по которому это видно: маркер взят
+   * из кэша, установка «активна», в логах один warn на запрос.
+   * Поэтому маркер забываем сразу, а установку помечаем — её состояние
+   * человек видит на странице интеграций.
+   */
+  async function zohoRejected(tenantId: string, inst: Installation): Promise<void> {
+    await dropZohoToken(redis, tenantId, inst.id);
+    await withTenant(pool, tenantId, async (db) => {
+      await db.query(`UPDATE zoho_installations SET status = 'degraded' WHERE id = $1`, [inst.id]);
+    });
+    log('warn', 'Zoho отклонила маркер доступа, перевыдадим при следующей попытке', {
+      tenantId, installationId: inst.id,
+    });
+  }
+
   async function accessToken(tenantId: string, inst: Installation): Promise<string | null> {
     const { refreshToken } = decryptJson<{ refreshToken: string }>(
       masterKey,
@@ -74,6 +95,7 @@ export function createCrmSync(deps: CrmDeps) {
     const out = await zohoAccessToken({
       cache: redis,
       tenantId,
+      installationId: inst.id,
       accountsServer: inst.accounts_server,
       refreshToken,
       clientId: deps.clientId,
@@ -95,6 +117,7 @@ export function createCrmSync(deps: CrmDeps) {
 
   /** Поиск по номеру. Zoho ищет по точному совпадению, поэтому номер идёт как есть. */
   async function findByPhone(
+    tenantId: string,
     inst: Installation,
     token: string,
     phone: string,
@@ -110,6 +133,7 @@ export function createCrmSync(deps: CrmDeps) {
       if (res.status === 204) continue;
       if (!res.ok) {
         log('warn', 'Поиск в Zoho вернул ошибку', { status: res.status, module: moduleName });
+        if (res.status === 401) await zohoRejected(tenantId, inst);
         continue;
       }
       const body = (await res.json()) as { data?: Array<{ id?: string }> };
@@ -167,6 +191,7 @@ export function createCrmSync(deps: CrmDeps) {
       log('warn', 'Zoho не создала карточку', {
         status: res.status, module: moduleName, message: first?.message,
       });
+      if (res.status === 401) await zohoRejected(job.tenantId, inst);
       return null;
     }
     return { module: moduleName, id: first.details.id };
@@ -180,6 +205,7 @@ export function createCrmSync(deps: CrmDeps) {
    * регистра, потому что почту вводят руками и в обоих местах.
    */
   async function zohoUserByEmail(
+    tenantId: string,
     inst: Installation,
     token: string,
     email: string,
@@ -192,6 +218,7 @@ export function createCrmSync(deps: CrmDeps) {
     });
     if (!res.ok) {
       log('warn', 'Zoho не отдала список сотрудников', { status: res.status });
+      if (res.status === 401) await zohoRejected(tenantId, inst);
       return null;
     }
     const body = (await res.json()) as { users?: Array<{ id?: string; email?: string }> };
@@ -224,7 +251,7 @@ export function createCrmSync(deps: CrmDeps) {
     const token = await accessToken(job.tenantId, inst);
     if (!token) return;
 
-    const userId = await zohoUserByEmail(inst, token, job.ownerEmail);
+    const userId = await zohoUserByEmail(job.tenantId, inst, token, job.ownerEmail);
     if (!userId) {
       log('debug', 'В Zoho нет сотрудника с такой почтой', { tenantId: job.tenantId });
       return;
@@ -241,6 +268,7 @@ export function createCrmSync(deps: CrmDeps) {
     });
     if (!res.ok) {
       log('warn', 'Zoho не сменила ответственного', { status: res.status });
+      if (res.status === 401) await zohoRejected(job.tenantId, inst);
       return;
     }
     log('info', 'Ответственный в Zoho обновлён', {
@@ -362,7 +390,9 @@ export function createCrmSync(deps: CrmDeps) {
     const token = await accessToken(job.tenantId, inst);
     if (!token) return;
 
-    let link = contact.phone_e164 ? await findByPhone(inst, token, contact.phone_e164) : null;
+    let link = contact.phone_e164
+      ? await findByPhone(job.tenantId, inst, token, contact.phone_e164)
+      : null;
     const found = Boolean(link);
 
     if (!link) {

@@ -15,11 +15,14 @@
 export interface TokenCache {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, mode: 'EX', seconds: number): Promise<unknown>;
+  del?(key: string): Promise<unknown>;
 }
 
 export interface ZohoTokenInput {
   cache: TokenCache;
   tenantId: string;
+  /** Какая именно установка. У компании их может быть несколько. */
+  installationId: string;
   accountsServer: string;
   refreshToken: string;
   clientId: string;
@@ -29,8 +32,36 @@ export interface ZohoTokenInput {
 /** Пятьдесят минут при часовой жизни: запас на долгую задачу. */
 export const ZOHO_TOKEN_TTL_SEC = 50 * 60;
 
-export function zohoTokenKey(tenantId: string): string {
-  return `zoho:at:${tenantId}`;
+/**
+ * Ключ кэша — на установку, а не на компанию.
+ *
+ * У одной компании Zoho может быть подключена не одна: вторая
+ * организация, другой дата-центр. Refresh-токен у каждой свой, и
+ * маркер, выданный по одному, в другой организации недействителен.
+ * Пока ключ был общим, вторая установка затирала маркер первой, и
+ * обе получали от Zoho 401 на каждый запрос — причём молча: маркер
+ * брался из кэша, значит «всё хорошо», установка оставалась
+ * «активной», а карточки просто не создавались.
+ */
+export function zohoTokenKey(tenantId: string, installationId: string): string {
+  return `zoho:at:${tenantId}:${installationId}`;
+}
+
+/**
+ * Забыть маркер.
+ *
+ * Нужна на 401 от самой CRM: маркер лежит пятьдесят минут, и если он
+ * перестал годиться раньше (доступ отозвали, согласие выдали заново),
+ * без этого компания ждала бы конца срока, а всё это время карточки
+ * не заводились бы без единой внятной ошибки.
+ */
+export async function dropZohoToken(
+  cache: TokenCache,
+  tenantId: string,
+  installationId: string,
+): Promise<void> {
+  if (!cache.del) return;
+  await cache.del(zohoTokenKey(tenantId, installationId));
 }
 
 export type ZohoTokenResult =
@@ -46,7 +77,7 @@ export type ZohoTokenResult =
  * работа вызывающего: у воркера и у формы настроек ответы разные.
  */
 export async function zohoAccessToken(input: ZohoTokenInput): Promise<ZohoTokenResult> {
-  const key = zohoTokenKey(input.tenantId);
+  const key = zohoTokenKey(input.tenantId, input.installationId);
   const cached = await input.cache.get(key);
   if (cached) return { ok: true, token: cached };
 

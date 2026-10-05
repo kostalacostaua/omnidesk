@@ -46,6 +46,7 @@ import {
   withSystem,
   withTenant,
   convertedContactId,
+  dropZohoToken,
   zohoAccessToken,
   zohoRecordUrl,
   type CrmKind,
@@ -264,6 +265,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     const got = await zohoAccessToken({
       cache: deps.redis as never,
       tenantId,
+      installationId: inst.id,
       accountsServer: inst.accounts_server,
       refreshToken,
       clientId: deps.zoho.clientId,
@@ -313,7 +315,21 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
     return { error: 'zoho_refused', detail };
   }
 
-  async function zohoWhy(res: Response): Promise<{ error: string; detail?: string }> {
+  async function zohoWhy(
+    res: Response,
+    inst?: { id: string },
+    tenantId?: string,
+  ): Promise<{ error: string; detail?: string }> {
+    /*
+     * 401 — это не «попробуйте позже». Маркер лежит в кэше пятьдесят
+     * минут, и если Zoho перестала его принимать раньше, то без
+     * сброса компания эти пятьдесят минут живёт без CRM, причём
+     * установка числится активной: маркер-то берётся из кэша.
+     * Поэтому забываем его сразу — следующий запрос выдаст новый.
+     */
+    if (res.status === 401 && inst && tenantId && deps.redis) {
+      await dropZohoToken(deps.redis as never, tenantId, inst.id);
+    }
     return whyBody(await res.json().catch(() => ({})));
   }
 
@@ -358,7 +374,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
    */
   async function metaFor(
     tenantId: string,
-    z: { inst: { api_domain: string }; head: Record<string, string> },
+    z: { inst: { id: string; api_domain: string }; head: Record<string, string> },
     module: OrderModule,
   ): Promise<OrderMeta | { error: string; detail?: string }> {
     const key = tenantId + ':' + module;
@@ -369,7 +385,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       const url = new URL(`${z.inst.api_domain}/crm/v6/settings/${path}`);
       for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
       const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
-      if (!res.ok) return { error: await zohoWhy(res) };
+      if (!res.ok) return { error: await zohoWhy(res, z.inst, tenantId) };
       return { body: await res.json() };
     };
 
@@ -762,7 +778,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
       // 204 — товаров нет вовсе. Это ответ, а не сбой.
       if (res.status === 204) break;
-      if (!res.ok) return reply.code(502).send(await zohoWhy(res));
+      if (!res.ok) return reply.code(502).send(await zohoWhy(res, z.inst, a.tenantId));
 
       const got = catalogPage(await res.json());
       for (const item of got.items) items.push(item);
@@ -965,7 +981,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       `${z.inst.api_domain}/crm/v6/Contacts/${recordId}?fields=Account_Name,Last_Name`,
       { headers: z.head, signal: AbortSignal.timeout(20_000) },
     );
-    if (!who.ok) return reply.code(502).send(await zohoWhy(who));
+    if (!who.ok) return reply.code(502).send(await zohoWhy(who, z.inst, a.tenantId));
     const whoBody = (await who.json()) as {
       data?: Array<{ Account_Name?: { id?: string; name?: string } }>;
     };
