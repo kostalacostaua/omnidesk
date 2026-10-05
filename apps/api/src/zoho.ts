@@ -82,6 +82,18 @@ const SCOPES = [
  * правилом «отрезать accounts.» дало бы несуществующий адрес, и ошибка
  * вылезла бы у первого канадского клиента.
  */
+/** Разбор адреса из переменной окружения: только известные зоны. */
+function safeHost(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:') return null;
+    return Object.prototype.hasOwnProperty.call(ZONES, u.hostname) ? `https://${u.hostname}` : null;
+  } catch {
+    return null;
+  }
+}
+
 const ZONES: Record<string, string> = {
   'accounts.zoho.com': 'https://www.zohoapis.com',
   'accounts.zoho.eu': 'https://www.zohoapis.eu',
@@ -95,7 +107,35 @@ const ZONES: Record<string, string> = {
 
 const ALLOWED_HOSTS = Object.keys(ZONES);
 
-const DEFAULT_ACCOUNTS = 'https://accounts.zoho.eu';
+/**
+ * Где спрашивается согласие.
+ *
+ * Не «наш» дата-центр, а accounts.zoho.com — так требует Zoho: вход
+ * начинается с него, и дальше Zoho сама переносит человека в зону его
+ * организации, возвращая нам location и accounts-server. Начать вход
+ * сразу в европейской зоне нельзя: клиента с организацией в зоне .com
+ * она туда не отправит, и подключение заканчивается отказом на самом
+ * экране согласия — до нашего callback дело не доходит, поэтому в
+ * логах пусто и причину по ним не найти.
+ *
+ * Условие со стороны Zoho: в консоли приложения на вкладке Settings
+ * включены нужные дата-центры и выбран общий секрет для всех
+ * («use the same OAuth credentials for all data centers»). С
+ * отдельными секретами по зонам обмен кода отвечает invalid_client —
+ * его мы ловим и говорим прямо (см. ниже).
+ *
+ * Переменная окружения оставлена, чтобы вернуть прежнее поведение
+ * без правки кода, если в консоли дата-центры не включены.
+ */
+const AUTH_ACCOUNTS =
+  safeHost(process.env['ZOHO_ACCOUNTS']) ?? 'https://accounts.zoho.com';
+
+/** Зона из адреса сервера аккаунтов: eu, com, in... Нужна только для показа. */
+export function zoneOf(accountsServer: string): string {
+  const host = accountsServer.replace('https://', '');
+  if (host === 'accounts.zohocloud.ca') return 'ca';
+  return host.replace('accounts.zoho.', '') || 'com';
+}
 
 export interface ZohoDeps {
   pool: Pool;
@@ -129,8 +169,14 @@ function safeEqual(a: string, b: string): boolean {
  * Без проверки подменённый `accounts-server` увёл бы обмен кода — вместе
  * с нашим client_secret — на чужой сервер.
  */
-export function safeAccountsServer(raw: string | undefined): string | null {
-  if (!raw) return DEFAULT_ACCOUNTS;
+export function safeAccountsServer(
+  raw: string | undefined,
+  fallback: string = AUTH_ACCOUNTS,
+): string | null {
+  // Параметра нет — значит Zoho никуда не переносила, и зона та же,
+  // в которой мы начали вход. Подставлять «нашу» нельзя: обмен кода
+  // ушёл бы не на тот сервер.
+  if (!raw) return fallback;
   let url: URL;
   try {
     url = new URL(raw);
@@ -226,7 +272,7 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
     }
 
     const state = signState({ t: auth.tenantId, u: auth.userId, exp: Date.now() + 15 * 60_000 });
-    const u = new URL(`${DEFAULT_ACCOUNTS}/oauth/v2/auth`);
+    const u = new URL(`${AUTH_ACCOUNTS}/oauth/v2/auth`);
     u.searchParams.set('client_id', opts.clientId);
     u.searchParams.set('response_type', 'code');
     u.searchParams.set('redirect_uri', redirectUri);
@@ -278,8 +324,20 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
       });
       const token = (await res.json()) as TokenResponse;
       if (!res.ok || token.error || !token.refresh_token || !token.access_token) {
-        app.log.warn({ status: res.status, error: token.error }, 'Обмен кода Zoho не удался');
-        return back('zoho-error=exchange');
+        /*
+         * invalid_client от чужой зоны — не «попробуйте ещё раз».
+         * Zoho так отвечает, когда дата-центр этой организации не
+         * включён в консоли приложения или заведён со своим секретом:
+         * сколько ни повторяй, ответ будет тот же. Поэтому отдаём
+         * отдельный код — человек должен прочитать, что делать, а не
+         * нажимать «подключить» по кругу.
+         */
+        const bad = String(token.error ?? '');
+        app.log.warn(
+          { status: res.status, error: bad, accounts, zone: zoneOf(accounts) },
+          'Обмен кода Zoho не удался',
+        );
+        return back(bad === 'invalid_client' ? 'zoho-error=client' : 'zoho-error=exchange');
       }
 
       const apiDomain = apiDomainFor(accounts, token.api_domain);
@@ -319,7 +377,7 @@ export function registerZoho(app: FastifyInstance, opts: ZohoDeps): void {
             st.t,
             first.zgid,
             first.company_name ?? null,
-            req.query.location ?? 'eu',
+            req.query.location ?? zoneOf(accounts),
             accounts,
             apiDomain,
             encryptJson(masterKey, st.t, { refreshToken: token.refresh_token }),
