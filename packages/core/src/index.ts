@@ -13,6 +13,7 @@ export * from './crm-simple.js';
 export * from './bitrix.js';
 export * from './bitrix-order.js';
 export * from './crm-settings.js';
+export * from './zoho-http.js';
 export * from './zoho-token.js';
 export * from './viber.js';
 export * from './gateway.js';

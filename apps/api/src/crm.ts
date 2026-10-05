@@ -48,6 +48,7 @@ import {
   convertedContactId,
   dropZohoToken,
   zohoAccessToken,
+  zohoBody,
   zohoRecordUrl,
   type CrmKind,
   type PipedriveTokens,
@@ -386,7 +387,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
       const res = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) return { error: await zohoWhy(res, z.inst, tenantId) };
-      return { body: await res.json() };
+      return { body: await zohoBody(res) };
     };
 
     const own = await ask('fields', { module });
@@ -702,8 +703,8 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       });
 
       let accountId: string | null = null;
-      if (found.status !== 204 && found.ok) {
-        const body = (await found.json()) as { data?: Array<{ id?: string }> };
+      if (found.ok) {
+        const body = (await zohoBody(found)) as { data?: Array<{ id?: string }> };
         accountId = body.data?.[0]?.id ?? null;
       }
 
@@ -780,7 +781,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       if (res.status === 204) break;
       if (!res.ok) return reply.code(502).send(await zohoWhy(res, z.inst, a.tenantId));
 
-      const got = catalogPage(await res.json());
+      const got = catalogPage(await zohoBody(res));
       for (const item of got.items) items.push(item);
       if (!got.more) break;
       if ((page + 1) * CATALOG_PAGE > CATALOG_MAX) truncated = true;
@@ -982,7 +983,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       { headers: z.head, signal: AbortSignal.timeout(20_000) },
     );
     if (!who.ok) return reply.code(502).send(await zohoWhy(who, z.inst, a.tenantId));
-    const whoBody = (await who.json()) as {
+    const whoBody = (await zohoBody(who)) as {
       data?: Array<{ Account_Name?: { id?: string; name?: string } }>;
     };
     const accountId = whoBody.data?.[0]?.Account_Name?.id;
@@ -1052,7 +1053,7 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
         url.searchParams.set('fields', 'Product_Name,Product_Code');
         const got = await fetch(url, { headers: z.head, signal: AbortSignal.timeout(20_000) });
         if (got.ok) {
-          for (const row of catalogPage(await got.json()).items) {
+          for (const row of catalogPage(await zohoBody(got)).items) {
             names.set(row.id, row.name || row.code);
           }
         }

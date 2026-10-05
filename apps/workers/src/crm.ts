@@ -11,6 +11,7 @@ import {
   withSystem,
   withTenant,
   zohoAccessToken,
+  zohoBody,
   type CrmKind,
   type CrmSyncJob,
   type Pool,
@@ -136,7 +137,7 @@ export function createCrmSync(deps: CrmDeps) {
         if (res.status === 401) await zohoRejected(tenantId, inst);
         continue;
       }
-      const body = (await res.json()) as { data?: Array<{ id?: string }> };
+      const body = (await zohoBody(res)) as { data?: Array<{ id?: string }> };
       const id = body.data?.[0]?.id;
       if (id) return { module: moduleName, id };
     }
@@ -183,7 +184,7 @@ export function createCrmSync(deps: CrmDeps) {
       signal: AbortSignal.timeout(20_000),
     });
 
-    const body = (await res.json()) as {
+    const body = (await zohoBody(res)) as {
       data?: Array<{ code?: string; details?: { id?: string }; message?: string }>;
     };
     const first = body.data?.[0];
@@ -221,7 +222,7 @@ export function createCrmSync(deps: CrmDeps) {
       if (res.status === 401) await zohoRejected(tenantId, inst);
       return null;
     }
-    const body = (await res.json()) as { users?: Array<{ id?: string; email?: string }> };
+    const body = (await zohoBody(res)) as { users?: Array<{ id?: string; email?: string }> };
     const want = email.trim().toLowerCase();
     const hit = (body.users ?? []).find((u) => (u.email ?? '').toLowerCase() === want);
     return hit?.id ?? null;
