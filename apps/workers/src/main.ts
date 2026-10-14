@@ -3437,7 +3437,11 @@ async function hookOutboundInner(job: OutboundJob): Promise<void> {
       contact_id: string | null;
       channel_type: string;
     }>(
-      `SELECT m.status, m.text, m.external_id, m.conversation_id,
+      /* Текст живёт в content, отдельной колонки text у сообщения нет.
+         Запрос с m.text падал на каждом исходящем, и падал тихо: ошибка
+         ловилась снаружи и уходила в лог одной строкой, а наружу это
+         выглядело как «вебхуки просто не приходят». */
+      `SELECT m.status, m.content->>'text' AS text, m.external_id, m.conversation_id,
               c.contact_id, ch.type AS channel_type
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
