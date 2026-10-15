@@ -49,6 +49,26 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v ? v : undefined;
 }
 
+/**
+ * Время события в миллисекундах, в чём бы его ни прислали.
+ *
+ * У Meta единицы разные и нигде рядом не написаны: Instagram шлёт
+ * `entry.time` в секундах, лента Facebook — `created_time` тоже в
+ * секундах, а личка — миллисекунды. Прочитать секунды как
+ * миллисекунды — это 1970 год: сообщение сохраняется, но в списке
+ * диалогов оказывается ниже всего, что было за тридцать лет, и
+ * выглядит это как «комментарий не пришёл».
+ *
+ * Отличаем по величине, а не по источнику: в миллисекундах нынешнее
+ * время — тринадцать знаков, в секундах — десять. Порог в сто
+ * миллиардов разделяет их с запасом в обе стороны: как миллисекунды
+ * это 1973 год, как секунды — пятое тысячелетие.
+ */
+export function eventMillis(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return raw < 1e11 ? raw * 1000 : raw;
+}
+
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
 }
@@ -74,7 +94,7 @@ export function splitCommentPayload(payload: unknown): CommentEntry[] {
     const entry = obj(rawEntry);
     const channelExternalId = str(entry['id']);
     if (!channelExternalId) continue;
-    const entryTime = typeof entry['time'] === 'number' ? entry['time'] : undefined;
+    const entryTime = eventMillis(entry['time']);
 
     const events: CommentEvent[] = [];
     for (const rawChange of Array.isArray(entry['changes']) ? (entry['changes'] as unknown[]) : []) {
@@ -102,8 +122,7 @@ function facebookComment(value: Record<string, unknown>, entryTime?: number): Co
   const authorId = str(from['id']);
   if (!commentId || !authorId) return null;
 
-  // created_time в секундах, time пачки — в миллисекундах.
-  const created = typeof value['created_time'] === 'number' ? value['created_time'] * 1000 : undefined;
+  const created = eventMillis(value['created_time']);
 
   const ev: CommentEvent = {
     commentId,
