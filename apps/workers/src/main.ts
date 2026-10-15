@@ -1000,10 +1000,40 @@ async function handleInbound(job: InboundJob): Promise<void> {
   if (job.provider === 'meta') {
     const payload = job.payload as MetaWebhookPayload;
     if (payload.object === 'page' || payload.object === 'instagram') {
-      for (const entry of splitMessagingPayload(payload)) await handleMessagingEntry(entry);
+      const messaging = splitMessagingPayload(payload);
       // Комментарии приходят в тех же пачках, но другими полями, и
       // канал у них свой. Одна пачка может нести и то, и другое.
-      for (const entry of splitCommentPayload(payload)) await handleCommentEntry(entry);
+      const comments = splitCommentPayload(payload);
+
+      for (const entry of messaging) await handleMessagingEntry(entry);
+      for (const entry of comments) await handleCommentEntry(entry);
+
+      /*
+       * Пачка, из которой не вышло ничего.
+       *
+       * Раньше такая уходила в тишину: ни строки в логе, ни следа. А
+       * «вебхук пришёл, но ничего не произошло» и «вебхук не приходил
+       * вовсе» — это разные неисправности с разными причинами, и
+       * различить их было нечем. На отладке подписок это стоило суток.
+       *
+       * Поэтому здесь остаётся запись с полями, которые Meta прислала:
+       * по ним сразу видно, подписка ли не на то поле, пришёл ли
+       * пробный вызов из кабинета или канал просто не подключён.
+       */
+      if (!messaging.length && !comments.length) {
+        const fields = new Set<string>();
+        let withMessaging = 0;
+        for (const entry of payload.entry ?? []) {
+          for (const change of entry.changes ?? []) if (change.field) fields.add(change.field);
+          if (Array.isArray(entry.messaging) && entry.messaging.length) withMessaging += 1;
+        }
+        log('debug', 'Вебхук Meta ни во что не превратился', {
+          object: payload.object,
+          entries: (payload.entry ?? []).length,
+          fields: Array.from(fields).join(',') || 'нет',
+          withMessaging,
+        });
+      }
       return;
     }
     const phoneNumberId = extractWhatsAppPhoneNumberId(payload);
