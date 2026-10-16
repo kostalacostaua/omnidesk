@@ -1136,6 +1136,18 @@ export const INBOX_HTML = `<!DOCTYPE html>
     border:1px solid var(--note-line);border-radius:12px;padding:10px 14px;
     font-size:13.5px;line-height:1.5;color:var(--t1);white-space:pre-wrap;
     word-wrap:break-word}
+  /* Отметка о звонке — та же карточка, что и заметка, только холоднее:
+     заметка это чьи-то слова, а звонок — событие, и жёлтый «кто-то
+     написал от руки» здесь обманывал бы. */
+  .note.call{background:var(--bg2);border-color:var(--line)}
+  .note.call .nh{color:var(--t2)}
+  /* Полоска «чим скінчився дзвінок» живёт над полем ответа и не
+     двигает переписку: она в той же рамке, что и ответ на сообщение. */
+  .callbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+    padding:0 2px 8px;font-size:12.5px}
+  .callbar .t{color:var(--t2);margin-right:2px}
+  .callbar .c{margin-left:auto;cursor:pointer;color:var(--t3);padding:0 6px;line-height:1}
+  .callbar .c:hover{color:var(--t1)}
   .note .nh{display:flex;gap:6px;align-items:center;font-size:11px;font-weight:600;
     color:var(--t3);margin-bottom:4px}
   .note .nh svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;
@@ -2124,6 +2136,11 @@ var replyTo = null;   // сообщение, на которое отвечае�
 var pendingFile = null; // выбранный, но ещё не отправленный файл
 var pendingUrl = null;  // ссылка на него для миниатюры; живёт ровно столько же
 var noteMode = false;   // поле пишет заметку для своих, а не ответ клиенту
+/* Начатый звонок: с какой секунды и по какому диалогу. Пока он здесь,
+   над полем ответа стоит полоска с вопросом, чем кончилось. Время
+   засекаем сами — набор идёт на устройстве оператора, и сколько он
+   длился, браузеру узнать неоткуда. */
+var callAsk = null;
 var el = function(id){ return document.getElementById(id) };
 
 function api(path, opts){
@@ -2597,6 +2614,21 @@ function renderHead(){
          Спрячь статус за вторым касанием, и его перестанут ставить
          вовсе. */
       '<div class="amore" id="aMore">' +
+      /* Звонок. Голос в кабинет мы не несём — его неоткуда взять: ни
+         сессия WhatsApp, ни сессия Telegram не дают звонить ничем, что
+         можно поставить людям в рабочий сервис. Кнопка делает то, что
+         и так делает оператор, только без переписывания номера рукой:
+         открывает набор на его устройстве. А за ней встаёт отметка в
+         ленте, ради которой всё и затевалось.
+
+         Без номера кнопки нет вовсе: под постом в инстаграме и в чате
+         на сайте звонить некуда, и серая кнопка «нельзя» сообщала бы
+         об этом каждый раз заново. */
+      (c.phone_e164
+        ? '<a class="ghost mini" id="aCall" href="tel:' + esc(c.phone_e164) + '" title="' +
+          L('Подзвонити ') + esc(c.phone_e164) + '">' + icon('phone') +
+          L('<span>Подзвонити</span>') + '</a>'
+        : '') +
       /* Передача конкретному человеку. Списком, а не поиском: операторов
          в смене единицы, и выпадающий список честнее показывает, что
          выбор невелик. */
@@ -2651,6 +2683,15 @@ function renderHead(){
   if (el('aMoreBtn')) el('aMoreBtn').onclick = function(e){
     e.stopPropagation();
     el('thead').classList.toggle('more-on');
+  };
+
+  /* Ссылку не перехватываем: пусть устройство само решает, чем
+     открыть набор номера. Наше дело — засечь время и поставить над
+     полем ответа вопрос, который иначе никто себе не задаст. */
+  if (el('aCall')) el('aCall').onclick = function(){
+    callAsk = { conv: current, at: Date.now() };
+    el('thead').classList.remove('more-on');
+    renderComposer(true);
   };
 
   if (el('aTake')) el('aTake').onclick = function(){
@@ -2912,6 +2953,29 @@ function loadThread(){
          ни пузыря, ни стороны, ни статуса доставки — доставлять её
          некому. Имя автора обязательно: через неделю «обіцяв знижку»
          без подписи — это неизвестно чьё обещание. */
+      /* Отметка о звонке стоит ровно там, где звонок случился: между
+         вопросом клиента и тем, что сказали после. Ни пузыря, ни
+         стороны — это не реплика, а событие. */
+      if (m.kind === 'call') {
+        var mins = c.seconds ? Math.floor(c.seconds / 60) : 0;
+        var secs = c.seconds ? c.seconds % 60 : 0;
+        var how =
+          c.result === 'answered'
+            ? L('Поговорили') +
+              (c.seconds
+                ? ' · ' + (mins ? mins + L(' хв ') : '') + secs + L(' с')
+                : '')
+            : c.result === 'no_answer' ? L('Не взяв трубку')
+            : L('Скинув дзвінок');
+        return day + '<div class="note call" data-mid="' + m.id + '"><div class="nh">' +
+          icon('phone') +
+          (m.direction === 'in' ? L('<span>Дзвінок клієнта</span>') : L('<span>Дзвінок</span>')) +
+          '<span>· </span>' + esc(how) + '<span>· </span>' +
+          esc(m.author_name || L('співробітник')) + '<span>· </span>' +
+          esc(clockTime(m.sent_at)) + '</div>' +
+          (c.text ? esc(c.text) : '') + '</div>';
+      }
+
       if (m.kind === 'note') {
         return day + '<div class="note" data-mid="' + m.id + '"><div class="nh">' +
           icon('pen') + L('<span>Нотатка для команди</span><span>· </span>') +
@@ -3160,7 +3224,21 @@ function renderComposer(force){
       esc(q.shortcut || q.title || '') + '</span></button>';
   }).join('');
 
+  /* Полоска стоит над полем ответа, а не окошком поверх страницы:
+     оператор возвращается в кабинет после разговора, и первое, что
+     он видит, — вопрос, на который ответить одним касанием. Окно он
+     закрыл бы не глядя. */
+  var callBar = callAsk && callAsk.conv === current
+    ? L('<div class="callbar"><div class="t">Дзвінок о ') + esc(clockTime(callAsk.at)) +
+      L(' — чим скінчився?</div>') +
+      L('<button class="mini" data-call="answered">Поговорили</button>') +
+      L('<button class="ghost mini" data-call="no_answer">Не взяв</button>') +
+      L('<button class="ghost mini" data-call="declined">Скинув</button>') +
+      '<div class="c" id="callCancel" title="' + L('Прибрати') + '">x</div></div>'
+    : '';
+
   box.innerHTML = '<div class="cbox' + (noteMode ? ' note-on' : '') + '">' +
+    callBar +
     (replyTo
       ? L('<div class="replybar"><div class="t"><b>Відповідь ') +
         (replyTo.mine ? L('на своє повідомлення') : L('клієнту')) + ':</b> ' +
@@ -3292,6 +3370,15 @@ function renderComposer(force){
   if (el('tpl')) el('tpl').onclick = toggleTemplates;
   if (el('ai')) el('ai').onclick = aiDraft;
   el('noteBtn').onclick = function(){ noteMode = !noteMode; renderComposer(true) };
+  if (el('callCancel')) el('callCancel').onclick = function(){
+    /* Отменить — значит «звонка не было»: промахнулись кнопкой или
+       передумали набирать. Писать в ленту тут нечего. */
+    callAsk = null;
+    renderComposer(true);
+  };
+  Array.prototype.forEach.call(box.querySelectorAll('[data-call]'), function(b){
+    b.onclick = function(){ saveCall(b.dataset.call) };
+  });
   Array.prototype.forEach.call(box.querySelectorAll('[data-qr]'), function(b){
     b.onclick = function(){
       var q = QR.filter(function(x){ return x.id === b.dataset.qr })[0];
@@ -3299,6 +3386,36 @@ function renderComposer(force){
     };
   });
   ta.focus();
+}
+
+/**
+ * Отметка о звонке.
+ *
+ * Звонить из браузера нам нечем: ни сессия WhatsApp, ни сессия
+ * Telegram не дают голоса ничем, что можно поставить людям в рабочий
+ * сервис, а строить ради кнопки медиасервер — это месяцы. Поэтому
+ * кнопка открывает набор на устройстве оператора, а сюда приходит то,
+ * чего без нас не было бы нигде: что звонок был, когда и чем кончился.
+ *
+ * Длительность считаем от нажатия кнопки до ответа на вопрос. Это не
+ * время разговора — это время отсутствия, и оно всегда чуть больше.
+ * Но оно наше и честное, а точного взять неоткуда: набор идёт мимо
+ * браузера. Поэтому «не взяв» и «скинув» идут без секунд вовсе: там
+ * измерять нечего, и число рядом только сбивало бы с толку.
+ */
+function saveCall(result){
+  if (!callAsk || !current) return;
+  var conv = callAsk.conv;
+  var body = { result: result };
+  if (result === 'answered') body.seconds = Math.round((Date.now() - callAsk.at) / 1000);
+  callAsk = null;
+  renderComposer(true);
+  api('/conversations/' + conv + '/calls', { method:'POST', body: body })
+    .then(function(){
+      toast(result === 'answered' ? L('Дзвінок записано') : L('Відмітку збережено'));
+      if (current === conv) loadThread();
+    })
+    .catch(function(){ toast(L('Не вдалося зберегти відмітку')) });
 }
 
 /**
@@ -10793,6 +10910,7 @@ var ICONS = {
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/>',
   card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  phone:'<path d="M15.5 21A12.5 12.5 0 0 1 3 8.5 2.5 2.5 0 0 1 5.5 6h2a1 1 0 0 1 1 .8l.6 2.6a1 1 0 0 1-.3 1l-1.4 1.3a11 11 0 0 0 4.9 4.9l1.3-1.4a1 1 0 0 1 1-.3l2.6.6a1 1 0 0 1 .8 1v2A2.5 2.5 0 0 1 15.5 21z"/>',
   help:'<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.4-2.8 4M12 17.5h.01"/>'
 };
 

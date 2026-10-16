@@ -1622,6 +1622,76 @@ app.post<{ Params: { id: string }; Body: { text?: string } }>(
 );
 
 /**
+ * Отметка о звонке.
+ *
+ * Голос мы не несём: ни Baileys, ни GramJS не дают звонить так, чтобы
+ * это можно было поставить людям в рабочий сервис, — и строить ради
+ * этого медиасервер значит месяцы работы ради кнопки. Оператор звонит
+ * тем, чем звонил всегда: кнопка в шапке открывает набор номера на его
+ * устройстве.
+ *
+ * А вот след звонка — наш. Без него тот, кто возьмёт диалог следующим,
+ * видит вопрос клиента без ответа и спрашивает то же самое второй раз,
+ * а в отчёте половина работы смены не существует.
+ *
+ * Поэтому отметка стоит в ленте по времени и ничем не отличается от
+ * заметки по части безопасности: kind у неё свой, в очередь отправки
+ * её никто не кладёт, и «случайно уйти клиенту» ей физически нечем.
+ */
+const CALL_RESULTS = ['answered', 'no_answer', 'declined'] as const;
+type CallResult = (typeof CALL_RESULTS)[number];
+
+app.post<{
+  Params: { id: string };
+  Body: { result?: string; direction?: string; seconds?: number; text?: string };
+}>('/conversations/:id/calls', async (req, reply) => {
+  const auth = requireAuth(req as never);
+  if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+  const result = String(req.body?.result ?? '') as CallResult;
+  if (!CALL_RESULTS.includes(result)) return reply.code(400).send({ error: 'bad_result' });
+
+  // Звонит обычно оператор, но клиент перезванивает — и это тот же
+  // факт, записанный с другой стороны.
+  const direction = req.body?.direction === 'in' ? 'in' : 'out';
+
+  /* Длительность — число секунд, а не строка «2 хв»: по строке не
+     посчитать ни среднего разговора, ни времени смены. Верхняя
+     граница в четыре часа не от недоверия, а потому, что всё
+     большее — забытая открытой вкладка, а не разговор. */
+  const raw = req.body?.seconds;
+  const seconds =
+    typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? Math.min(Math.floor(raw), 4 * 60 * 60)
+      : null;
+
+  const text = (req.body?.text ?? '').trim().slice(0, 2048);
+
+  const row = await withTenant(pool, auth.tenantId, async (db) => {
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO messages
+         (tenant_id, conversation_id, channel_id, direction, sender_type,
+          sender_user_id, content, status, kind)
+       -- status = note, как у заметки: это не её вид, а единственное
+       -- значение, означающее «доставлять нечего». Второе такое же
+       -- пришлось бы помнить каждой будущей проверке.
+       SELECT c.tenant_id, c.id, c.channel_id, $4, 'agent', $2,
+              jsonb_build_object('result', $3::text, 'seconds', $5::int, 'text', $6::text),
+              'note', 'call'
+         FROM conversations c
+        WHERE c.id = $1
+          AND ${channelScope('c.channel_id', '$2')}
+       RETURNING id`,
+      [req.params.id, auth.userId, result, direction, seconds, text || null],
+    );
+    return rows[0] ?? null;
+  });
+
+  if (!row) return reply.code(404).send({ error: 'conversation_not_found' });
+  return { id: row.id };
+});
+
+/**
  * Аватар контакта.
  *
  * Отдаётся тем же способом, что и вложения: через RLS, без явной
