@@ -98,3 +98,33 @@ describe('номер и чат', () => {
     expect(chatToPhone('213547778889990@lid')).toBeNull();
   });
 });
+
+/*
+ * Имя из исходящего — своё, не клиентово.
+ *
+ * WhatsApp кладёт в каждое сообщение pushName того, кто его отправил.
+ * В исходящем это владелец номера. Имя контакта ставится один раз, при
+ * создании, и чат, начавшийся ответом с телефона, получал в списке имя
+ * владельца: три разных клиента показывались одним человеком.
+ */
+describe('имя собеседника в номерном WhatsApp', () => {
+  it('берётся из входящего', () => {
+    const u = normalizeGateway(IN, { tenantId: 't1', channelId: 'c1' });
+    expect(u?.peerProfile.name).toBe('Валентина');
+  });
+
+  it('из исходящего не берётся', () => {
+    const own: GatewayMessage = {
+      ...IN,
+      id: 'OWN1',
+      name: 'Slastin Kostiantyn',
+      text: 'Доброго дня, зараз підкажу',
+      incoming: false,
+    };
+    const u = normalizeGateway(own, { tenantId: 't1', channelId: 'c1' });
+    expect(u?.direction).toBe('out');
+    // Телефон собеседника в исходящем настоящий — его берём.
+    expect(u?.peerProfile.phone).toBe('+380509876543');
+    expect(u?.peerProfile.name).toBeUndefined();
+  });
+});

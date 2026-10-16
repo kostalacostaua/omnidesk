@@ -299,6 +299,23 @@ async function persistMessage(
       );
     }
 
+    /*
+     * Имя известного контакта. Имя ставится при создании, и до сих
+     * пор другого случая не было: в первом же сообщении оно есть.
+     * У номерного WhatsApp бывает иначе — контакт заводит исходящее с
+     * телефона, в котором имени собеседника нет вовсе, — и такой чат
+     * оставался «Без імені», пока клиент не напишет. Теперь имя
+     * приходит с первым входящим. Пустое поле заполняем, заполненное
+     * не трогаем: там может стоять то, что вписал оператор.
+     */
+    if (contactId && msg.peerProfile.name) {
+      await db.query(
+        `UPDATE contacts SET display_name = $2
+          WHERE id = $1 AND (display_name IS NULL OR display_name = '')`,
+        [contactId, msg.peerProfile.name],
+      );
+    }
+
     // 2. Диалог + окно ответа
     const window = computeResponseWindow(msg.channelType, msg.sentAt);
     const move = unreadMove(msg.direction, msg.senderType);

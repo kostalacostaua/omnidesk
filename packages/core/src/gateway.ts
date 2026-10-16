@@ -124,7 +124,10 @@ export function normalizeGateway(
     externalId: msg.id,
     peerId: msg.chatId,
     peerProfile: {
-      ...(msg.name ? { name: msg.name } : {}),
+      /* Имя — только из входящего. В исходящем WhatsApp присылает имя
+         отправителя, то есть владельца номера, и записать его как имя
+         собеседника значит назвать клиента своим же именем. */
+      ...(msg.incoming && msg.name ? { name: msg.name } : {}),
       ...(phone ? { phone } : {}),
     },
     /* Сообщение, отправленное с телефона владельца, — тоже часть

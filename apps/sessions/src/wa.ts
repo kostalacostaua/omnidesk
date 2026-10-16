@@ -292,7 +292,14 @@ export function startWa(deps: WaDeps): { stop: () => Promise<void> } {
     return {
       id,
       chatId,
-      name: (raw['pushName'] as string) || null,
+      /*
+       * pushName — имя ОТПРАВИТЕЛЯ, а отправитель своего же сообщения
+       * мы сами. Раньше это уходило дальше как имя собеседника, и
+       * каждый чат, где владелец ответил с телефона первым, получал в
+       * списке его собственное имя: три разных клиента показывались
+       * одним человеком.
+       */
+      name: (key['fromMe'] ? null : (raw['pushName'] as string)) || null,
       text: body,
       ...(fileKey ? { fileKey } : {}),
       ...(fileName ? { fileName } : {}),

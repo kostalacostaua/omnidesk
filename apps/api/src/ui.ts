@@ -2303,6 +2303,17 @@ function windowState(c){
   return { open:true, left: h > 0 ? h + L(' год ') + m + L(' хв') : m + L(' хв') };
 }
 
+/* Как назвать чат в списке.
+
+   Имени у собеседника может не быть вовсе: номерной WhatsApp заводит
+   контакт исходящим с телефона, и до первого ответа клиента имя
+   неизвестно. Телефон в этом случае лучше, чем «Без імені»: несколько
+   безымянных чатов подряд выглядели одним и тем же человеком, и
+   открыть нужный можно было только наугад. */
+function convName(c){
+  return c.display_name || c.phone_e164 || L('Без імені');
+}
+
 function initials(name){
   var s = String(name || '?').trim();
   if (!s) return '?';
@@ -2406,11 +2417,12 @@ function renderList(){
       '" data-id="' + c.id + '">' +
       '<div class="avwrap">' +
         '<div class="av" data-av="' + c.contact_id + '" style="' +
-          avStyle(c.display_name || c.id) + '">' + esc(initials(c.display_name)) + '</div>' +
+          avStyle(c.display_name || c.phone_e164 || c.id) + '">' +
+          esc(initials(c.display_name || c.phone_e164)) + '</div>' +
         chBadge(c.channel_type) +
       '</div>' +
       '<div class="body">' +
-        '<div class="r1"><span class="nm">' + esc(c.display_name || L('Без імені')) + '</span>' +
+        '<div class="r1"><span class="nm">' + esc(convName(c)) + '</span>' +
         '<span class="tm">' + esc(fmtTime(c.last_message_at)) + '</span></div>' +
         '<div class="r2"><span class="pv">' + esc(c.preview || '') + '</span>' + mark(c) + '</div>' +
         marks +
