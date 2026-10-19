@@ -62,10 +62,36 @@ export function isAuthPath(path: string): boolean {
   return path === '/auth' || path.startsWith('/auth/');
 }
 
+/*
+ * Чтение, которое всё-таки не для всех.
+ *
+ * Выше сказано, что чтение открыто всем ролям, и это верно для
+ * списков: в них нет секретов. Журнал действий — исключение, и вот
+ * почему. Он отвечает на вопрос «кто читал эту переписку», то есть
+ * показывает оператору, чем заняты коллеги, с каких адресов они
+ * входят и во сколько. Это сведения о сотрудниках, а не о работе, и
+ * смотреть их должен тот, кто за сотрудников отвечает.
+ */
+const ADMIN_READS = ['/audit'];
+
 /** Какой уровень нужен для этого запроса. */
 export function requiredLevel(method: string, path: string): Level {
   const m = method.toUpperCase();
-  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return 'any';
+  const clean0 = path.split('?')[0] ?? path;
+
+  /* Отметка о своей выгрузке — не чтение журнала и не настройка.
+     Её ставит кабинет за того, кто нажал кнопку, а нажать может любой,
+     кому вообще дали смотреть отчёты, — наблюдатель в том числе.
+     Требовать здесь прав значило бы не записать ровно тех, за кем
+     чаще всего и смотрят. */
+  if (clean0 === '/audit/export') return 'any';
+
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') {
+    for (const prefix of ADMIN_READS) {
+      if (clean0 === prefix || clean0.startsWith(prefix + '/')) return 'admin';
+    }
+    return 'any';
+  }
 
   // Публичные ручки: заявка с промо-страницы и вход по коду.
   if (isAuthPath(path) || path === '/leads') return 'any';

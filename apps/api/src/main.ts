@@ -71,6 +71,7 @@ import { registerWebchat } from './webchat.js';
 import { registerSupport } from './support.js';
 import { registerCustom } from './custom.js';
 import { registerStatuses } from './statuses.js';
+import { registerAudit } from './audit.js';
 import { registerAdmin } from './admin.js';
 import { registerAnalytics } from './analytics.js';
 import { backfillEvents } from './backfill.js';
@@ -775,6 +776,18 @@ registerEmailAuth(app, {
  * Вебхуки клиента: настройка, ключи и журнал доставок. Сама доставка —
  * в воркерах, здесь только очередь.
  */
+/*
+ * Журнал действий. Регистрируется раньше остальных: его onResponse
+ * должен висеть на всех ручках, в том числе тех, что заведут завтра.
+ */
+const audit = registerAudit(app, {
+  pool,
+  requireAuth: (req) => requireAuth(req as never),
+  // Та же переменная, что у чистки в воркерах: срок, названный
+  // человеку на экране, и срок, по которому чистят, обязаны совпадать.
+  keepDays: Number(process.env['AUDIT_KEEP_DAYS'] ?? 365),
+});
+
 registerWebhooks(app, {
   pool,
   masterKey,
@@ -1480,6 +1493,18 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
   const auth = requireAuth(req as never);
   if (!auth) return reply.code(401).send({ error: 'unauthorized' });
 
+  /*
+   * Кто читал переписку — главный вопрос анкеты безопасности, и
+   * отвечает на него эта строка. Раз в полчаса на человека и диалог:
+   * лента обновляется сама, и без этого в журнале было бы по строке
+   * каждые три секунды на каждую открытую вкладку.
+   */
+  audit.note(
+    req as never,
+    { action: 'conversation.read', resourceType: 'conversation', resourceId: req.params.id },
+    `conv:${req.params.id}`,
+  );
+
   const rows = await withTenant(pool, auth.tenantId, async (db) => {
     // Фильтра по tenant_id здесь намеренно нет: его ставит RLS.
     // Чужой conversationId просто вернёт пустой список, а не чужую переписку.
@@ -1737,6 +1762,37 @@ app.post<{
 
   if (!row) return reply.code(404).send({ error: 'conversation_not_found' });
   return { id: row.id };
+});
+
+/**
+ * Выгрузка данных — отметка от кабинета.
+ *
+ * Таблицы в отчётах собираются в браузере из того, что он уже
+ * получил: отдельной ручки «скачать» у нас нет, и перехватить
+ * выгрузку на сервере негде. Поэтому отмечает её сам кабинет, когда
+ * человек нажимает кнопку.
+ *
+ * Чего эта запись НЕ делает, надо сказать прямо: она не мешает
+ * выгрузить данные молча. К моменту нажатия они уже в браузере, и тот,
+ * кто захочет скрыть выгрузку, просто не пошлёт этот запрос. Строка
+ * отвечает на вопрос «кто и что выгружал» про обычную работу обычных
+ * людей — а на вопрос «мог ли кто-то унести данные незаметно»
+ * отвечает отметка о чтении, которая ставится на сервере и обойти её
+ * нечем.
+ */
+app.post<{ Body: { what?: string; rows?: number } }>('/audit/export', async (req, reply) => {
+  const auth = requireAuth(req as never);
+  if (!auth) return reply.code(401).send({ error: 'unauthorized' });
+
+  const what = String(req.body?.what ?? '').slice(0, 80) || 'csv';
+  const count = Number(req.body?.rows);
+  audit.note(req as never, {
+    action: 'data.export',
+    resourceType: 'report',
+    resourceId: what,
+    metadata: { rows: Number.isFinite(count) && count >= 0 ? Math.floor(count) : null },
+  });
+  return { ok: true };
 });
 
 /**

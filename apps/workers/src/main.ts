@@ -3842,8 +3842,49 @@ void (async function notifyCleanupLoop(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    try {
+      await auditCleanup();
+    } catch (err) {
+      log('warn', 'Чистка журнала действий не удалась', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 })();
+
+/**
+ * Срок хранения журнала действий.
+ *
+ * Журнал, который растёт вечно, однажды кончается не решением, а
+ * местом на диске — и тогда его чистят второпях и целиком. Год
+ * назначен не наугад: столько длится обычный годовой договор, и
+ * вопрос «кто читал нашу переписку» задают в пределах его срока.
+ *
+ * Чистим пачками по десять тысяч: один DELETE на годовой хвост держал
+ * бы таблицу под замком столько, сколько в ней накопилось, а писать в
+ * неё надо всё это время.
+ */
+const AUDIT_KEEP_DAYS = Number(process.env['AUDIT_KEEP_DAYS'] ?? 365);
+
+async function auditCleanup(): Promise<void> {
+  if (!Number.isFinite(AUDIT_KEEP_DAYS) || AUDIT_KEEP_DAYS <= 0) return;
+
+  for (let pass = 0; pass < 50; pass += 1) {
+    const gone = await withSystem(pool, 'чистка журнала действий', async (db) => {
+      const { rowCount } = await db.query(
+        `DELETE FROM audit_log
+          WHERE id IN (
+            SELECT id FROM audit_log
+             WHERE created_at < now() - ($1::int * interval '1 day')
+             LIMIT 10000
+          )`,
+        [Math.floor(AUDIT_KEEP_DAYS)],
+      );
+      return rowCount ?? 0;
+    });
+    if (gone < 10000) return;
+  }
+}
 
 /**
  * Воркер связки с CRM.

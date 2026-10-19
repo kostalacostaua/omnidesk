@@ -5718,7 +5718,11 @@ var SET_PAGES = [
   { v:'profile',  t:'Профіль',    admin:false },
   { v:'users',    t:'Команда',    admin:true  },
   { v:'statuses', t:'Статуси',    admin:true  },
-  { v:'notify',   t:'Сповіщення', admin:true  }
+  { v:'notify',   t:'Сповіщення', admin:true  },
+  /* Журнал стоит рядом с «Командою» не случайно: вопрос, на который
+     он отвечает, — «хто з ваших співробітників читав нашу
+     переписку», — человек идёт искать именно туда. */
+  { v:'audit',    t:'Журнал',     admin:true  }
 ];
 
 /** Есть ли такая страница в настройках. По ней подсвечивается рейл. */
@@ -9459,6 +9463,92 @@ function ntAdd(){
     tg + mail + pushTile + '</div></div>';
 }
 
+/**
+ * Журнал действий.
+ *
+ * Отвечает на единственный вопрос, ради которого его завели: кто и
+ * когда что сделал в этом кабинете. Страница намеренно скучная —
+ * список строк без графиков и сводок: в журнал приходят, когда надо
+ * найти одну строку, а не посмотреть на красивое.
+ *
+ * Названия действий переводим в слова. «PATCH /users/:id» — верно, но
+ * человек, заполняющий анкету безопасности, должен читать «змінив
+ * роль співробітника», а не разбирать методы HTTP.
+ */
+var AUDIT_WORDS = {
+  'conversation.read': 'Читав переписку',
+  'data.export': 'Вивантажив дані',
+  'PATCH /users/:id': 'Змінив співробітника',
+  'POST /users': 'Запросив співробітника',
+  'DELETE /users/:id': 'Видалив співробітника',
+  'POST /conversations/:id/messages': 'Відповів клієнту',
+  'POST /conversations/:id/notes': 'Залишив нотатку',
+  'POST /conversations/:id/calls': 'Відмітив дзвінок',
+  'DELETE /channels/:id': 'Відключив канал',
+  'POST /settings/pipedrive/attach': 'Підключив Pipedrive',
+  'DELETE /settings/crm/:id': 'Відключив CRM',
+  'PATCH /tenant': 'Змінив дані компанії',
+  'PATCH /me': 'Змінив свій профіль'
+};
+
+function auditWord(a){
+  if (AUDIT_WORDS[a]) return L(AUDIT_WORDS[a]);
+  /* Чего нет в словаре — показываем как есть. Это лучше пустоты:
+     ручку завели вчера, а строка о ней нужна сегодня. */
+  return a;
+}
+
+var AUD = { rows: [], q: '', who: '' };
+
+function tabAudit(){
+  var q = [];
+  if (AUD.q) q.push('action=' + encodeURIComponent(AUD.q));
+  if (AUD.who) q.push('userId=' + encodeURIComponent(AUD.who));
+
+  api('/audit' + (q.length ? '?' + q.join('&') : '')).then(function(d){
+    AUD.rows = d.entries || [];
+    var keep = d.keepDays || 365;
+
+    var who = '<select id="auWho"><option value="">' + L('Усі співробітники') + '</option>' +
+      (USERS || []).map(function(u){
+        return '<option value="' + u.id + '"' + (AUD.who === u.id ? ' selected' : '') +
+          '>' + esc(u.full_name || u.email) + '</option>';
+      }).join('') + '</select>';
+
+    var rows = AUD.rows.map(function(r){
+      var what = auditWord(r.action);
+      return '<tr><td style="white-space:nowrap">' + esc(fmtDate(r.created_at)) + ' ' +
+        esc(clockTime(r.created_at)) + '</td>' +
+        '<td>' + esc(r.user_name || r.user_email || L('—')) + '</td>' +
+        '<td>' + esc(what) + '</td>' +
+        '<td class="dim" style="font-size:12px">' + esc(r.resource_id || '') + '</td>' +
+        '<td class="dim" style="font-size:12px">' + esc(r.ip || '') + '</td></tr>';
+    }).join('');
+
+    pageBox().innerHTML = '<div class="pg">' + setNav('audit') +
+      pageHead(L('Журнал дій'),
+        L('Хто і коли що робив у цьому кабінеті. Записи зберігаються ') + keep + L(' днів.')) +
+      '<div class="card">' +
+      '<div class="row2" style="margin-bottom:10px">' +
+      '<input id="auQ" placeholder="' + L('дія') + '" value="' + esc(AUD.q) + '">' +
+      who + '</div>' +
+      (rows
+        ? '<div style="overflow:auto"><table class="tbl"><thead><tr>' +
+          L('<th>Коли</th><th>Хто</th><th>Що</th><th>Над чим</th><th>Звідки</th>') +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : L('<div class="empty">Поки що порожньо</div>')) +
+      '</div></div>';
+
+    /* Переключатель разделов слушается на всём разделе страницы —
+       привязывать его здесь было бы вторым таким местом. */
+    if (el('auQ')) el('auQ').onchange = function(){ AUD.q = this.value.trim(); tabAudit() };
+    if (el('auWho')) el('auWho').onchange = function(){ AUD.who = this.value; tabAudit() };
+  }).catch(function(){
+    pageBox().innerHTML = '<div class="pg">' + setNav('audit') +
+      L('<div class="empty">Журнал недоступний</div>') + '</div>';
+  });
+}
+
 function tabNotify(){
   api('/settings/notify').then(function(d){
     NT.data = d;
@@ -9790,6 +9880,14 @@ function csvDump(name, head, rows){
   a.download = name + '-' + new Date().toISOString().slice(0, 10) + '.csv';
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href) }, 1000);
+
+  /* Отметка в журнал. Таблица собирается здесь, в браузере, из того,
+     что он уже получил, — перехватить выгрузку на сервере негде.
+     Поэтому о ней сообщаем сами. Молча не удалось — не беда: ответ
+     на вопрос «хто виніс дані» даёт отметка о чтении, её ставит
+     сервер и обойти её нечем. */
+  api('/audit/export', { method:'POST', body:{ what: name, rows: rows.length } })
+    .catch(function(){});
 }
 
 /** Доля в процентах, без деления на ноль. */
@@ -12593,7 +12691,8 @@ var VIEWS = {
   users: tabUsers,
   profile: tabProfile,
   integrations: pageIntegrations,
-  notify: tabNotify
+  notify: tabNotify,
+  audit: tabAudit
 };
 
 /**
