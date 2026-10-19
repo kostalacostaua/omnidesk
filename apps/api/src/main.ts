@@ -48,6 +48,7 @@ import {
   isHookEvent,
   type HookEvent,
   type WebhookJob,
+  mediaHeaders,
 } from '@omnidesk/core';
 import { INBOX_HTML, UI_BUILD } from './ui.js';
 import { registerSettings } from './settings.js';
@@ -1819,9 +1820,14 @@ app.get<{ Params: { contactId: string } }>('/avatars/:contactId', async (req, re
     return reply.code(204).header('cache-control', 'private, max-age=300').send();
   }
 
+  /* Лицо приходит из канала вместе с типом, который назначил не мы.
+     Что не картинка — то скачивается, а не открывается страницей. */
+  const head = mediaHeaders(file.contentType, 'avatar');
   return reply
-    .type(file.contentType || 'image/jpeg')
+    .type(head.type)
     .header('cache-control', 'private, max-age=86400')
+    .header('content-disposition', head.disposition)
+    .header('x-content-type-options', 'nosniff')
     .send(file.body);
 });
 
@@ -2007,9 +2013,15 @@ app.get<{ Params: { id: string; index: string } }>(
     const file = await storage.get(String(picked['storageKey']));
     if (!file) return reply.code(404).send({ error: 'not_found' });
 
+    /* Тип файла в шаблоне назначил тот, кто его загрузил. Сотрудник —
+       не посторонний, но и повышать себе права через чужую вкладку он
+       не должен мочь. */
+    const head = mediaHeaders(file.contentType, picked['filename'] ?? null);
     return reply
-      .type(file.contentType || 'application/octet-stream')
+      .type(head.type)
       .header('cache-control', 'private, max-age=86400')
+      .header('content-disposition', head.disposition)
+      .header('x-content-type-options', 'nosniff')
       .send(file.body);
   },
 );
@@ -2179,11 +2191,16 @@ app.get<{ Params: { messageId: string; index: string } }>(
     }
 
     const att = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows } = await db.query<{ storage_key: string | null; mime: string | null }>(
+      const { rows } = await db.query<{
+        storage_key: string | null;
+        mime: string | null;
+        filename: string | null;
+      }>(
         // ::int обязателен: без приведения параметр считается текстом,
         // и обращение к массиву по ключу «0» возвращает NULL.
         `SELECT content->'attachments'->($2)::int->>'storageKey' AS storage_key,
-                content->'attachments'->($2)::int->>'mime'       AS mime
+                content->'attachments'->($2)::int->>'mime'       AS mime,
+                content->'attachments'->($2)::int->>'filename'   AS filename
            FROM messages
           WHERE id = $1
           LIMIT 1`,
@@ -2197,12 +2214,23 @@ app.get<{ Params: { messageId: string; index: string } }>(
     const obj = await storage.get(att.storage_key);
     if (!obj) return reply.code(404).send({ error: 'not_stored' });
 
+    /*
+     * Тип назначаем сами. Он пришёл из сообщения, а сообщение — от
+     * клиента: Telegram разрешает отправителю выставить mime_type
+     * каким угодно. Кабинет забирает файл запросом с токеном и
+     * открывает локальную копию — blob наследует тип ответа и наш
+     * домен, и text/html оттуда читает localStorage с этим самым
+     * токеном. Вектор заходит снаружи, из обычной переписки.
+     */
+    const head = mediaHeaders(att.mime ?? obj.contentType, att.filename);
     return reply
-      .type(att.mime ?? obj.contentType)
+      .type(head.type)
       // Вложения неизменяемы: ключ содержит идентификатор сообщения,
       // и содержимое по нему никогда не поменяется.
       .header('cache-control', 'private, max-age=86400, immutable')
       .header('content-length', String(obj.size))
+      .header('content-disposition', head.disposition)
+      .header('x-content-type-options', 'nosniff')
       .send(obj.body);
   },
 );

@@ -21,6 +21,7 @@ import {
   type InboundJob,
   type Pool,
   type Storage,
+  mediaHeaders,
 } from '@omnidesk/core';
 
 /**
@@ -390,20 +391,21 @@ export function registerWebchat(app: FastifyInstance, deps: WebchatDeps): void {
     const obj = await storage.get(att.storage_key);
     if (!obj) return reply.code(404).send({ error: 'not_stored' });
 
-    const name = safeFileName(att.filename ?? 'file');
+    /* Тип назначаем сами, а не берём из сообщения. Здесь это уже было
+       почти правильно: html уходил на скачивание. Но «картинка» решалась
+       по началу строки, а image/svg+xml — это документ со скриптом, и
+       он проходил в окно как картинка. Список безопасных типов такого
+       не знает. */
+    const head = mediaHeaders(
+      att.mime ?? obj.contentType,
+      att.filename ?? 'file',
+      req.query?.download === '1' ? 'attachment' : undefined,
+    );
     return reply
-      .type(att.mime ?? obj.contentType)
+      .type(head.type)
       .header('cache-control', 'private, max-age=86400, immutable')
       .header('content-length', String(obj.size))
-      /* Картинку показываем в окне, остальное отдаём на скачивание.
-         Без attachment браузер попытается открыть чужой html прямо на
-         нашем домене — а это уже не файл, а страница от нашего имени. */
-      .header(
-        'content-disposition',
-        (webchatFileKind(att.mime ?? '') === 'image' && req.query?.download !== '1'
-          ? 'inline'
-          : 'attachment') + `; filename*=UTF-8''${encodeURIComponent(name)}`,
-      )
+      .header('content-disposition', head.disposition)
       .header('x-content-type-options', 'nosniff')
       .send(obj.body);
   });
