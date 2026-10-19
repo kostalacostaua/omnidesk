@@ -834,6 +834,7 @@ registerWidget(app, {
       clientId: process.env['PIPEDRIVE_CLIENT_ID'] ?? '',
       clientSecret: process.env['PIPEDRIVE_CLIENT_SECRET'] ?? '',
       appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+      stateSecret: JWT_SECRET,
     },
   }),
 });
@@ -920,6 +921,7 @@ registerCrm(app, {
     clientId: process.env['PIPEDRIVE_CLIENT_ID'] ?? '',
     clientSecret: process.env['PIPEDRIVE_CLIENT_SECRET'] ?? '',
     appUrl: (process.env['APP_URL'] ?? '').replace(/[/]+$/, ''),
+    stateSecret: JWT_SECRET,
   },
   zoho: {
     clientId: process.env['ZOHO_CLIENT_ID'] ?? '',

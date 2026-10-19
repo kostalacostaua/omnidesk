@@ -8826,11 +8826,26 @@ function readPipedriveHash(){
   // с неё и ждёт ответа именно о ней.
   CRM_OPEN = 'pipedrive';
 
-  if (err){ S.zohoError = L('Pipedrive не підтвердив встановлення'); setView('integrations'); return }
+  if (err){
+    S.zohoError = h.indexOf('pipedrive-error=state') >= 0
+      ? L('Посилання застаріло — натисніть «Встановити Pipedrive» ще раз.')
+      : L('Pipedrive не підтвердив встановлення');
+    setView('integrations');
+    return;
+  }
 
   api('/settings/pipedrive/attach', { method:'POST', body:{ installId: ok[1] } })
     .then(function(){ S.zohoNote = L('Застосунок Pipedrive встановлено'); setView('integrations') })
-    .catch(function(){ S.zohoError = L('Встановлення застаріло — почніть заново'); setView('integrations') });
+    .catch(function(e){
+      /* Номер установки из чужого письма: сервер знает, кто её начинал,
+         и к этой компании она не относится. Говорим прямо, а не
+         «застаріло» — застарелое человек пробует ещё раз, а чужое
+         должно насторожить. */
+      S.zohoError = e && e.payload && e.payload.error === 'install_not_yours'
+        ? L('Це встановлення належить іншому акаунту. Почніть установку у себе.')
+        : L('Встановлення застаріло — почніть заново');
+      setView('integrations');
+    });
 }
 
 var ZOHO_ERRORS = {

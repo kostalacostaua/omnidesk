@@ -54,7 +54,7 @@ import {
   type PipedriveTokens,
   type Pool,
 } from '@omnidesk/core';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { channelScope } from './scope.js';
 
 /**
@@ -79,7 +79,10 @@ interface CrmDeps {
   masterKey: Buffer;
   requireAuth: (req: unknown) => { tenantId: string; userId: string } | null;
   /** Ключи приложения Pipedrive: нужны только для панели в карточке. */
-  pipedrive?: { clientId: string; clientSecret: string; appUrl: string };
+  /* stateSecret — тот же ключ, что подписывает вход. Он здесь не ради
+     токенов Pipedrive, а ради state: без него установка привязывается
+     к тому, кто открыл ссылку, а не к тому, кто её начал. */
+  pipedrive?: { clientId: string; clientSecret: string; appUrl: string; stateSecret: string };
   /**
    * Короткая память под установку приложения. Тип широкий намеренно:
    * здесь нужны три операции, а не весь клиент Redis.
@@ -1324,6 +1327,50 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
    * привязывает их к компании уже вошедший человек в нашем интерфейсе.
    * Так токен не попадает ни в адрес, ни к чужому тенанту.
    */
+  /*
+   * state — подпись, а не случайное число.
+   *
+   * Раньше здесь стоял randomUUID(), который никуда не записывался, а
+   * callback его не читал вовсе. Установка от этого переставала быть
+   * чьей-то: посторонний проходил разрешение со СВОИМ Pipedrive,
+   * получал в адресе номер установки и присылал жертве ссылку
+   * app.rozmovio.com/app#pipedrive=<номер>. Кабинет привязывал её сам,
+   * без единого вопроса, и с этой минуты все сделки, имена и телефоны
+   * клиентов жертвы уезжали в CRM постороннего. Одно нажатие.
+   *
+   * Подпись несёт тенанта и человека, срок жизни — пятнадцать минут.
+   * Ровно так это сделано в Zoho и в Meta; третий способ был бы
+   * четвёртым местом, где однажды ошибутся.
+   */
+  function signState(payload: Record<string, unknown>): string {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = createHmac('sha256', deps.pipedrive?.stateSecret ?? '')
+      .update(body)
+      .digest('base64url');
+    return `${body}.${sig}`;
+  }
+
+  function readState(state: string): { t: string; u: string; exp: number } | null {
+    const [body, sig] = String(state ?? '').split('.');
+    if (!body || !sig) return null;
+    const expect = createHmac('sha256', deps.pipedrive?.stateSecret ?? '')
+      .update(body)
+      .digest('base64url');
+    const a = Buffer.from(expect);
+    const b = Buffer.from(sig);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    try {
+      const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
+        t: string;
+        u: string;
+        exp: number;
+      };
+      return p.exp > Date.now() ? p : null;
+    } catch {
+      return null;
+    }
+  }
+
   app.get('/settings/pipedrive/start', async (req, reply) => {
     const a = requireAuth(req);
     if (!a) return reply.code(401).send(auth401);
@@ -1333,17 +1380,25 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
       url: pipedriveAuthorizeUrl(
         deps.pipedrive.clientId,
         `${deps.pipedrive.appUrl}/pipedrive/callback`,
-        randomUUID(),
+        signState({ t: a.tenantId, u: a.userId, exp: Date.now() + 15 * 60_000 }),
       ),
     };
   });
 
-  app.get<{ Querystring: { code?: string; error?: string } }>(
+  app.get<{ Querystring: { code?: string; error?: string; state?: string } }>(
     '/pipedrive/callback',
     async (req, reply) => {
       const appUrl = deps.pipedrive?.appUrl ?? '';
       if (req.query.error || !req.query.code || !deps.pipedrive || !deps.redis) {
         return reply.redirect(`${appUrl}/app#pipedrive-error=cancelled`);
+      }
+
+      // Кто начал установку. Без ответа идти дальше нельзя: именно
+      // здесь установка перестаёт быть ничьей.
+      const st = readState(req.query.state ?? '');
+      if (!st) {
+        app.log.warn({ ip: req.ip }, 'Возврат Pipedrive без подписи');
+        return reply.redirect(`${appUrl}/app#pipedrive-error=state`);
       }
 
       try {
@@ -1352,7 +1407,11 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
           deps.pipedrive,
         );
         const id = randomUUID();
-        await deps.redis.setex(`pd:install:${id}`, 600, JSON.stringify(tokens));
+        await deps.redis.setex(
+          `pd:install:${id}`,
+          600,
+          JSON.stringify({ tokens, t: st.t, u: st.u }),
+        );
         return reply.redirect(`${appUrl}/app#pipedrive=${id}`);
       } catch (err) {
         app.log.warn({ err: (err as Error).message }, 'Установка Pipedrive не удалась');
@@ -1372,9 +1431,29 @@ export function registerCrm(app: FastifyInstance, deps: CrmDeps): void {
 
     const raw = await deps.redis.get(`pd:install:${id}`);
     if (!raw) return reply.code(400).send({ error: 'install_expired' });
+
+    const held = JSON.parse(raw) as { tokens: PipedriveTokens; t?: string; u?: string };
+
+    /*
+     * Привязывает тот, кто начинал. Иначе номер установки — это
+     * предъявительский ключ: посторонний проходит разрешение со своим
+     * Pipedrive и присылает жертве ссылку с этим номером, а кабинет
+     * привязывает её сам. Проверка здесь, а не только в callback,
+     * потому что между ними лежит адресная строка, куда номер можно
+     * вписать рукой.
+     *
+     * Чужую установку не стираем: это не наш ключ, и гасить его по
+     * предъявлении чужого номера значит дать посторонним способ
+     * ломать чужую установку.
+     */
+    if (held.t !== a.tenantId) {
+      app.log.warn({ tenantId: a.tenantId, userId: a.userId }, 'Чужая установка Pipedrive');
+      return reply.code(400).send({ error: 'install_not_yours' });
+    }
+
     await deps.redis.del(`pd:install:${id}`);
 
-    const tokens = JSON.parse(raw) as PipedriveTokens;
+    const tokens = held.tokens;
     const domain = tokens.apiDomain.replace(/^https?:\/\//i, '');
     const creds: Creds = { domain, oauth: tokens };
 
