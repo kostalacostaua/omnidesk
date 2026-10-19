@@ -11306,8 +11306,15 @@ function refresh(){
   }).catch(showErr);
 }
 
+/* Доступ закрыли, пока человек работал. Говорим об этом словами, а
+   не «токен застарів»: это разные вещи, и первое человек понесёт не в
+   поддержку, а к тому, кто его отключил. */
 function showErr(e){
-  if (e && e.status === 401){ logout(); el('gateErr').textContent = L('Токен недійсний або застарів'); }
+  if (!e || e.status !== 401) return;
+  logout();
+  el('gateErr').textContent = e.payload && e.payload.error === 'session_revoked'
+    ? L('Доступ до цього кабінету закрито')
+    : L('Токен недійсний або застарів');
 }
 
 

@@ -58,7 +58,7 @@ export function isPlatformPath(path: string): boolean {
 }
 
 /** Всё, что относится ко входу: проверку прав здесь делать нечем. */
-function isAuthPath(path: string): boolean {
+export function isAuthPath(path: string): boolean {
   return path === '/auth' || path.startsWith('/auth/');
 }
 

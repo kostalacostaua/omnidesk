@@ -75,7 +75,7 @@ import { registerAnalytics } from './analytics.js';
 import { backfillEvents } from './backfill.js';
 import { crmPhoneReader, registerCrm } from './crm.js';
 import { registerBitrix, registerBitrixOrders } from './bitrix.js';
-import { denial, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
+import { denial, isAuthPath, isPlatformPath, requiredLevel, roleAllows } from './roles.js';
 import { channelScope } from './scope.js';
 import { APP_ICON_180, APP_ICON_192, APP_ICON_512, APP_ICON_SVG, OG_IMAGE } from './brand.js';
 import { SESSION_COOKIE, SESSION_TTL, isHttps, readCookie, sessionCookie } from './session.js';
@@ -374,6 +374,20 @@ async function whoIs(tenantId: string, userId: string): Promise<{ role: string; 
   return found;
 }
 
+/**
+ * Забыть человека немедленно.
+ *
+ * Минута памяти — цена за то, чтобы не ходить в базу на каждый запрос.
+ * Но у увольнения эта минута не бесплатна: администратор нажал
+ * «відключити» и смотрит на экран, а тот, кого отключили, ещё читает
+ * переписку. Поэтому места, которые меняют роль или отключают доступ,
+ * стирают запись сами, и проверка идёт в базу со следующего же
+ * запроса.
+ */
+function forgetUser(userId: string): void {
+  roleCache.delete(userId);
+}
+
 async function roleOf(tenantId: string, userId: string): Promise<string> {
   return (await whoIs(tenantId, userId)).role;
 }
@@ -532,6 +546,31 @@ app.addHook('preHandler', async (req, reply) => {
   const auth = requireAuth(req as never);
 
   /*
+   * Уволенный сотрудник.
+   *
+   * Роль спрашивалась только на запись: на чтение правило «можно всем
+   * вошедшим» не спрашивало ничего. А отключённый — это вошедший: его
+   * токен подписан и живёт неделю. Отключив человека, компания видела
+   * его вне списка и считала дело сделанным, а он ещё семь дней читал
+   * всю переписку, все телефоны и всю историю со своего ноутбука.
+   *
+   * Отключённый и удалённый выпадают здесь одинаково: whoIs не находит
+   * строки и отдаёт пустую роль. Ответ 401, а не 403 — доступа нет
+   * вовсе, и интерфейс по нему выходит на страницу входа.
+   *
+   * Вход сюда не попадает намеренно: человек, которому закрыли доступ,
+   * должен мочь выйти и войти заново под другой учётной записью.
+   */
+  let role = '';
+  if (auth && !isAuthPath(path)) {
+    role = await roleOf(auth.tenantId, auth.userId);
+    if (!role) {
+      app.log.info({ userId: auth.userId, path }, 'Запрос от закрытого доступа');
+      return reply.code(401).send({ error: 'session_revoked' });
+    }
+  }
+
+  /*
    * Срок оплаты вышел.
    *
    * Проверка стоит до разбора ролей, а не после. Роли требуются только
@@ -560,7 +599,6 @@ app.addHook('preHandler', async (req, reply) => {
   // отвечать, а мы здесь занимаемся только правами.
   if (!auth) return;
 
-  const role = await roleOf(auth.tenantId, auth.userId);
   if (roleAllows(role, level)) return;
 
   app.log.info({ userId: auth.userId, role, path, method: req.method }, 'Отказано по роли');
@@ -748,6 +786,7 @@ registerSettings(app, {
   pool,
   masterKey,
   requireAuth: (req) => requireAuth(req as never),
+  forgetUser,
   platform: async (req) => ({
     owner: !!(await platformOwnerOf(req as never)),
     impersonatedBy: impersonatedBy(req as never),

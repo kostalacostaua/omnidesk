@@ -124,6 +124,15 @@ export interface SettingsDeps {
    * клиентом». Оба ответа нужны на первом же экране.
    */
   platform?: (req: unknown) => Promise<{ owner: boolean; impersonatedBy: string | null }>;
+  /**
+   * Забыть роль человека немедленно.
+   *
+   * Роль держится в памяти минуту, чтобы не ходить в базу на каждый
+   * запрос. У увольнения эта минута не бесплатна: администратор нажал
+   * «відключити», а отключённый ещё читает переписку. Поэтому место,
+   * которое меняет роль или закрывает доступ, стирает запись само.
+   */
+  forgetUser?: (userId: string) => void;
 }
 
 export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void {
@@ -1826,6 +1835,9 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       if (!['owner', 'admin', 'agent', 'viewer'].includes(r)) {
         return reply.code(400).send({ error: 'bad_role' });
       }
+      /* Второй владелец — это тот же захват, только через приглашение:
+         администратор звал бы на свою же почту с ролью владельца. */
+      if (r === 'owner') return reply.code(409).send({ error: 'cannot_grant_owner' });
 
       const result = await withTenant(pool, auth.tenantId, async (db) => {
         // Лимит мест — из тарифа. Проверяем здесь, а не в интерфейсе:
@@ -1955,13 +1967,40 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
         return reply.code(400).send({ error: 'bad_role' });
       }
 
+      /*
+       * Владение не выдаётся и не снимается этой ручкой.
+       *
+       * Сюда пускает проверка уровня «администратор» — и этого хватало,
+       * чтобы администратор выдал себе роль владельца, разжаловал
+       * настоящего владельца в наблюдатели или просто отключил ему
+       * доступ. Администратора нанимают вести каналы и команду; забрать
+       * компанию он при этом не должен мочь ни одним запросом.
+       *
+       * Передачи владения продукт не знает вовсе: владелец один, и
+       * удалить его тоже нельзя. Пока её нет, честнее отказать, чем
+       * оставить лазейку, через которую она как будто есть.
+       */
+      if (role === 'owner') return reply.code(409).send({ error: 'cannot_grant_owner' });
+
       // Нельзя отключить самого себя: иначе владелец одним кликом
       // лишает себя доступа и восстановить может только через консоль.
       if (req.params.id === auth.userId && isActive === false) {
         return reply.code(409).send({ error: 'cannot_disable_self' });
       }
 
-      const ok = await withTenant(pool, auth.tenantId, async (db) => {
+      const done = await withTenant(pool, auth.tenantId, async (db) => {
+        /*
+         * Роль цели читаем в той же транзакции, что и меняем: между
+         * двумя отдельными запросами она успевает стать другой, и
+         * проверка защищала бы строку, которой уже нет.
+         */
+        const { rows: target } = await db.query<{ role: string }>(
+          `SELECT role FROM users WHERE id = $1 FOR UPDATE`,
+          [req.params.id],
+        );
+        if (!target[0]) return 'missing' as const;
+        if (target[0].role === 'owner') return 'owner' as const;
+
         const { rowCount } = await db.query(
           `UPDATE users
               SET role = COALESCE($2, role),
@@ -1969,10 +2008,14 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
             WHERE id = $1`,
           [req.params.id, role ?? null, isActive ?? null],
         );
-        return (rowCount ?? 0) > 0;
+        return (rowCount ?? 0) > 0 ? ('ok' as const) : ('missing' as const);
       });
 
-      if (!ok) return reply.code(404).send({ error: 'not_found' });
+      if (done === 'missing') return reply.code(404).send({ error: 'not_found' });
+      if (done === 'owner') return reply.code(409).send({ error: 'cannot_change_owner' });
+
+      // Новая роль действует со следующего запроса, а не через минуту.
+      deps.forgetUser?.(req.params.id);
       return { ok: true };
     },
   );
@@ -2021,6 +2064,9 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
 
     if (done === 'missing') return reply.code(404).send({ error: 'not_found' });
     if (done === 'owner') return reply.code(409).send({ error: 'cannot_delete_owner' });
+
+    // Удалённый перестаёт быть вошедшим сразу, а не через минуту.
+    deps.forgetUser?.(req.params.id);
     return { ok: true };
   });
 
