@@ -117,6 +117,20 @@ export interface SettingsDeps {
    */
   mailboxSmtp?: boolean;
   /**
+   * Предлагаем ли почту как канал.
+   *
+   * Канал есть, и он работает вполсилы: письма принимает поддомен
+   * через нашу рассылочную службу, а взять существующий ящик клиента
+   * нечем — порты закрыты площадкой. Половина почты — это не почта:
+   * человек заводит канал, ждёт писем на свой адрес и не понимает,
+   * почему их нет.
+   *
+   * Поэтому канал не предлагается, пока не появится чтение ящика по
+   * IMAP или POP3. Уже заведённые каналы продолжают работать: выключить
+   * их значило бы потерять переписку, которая в них есть.
+   */
+  emailChannel?: boolean;
+  /**
    * Кто смотрит: владелец платформы и не под клиентом ли он сейчас.
    *
    * Отдаётся в /me, потому что интерфейс решает по этому два вопроса:
@@ -214,7 +228,12 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       ? await deps.platform(req)
       : { owner: false, impersonatedBy: null };
 
-    return { tenant, access, ...data, platform };
+    /* Что умеет этот сервер. Интерфейс по этому решает, показывать ли
+       карточку подключения: форма, которая не может сработать, хуже
+       отсутствующей формы. */
+    const can = { emailChannel: deps.emailChannel === true, mailbox: deps.mailboxSmtp === true };
+
+    return { tenant, access, ...data, platform, can };
   });
 
   /**
@@ -967,6 +986,11 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     async (req, reply) => {
       const auth = requireAuth(req);
       if (!auth) return reply.code(401).send(auth401);
+      /* Пока ящик по IMAP или POP3 подключить нечем, канал почты
+         предлагать нечестно: поддомен принимает письма, а писать на
+         свой рабочий адрес клиент всё равно не может. Проверка
+         здесь, а не только в интерфейсе: интерфейс обходится. */
+      if (!deps.emailChannel) return reply.code(503).send({ error: 'email_channel_off' });
       if (!deps.resendApiKey) return reply.code(503).send({ error: 'email_unavailable' });
 
       const domain = String(req.body?.domain ?? '').trim().toLowerCase().replace(/^https?:[/][/]/, '');

@@ -2141,6 +2141,9 @@ var noteMode = false;   // поле пишет заметку для своих,
    засекаем сами — набор идёт на устройстве оператора, и сколько он
    длился, браузеру узнать неоткуда. */
 var callAsk = null;
+/* Что умеет этот сервер. Форма, которая не может сработать, хуже
+   отсутствующей формы, поэтому карточки подключения спрашивают. */
+function canEmailChannel(){ return !!(ME && ME.can && ME.can.emailChannel) }
 var el = function(id){ return document.getElementById(id) };
 
 function api(path, opts){
@@ -7053,20 +7056,27 @@ function tabChannels(){
       '<div class="err" id="berr"></div><div class="ok" id="bok"></div>' +
       '<div id="bfwd" style="display:none;margin-top:10px"></div></div>' +
 
-      /* Только поддомен. Ящик по IMAP и SMTP убран: площадка, на
-         которой мы стоим, закрывает исходящие почтовые порты, и
-         подключение ящика заканчивалось молчанием сервера. Форма,
-         которая не может сработать, хуже отсутствующей формы. */
-      '<div class="tile"><div class="t1"><div class="chico email">' + chIcon('email') + '</div>' +
-      L('<div><div class="ttl">Пошта</div><div class="sub">Піддомен для звернень</div></div></div>') +
-      L('<div class="sub" style="white-space:normal;margin-top:8px">Заведіть піддомен для звернень — help.firma.com. ') +
-      L('Основний домен не підійде: у нього один запис MX, і переказавши його нам, ') +
-      L('ви залишите без пошти співробітників.</div>') +
-      '<div class="row2" style="margin-top:8px">' +
-      L('<input id="mlLoc" placeholder="support" style="max-width:120px">') +
-      L('<input id="mlDom" placeholder="help.firma.com">') +
-      L('<button id="mlAdd">Підключити</button></div>') +
-      '<div class="err" id="mlcErr"></div></div>' +
+      /* Почта предлагается, только когда она целая.
+         Поддомен письма принимает, а взять существующий ящик клиента
+         нечем: площадка, на которой мы стоим, закрывает исходящие
+         почтовые порты. Половина почты — это не почта: человек заводит
+         канал, ждёт писем на свой рабочий адрес и не понимает, почему
+         их нет. Карточка вернётся вместе с чтением ящика по IMAP или
+         POP3, а не раньше. Уже заведённые каналы остаются на месте:
+         выключить их значило бы потерять переписку, которая в них
+         есть. */
+      (canEmailChannel()
+        ? '<div class="tile"><div class="t1"><div class="chico email">' + chIcon('email') + '</div>' +
+          L('<div><div class="ttl">Пошта</div><div class="sub">Піддомен для звернень</div></div></div>') +
+          L('<div class="sub" style="white-space:normal;margin-top:8px">Заведіть піддомен для звернень — help.firma.com. ') +
+          L('Основний домен не підійде: у нього один запис MX, і переказавши його нам, ') +
+          L('ви залишите без пошти співробітників.</div>') +
+          '<div class="row2" style="margin-top:8px">' +
+          L('<input id="mlLoc" placeholder="support" style="max-width:120px">') +
+          L('<input id="mlDom" placeholder="help.firma.com">') +
+          L('<button id="mlAdd">Підключити</button></div>') +
+          '<div class="err" id="mlcErr"></div></div>'
+        : '') +
 
       '<div class="tile" id="metaCard"><div class="t1"><div class="chico instagram">' + chIcon('instagram') + '</div>' +
       L('<div><div class="ttl">Instagram і Messenger</div><div class="sub">Через сторінку Facebook</div></div></div>') +

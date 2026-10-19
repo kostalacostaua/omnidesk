@@ -804,6 +804,12 @@ registerSettings(app, {
   // Ящик по IMAP и SMTP — только там, где площадка не закрывает
   // почтовые порты. По умолчанию выключено.
   mailboxSmtp: process.env['MAILBOX_SMTP'] === 'on',
+  /* Почта как канал — пока нет. Поддомен письма принимает, а взять
+     существующий ящик клиента нечем: исходящие почтовые порты закрыты
+     площадкой. Половина почты — это не почта, и предлагать её значит
+     обещать то, чего канал не делает. Включится одной переменной, как
+     только появится чтение ящика по IMAP или POP3. */
+  emailChannel: process.env['EMAIL_CHANNEL'] === 'on',
   telegramWebhookSecret: TELEGRAM_WEBHOOK_SECRET,
   mtproto: { redis, loginQueue: mtprotoLoginQueue },
   wa: { redis, loginQueue: waLoginQueue },
