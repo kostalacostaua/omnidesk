@@ -2970,6 +2970,39 @@ async function sendWhatsApp(job: OutboundJob, row: OutboundRow, peerId: string):
       log('warn', 'Лимит WhatsApp, притормаживаю', { messageId: job.messageId });
       throw err;
     }
+    /*
+     * У токена нет права отправлять.
+     *
+     * Это не отказ по сообщению, а поломка канала: право выдаётся на
+     * аккаунт целиком, и без него не уйдёт ничего. Отличается от
+     * отозванного токена одним — токен живой, и входящие продолжают
+     * приходить: для них хватает права на управление, а для
+     * исходящих нужно отдельное право на отправку. Их отмечают
+     * галочками в одном окне, и легко отметить не обе.
+     *
+     * Раньше такое падало в общую ветку, и человек видел только, как
+     * краснеет каждое сообщение подряд. Связать это с забытой
+     * галочкой в чужом кабинете невозможно — поэтому гасим канал и
+     * называем причину теми же словами, что и при подключении.
+     */
+    if (err.noPermission) {
+      await withTenant(pool, job.tenantId, async (db) => {
+        await db.query(
+          `UPDATE channels SET status = 'degraded',
+                  last_error = '{"reason":"wa_no_send_permission"}'::jsonb
+            WHERE id = $1`,
+          [job.channelId],
+        );
+      });
+      await markFailed(job, { reason: 'wa_no_send_permission', code: err.body.code });
+      await announceChannelDown(
+        job.tenantId,
+        job.channelId,
+        'У маркера WhatsApp немає права надсилати. Згенеруйте його заново ' +
+          'і відмітьте обидва права: whatsapp_business_messaging і whatsapp_business_management.',
+      );
+      throw new UnrecoverableError('У токена WhatsApp нет права отправлять от имени аккаунта');
+    }
     await markFailed(job, { reason: 'whatsapp_refused', detail: err.body.message ?? '' });
     throw new UnrecoverableError(`WhatsApp отказал: ${err.body.message ?? 'без описания'}`);
   }
