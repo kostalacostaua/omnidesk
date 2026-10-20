@@ -194,6 +194,18 @@ export interface DebugTokenReply {
     granular_scopes?: Array<{ scope?: string; target_ids?: string[] }>;
     /** Плоский список прав. У токена системного пользователя он и есть главный. */
     scopes?: string[];
+    /*
+     * Чей это маркер. Нужны не для подключения, а для разбора потом:
+     * «нет разрешения отправлять» звучит одинаково и когда прав не
+     * хватает, и когда маркер выдан другим приложением, — а
+     * различить их можно только здесь.
+     */
+    app_id?: string;
+    application?: string;
+    type?: string;
+    is_valid?: boolean;
+    /** 0 — не истекает никогда. */
+    expires_at?: number;
   };
 }
 

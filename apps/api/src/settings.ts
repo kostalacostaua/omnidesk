@@ -809,6 +809,148 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
    * или отклонить пять минут назад, и устаревший список означает отказ
    * при отправке.
    */
+  /**
+   * Почему не уходит из WhatsApp.
+   *
+   * Отправка отказывает кодом 200 — «нет разрешения отправлять от
+   * имени этого аккаунта», — и под этой одной фразой Meta прячет
+   * полдюжины разных поломок: маркер не того приложения, номер в
+   * чужом аккаунте, номер не зарегистрирован в Cloud API, аккаунт под
+   * ограничением. Снаружи они неотличимы, а чинятся по-разному.
+   *
+   * Весь вечер на это уходит потому, что спрашивать приходится
+   * человека: открой отладчик, найди строку, сравни с тем, что в
+   * кабинете. Но маркер лежит у нас, и спросить Meta можем мы сами —
+   * и показать не «нет прав», а что именно не сходится.
+   *
+   * Наружу не отдаём ни маркера, ни его части: только то, что он
+   * говорит о себе.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/settings/channels/whatsapp/:id/check',
+    async (req, reply) => {
+      const auth = requireAuth(req);
+      if (!auth) return reply.code(401).send(auth401);
+
+      const channel = await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows } = await db.query<{ credentials_enc: Buffer; meta: Record<string, unknown> }>(
+          `SELECT credentials_enc, meta FROM channels
+            WHERE id = $1 AND type = 'whatsapp' LIMIT 1`,
+          [req.params.id],
+        );
+        return rows[0] ?? null;
+      });
+      if (!channel) return reply.code(404).send({ error: 'not_found' });
+
+      const creds = decryptJson<{ pageId: string; pageToken: string }>(
+        masterKey,
+        auth.tenantId,
+        channel.credentials_enc,
+      );
+      const storedWaba = String(channel.meta?.['wabaId'] ?? '') || null;
+
+      const out: Record<string, unknown> = { phoneNumberId: creds.pageId, storedWaba };
+      const problems: string[] = [];
+
+      // 1. Чей это маркер и что он умеет.
+      try {
+        const debug = await graphGet<DebugTokenReply>('debug_token', {
+          input_token: creds.pageToken,
+          access_token: creds.pageToken,
+        });
+        const d = debug?.data;
+        out['token'] = {
+          appId: d?.app_id ?? null,
+          appName: d?.application ?? null,
+          type: d?.type ?? null,
+          valid: d?.is_valid ?? null,
+          expiresAt: d?.expires_at ?? null,
+          scopes: d?.scopes ?? [],
+        };
+        if (d?.is_valid === false) problems.push('token_invalid');
+        if (!canSendWhatsapp(debug)) problems.push('no_send_scope');
+      } catch (err) {
+        out['token'] = { error: err instanceof Error ? err.message : 'debug_failed' };
+        problems.push('token_unreadable');
+      }
+
+      /*
+       * 2. Что это за номер и чей он.
+       *
+       * platform_type — то, ради чего всё: номер, оставшийся на
+       * On-Premises, через Cloud API не отправляет никогда, и Meta
+       * отвечает на это тем же кодом 200. Глазами этого не видно
+       * нигде, кроме как здесь.
+       */
+      try {
+        const num = await graphGet<{
+          id?: string;
+          display_phone_number?: string;
+          verified_name?: string;
+          quality_rating?: string;
+          platform_type?: string;
+          code_verification_status?: string;
+          whatsapp_business_account?: { id?: string; name?: string };
+        }>(creds.pageId, {
+          access_token: creds.pageToken,
+          fields:
+            'id,display_phone_number,verified_name,quality_rating,platform_type,' +
+            'code_verification_status,whatsapp_business_account{id,name}',
+        });
+        const realWaba = num.whatsapp_business_account?.id ?? null;
+        out['number'] = {
+          phone: num.display_phone_number ?? null,
+          verifiedName: num.verified_name ?? null,
+          quality: num.quality_rating ?? null,
+          platform: num.platform_type ?? null,
+          verification: num.code_verification_status ?? null,
+          wabaId: realWaba,
+          wabaName: num.whatsapp_business_account?.name ?? null,
+        };
+        if (num.platform_type && num.platform_type !== 'CLOUD_API') problems.push('not_cloud_api');
+        if (realWaba && storedWaba && realWaba !== storedWaba) problems.push('waba_mismatch');
+      } catch (err) {
+        out['number'] = { error: err instanceof Error ? err.message : 'number_unreadable' };
+        problems.push('number_unreadable');
+      }
+
+      /*
+       * 3. Виден ли нам сам аккаунт.
+       *
+       * Если маркер читает номер, но не читает аккаунт, права выданы
+       * не туда — и отправка отказывает ровно этим кодом 200.
+       */
+      const wabaId =
+        (out['number'] as { wabaId?: string } | undefined)?.wabaId ?? storedWaba ?? null;
+      if (wabaId) {
+        try {
+          const waba = await graphGet<{
+            id?: string;
+            name?: string;
+            account_review_status?: string;
+            business_verification_status?: string;
+          }>(wabaId, {
+            access_token: creds.pageToken,
+            fields: 'id,name,account_review_status,business_verification_status',
+          });
+          out['waba'] = {
+            id: waba.id ?? null,
+            name: waba.name ?? null,
+            review: waba.account_review_status ?? null,
+            verification: waba.business_verification_status ?? null,
+          };
+        } catch (err) {
+          out['waba'] = { error: err instanceof Error ? err.message : 'waba_unreadable' };
+          problems.push('waba_unreadable');
+        }
+      }
+
+      out['problems'] = problems;
+      app.log.info({ channelId: req.params.id, problems }, 'Проверка канала WhatsApp');
+      return out;
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/channels/:id/whatsapp-templates',
     async (req, reply) => {

@@ -7755,6 +7755,18 @@ function openChannel(id){
 
     (c.type === 'webchat' ? '<div id="wcBox"></div>' : '') +
     (c.type === 'email' ? '<div id="mlBox"></div>' : '') +
+    /* «Не доставлено» у офіційного WhatsApp — найдовша діагностика в
+       сервісі: Meta ховає під одним кодом півдюжини різних поломок, і
+       розрізнити їх можна тільки спитавши її саму. Маркер лежить у
+       нас, тож питаємо ми, а не людина в відладчику. */
+    (c.type === 'whatsapp'
+      ? L('<div class="pg-sec"><h3>Перевірка підключення</h3><div class="tile">') +
+        L('<div class="sub" style="white-space:normal">Якщо повідомлення не йдуть — ') +
+        L('спитаємо в Meta, що саме не так: чий маркер, до якого акаунта належить ') +
+        L('номер і чи працює він через Cloud API.</div>') +
+        L('<div class="acts"><button class="ghost mini" id="waCheck">Перевірити</button></div>') +
+        '<div id="waCheckOut"></div></div></div>'
+      : '') +
     '<div id="chTeam"></div>' +
 
     L('<div class="pg-sec"><h3>Автоматизація</h3><div class="grid">') +
@@ -7769,6 +7781,8 @@ function openChannel(id){
   if (c.type === 'webchat') wcPanel(id);
   if (c.type === 'email') mlPanel(id, c);
   if (isAdmin()) chTeamPanel(id);
+
+  if (el('waCheck')) el('waCheck').onclick = function(){ waCheck(id) };
 
   el('chBack').onclick = tabChannels;
   el('chFlows').onclick = function(){ setView('bots') };
@@ -9552,6 +9566,72 @@ function tabAudit(){
   }).catch(function(){
     pageBox().innerHTML = '<div class="pg">' + setNav('audit') +
       L('<div class="empty">Журнал недоступний</div>') + '</div>';
+  });
+}
+
+/**
+ * Что именно не так с официальным WhatsApp.
+ *
+ * Meta на отказ отвечает одной фразой — «нет разрешения отправлять от
+ * имени этого аккаунта», — и под ней лежит полдюжины разных поломок.
+ * Снаружи они неотличимы, а чинятся по-разному, и человек перебирает
+ * их наугад весь вечер. Здесь спрашиваем Meta и пишем, что не сходится.
+ *
+ * Словами, а не кодами: тот, кто читает этот экран, уже устал.
+ */
+var WA_PROBLEMS = {
+  token_invalid: 'Маркер недійсний — згенеруйте новий.',
+  no_send_scope: 'У маркера немає права whatsapp_business_messaging.',
+  token_unreadable: 'Meta не впізнала маркер.',
+  not_cloud_api: 'Номер працює не через Cloud API, а через On-Premises — звідси й відмова. Перенесіть номер на Cloud API.',
+  waba_mismatch: 'Номер належить іншому акаунту WhatsApp, ніж записано в каналі. Підключіть канал заново.',
+  number_unreadable: 'Маркер не бачить цього номера — права видані не на той акаунт.',
+  waba_unreadable: 'Маркер не бачить акаунт WhatsApp, якому належить номер.'
+};
+
+function waCheck(id){
+  var out = el('waCheckOut');
+  if (!out) return;
+  out.innerHTML = L('<div class="sub" style="margin-top:8px">Питаю Meta…</div>');
+
+  api('/settings/channels/whatsapp/' + id + '/check', { method:'POST' }).then(function(d){
+    var t = d.token || {}, n = d.number || {}, w = d.waba || {};
+    var rows = [];
+    var add = function(k, v){ if (v) rows.push([k, String(v)]) };
+
+    add(L('Маркер видано застосунку'), (t.appName || '') + (t.appId ? ' (' + t.appId + ')' : ''));
+    add(L('Тип маркера'), t.type);
+    add(L('Маркер дійсний'), t.valid === false ? L('ні') : t.valid === true ? L('так') : '');
+    add(L('Права'), (t.scopes || []).join(', '));
+    add(L('Номер'), n.phone);
+    add(L('Назва номера'), n.verifiedName);
+    add(L('Платформа номера'), n.platform);
+    add(L('Якість номера'), n.quality);
+    add(L('Акаунт номера'), (n.wabaName || '') + (n.wabaId ? ' (' + n.wabaId + ')' : ''));
+    add(L('Акаунт у каналі'), d.storedWaba);
+    add(L('Стан акаунта'), w.review);
+    add(L('Верифікація бізнесу'), w.verification);
+    if (t.error) add(L('Помилка маркера'), t.error);
+    if (n.error) add(L('Помилка номера'), n.error);
+    if (w.error) add(L('Помилка акаунта'), w.error);
+
+    var found = (d.problems || []).map(function(p){
+      return '<li>' + esc(L(WA_PROBLEMS[p] || p)) + '</li>';
+    }).join('');
+
+    out.innerHTML =
+      (found
+        ? L('<div class="err" style="margin-top:10px"><b>Знайдено:</b><ul style="margin:6px 0 0 16px">') +
+          found + '</ul></div>'
+        : L('<div class="ok" style="margin-top:10px">Усе, що видно звідси, у порядку. ') +
+          L('Якщо відправка все одно не йде — покажіть цей екран нам.</div>')) +
+      '<div class="kv" style="margin-top:10px">' +
+      rows.map(function(r){
+        return '<div class="k">' + esc(r[0]) + '</div><div>' + esc(r[1]) + '</div>';
+      }).join('') + '</div>';
+  }).catch(function(e){
+    out.innerHTML = L('<div class="err" style="margin-top:10px">Перевірка не вдалася: ') +
+      esc((e && e.payload && e.payload.error) || (e && e.message) || '') + '</div>';
   });
 }
 
