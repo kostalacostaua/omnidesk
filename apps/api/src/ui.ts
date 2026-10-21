@@ -2315,8 +2315,24 @@ function statusLabel(s){
 }
 
 /** Окно ответа считаем на клиенте — лишний запрос ради этого не нужен. */
+/*
+ * Открыто ли окно ответа.
+ *
+ * Пустой срок значил «окна нет, пиши что хочешь» — и это верно для
+ * каналов, где окна нет вовсе. Но у WhatsApp пустой срок означает
+ * ровно обратное: окно есть, а клиент в этом диалоге ещё не писал
+ * ни разу. Так выглядит разговор, который начинаем мы сами.
+ *
+ * Оператор получал обычное поле ответа, писал текст, и сервер его не
+ * принимал: там проверка правильная и вне окна пропускает только
+ * шаблон. Поле, которое не работает, хуже закрытого поля.
+ *
+ * Неизвестный тип окна считаем отсутствующим: так было раньше, и
+ * закрывать из-за него каналы, у которых окна нет, нельзя.
+ */
 function windowState(c){
-  if (!c || !c.window_expires_at || c.window_type === 'none') return { open:true };
+  if (!c || !c.window_type || c.window_type === 'none') return { open:true };
+  if (!c.window_expires_at) return { open:false };
   var left = new Date(c.window_expires_at) - new Date();
   if (left <= 0) return { open:false };
   var h = Math.floor(left/3600000), m = Math.floor(left%3600000/60000);
@@ -7737,6 +7753,21 @@ function openChannel(id){
        сервісі: Meta ховає під одним кодом півдюжини різних поломок, і
        розрізнити їх можна тільки спитавши її саму. Маркер лежить у
        нас, тож питаємо ми, а не людина в відладчику. */
+    /* Шаблоны было видно только изнутри диалога с закрытым окном —
+       то есть случайно. Вопрос «а какие у меня вообще есть шаблоны и
+       схвалені вони чи ні» задают раньше, чем доходят до такого
+       диалога, и отвечать на него надо на странице канала. Заодно это
+       самая честная проверка связи: список пришёл — значит маркер,
+       акаунт и права на месте. */
+    (c.type === 'whatsapp'
+      ? L('<div class="pg-sec"><h3>Шаблони</h3><div class="tile">') +
+        L('<div class="sub" style="white-space:normal">Схвалені Meta шаблони цього номера. ') +
+        L('Ними відповідають, коли минуло 24 години від останнього повідомлення клієнта. ') +
+        L('Створюють і погоджують їх у WhatsApp Manager — ми лише показуємо готові.</div>') +
+        L('<div class="acts"><button class="ghost mini" id="waTplList">Показати шаблони</button></div>') +
+        '<div id="waTplOut"></div></div></div>'
+      : '') +
+
     (c.type === 'whatsapp'
       ? L('<div class="pg-sec"><h3>Перевірка підключення</h3><div class="tile">') +
         L('<div class="sub" style="white-space:normal">Якщо повідомлення не йдуть — ') +
@@ -7760,6 +7791,7 @@ function openChannel(id){
   if (c.type === 'email') mlPanel(id, c);
   if (isAdmin()) chTeamPanel(id);
 
+  if (el('waTplList')) el('waTplList').onclick = function(){ waTplList(id) };
   if (el('waCheck')) el('waCheck').onclick = function(){ waCheck(id) };
 
   el('chBack').onclick = tabChannels;
@@ -9566,6 +9598,46 @@ var WA_PROBLEMS = {
   number_unreadable: 'Маркер не бачить цього номера — права видані не на той акаунт.',
   waba_unreadable: 'Маркер не бачить акаунт WhatsApp, якому належить номер.'
 };
+
+/**
+ * Список шаблонов номера.
+ *
+ * Отвечает на три вопроса сразу: есть ли у меня шаблоны, схвалені ли
+ * они, и — молча — работает ли вообще связь с Meta. Список пришёл,
+ * значит маркер жив, акаунт найден и права на месте; это дешевле, чем
+ * отдельная проверка, и понятнее человеку.
+ */
+function waTplList(id){
+  var out = el('waTplOut');
+  if (!out) return;
+  out.innerHTML = L('<div class="sub" style="margin-top:8px">Завантажую...</div>');
+
+  api('/channels/' + id + '/whatsapp-templates').then(function(d){
+    var list = d.templates || [];
+    if (!list.length){
+      /* Пусто — это не поломка, а обычное состояние нового номера.
+         Говорим, что делать, а не «нічого немає». */
+      out.innerHTML = L('<div class="hint" style="margin-top:10px">Схвалених шаблонів немає. ') +
+        (d.detail ? esc(d.detail) + '. ' : '') +
+        L('Створіть і подайте на погодження у WhatsApp Manager — ') +
+        L('зазвичай Meta відповідає за кілька годин.</div>');
+      return;
+    }
+    out.innerHTML =
+      L('<div class="sub" style="margin-top:10px">Схвалено: ') + list.length + '</div>' +
+      '<div class="kv" style="margin-top:8px">' +
+      list.map(function(t){
+        return '<div class="k">' + esc(t.name) + ' · ' + esc(t.language) + '</div>' +
+          '<div style="white-space:pre-wrap">' + esc(t.body || '') +
+          (t.variables ? L('<div class="dim" style="font-size:12px">змінних: ') + t.variables + '</div>' : '') +
+          '</div>';
+      }).join('') + '</div>';
+  }).catch(function(e){
+    var p = (e && e.payload) || {};
+    out.innerHTML = L('<div class="err" style="margin-top:10px">Не вдалося отримати шаблони: ') +
+      esc(p.detail || p.error || '') + '</div>';
+  });
+}
 
 function waCheck(id){
   var out = el('waCheckOut');
