@@ -2627,11 +2627,15 @@ function renderHead(){
          Без номера кнопки нет вовсе: под постом в инстаграме и в чате
          на сайте звонить некуда, и серая кнопка «нельзя» сообщала бы
          об этом каждый раз заново. */
-      (c.phone_e164
-        ? '<a class="ghost mini" id="aCall" href="tel:' + esc(c.phone_e164) + '" title="' +
-          L('Подзвонити ') + esc(c.phone_e164) + '">' + icon('phone') +
-          L('<span>Подзвонити</span>') + '</a>'
-        : '') +
+      /* Кнопки звонка здесь нет намеренно.
+         Она открывала набор номера на устройстве оператора — и это
+         честно описывало то, что мы умеем, но не то, чего от кабинета
+         ждут. Звонок из кабинета — это голос в кабинете, а до него
+         нужен VoIP, которого у нас пока нет. Кнопка вернётся вместе с
+         ним и будет другой.
+         Запись о звонке при этом осталась: ручка, вид сообщения и
+         отрисовка в ленте на месте, и уже сделанные отметки видны.
+         Убран только способ начать — он и менялся бы первым. */
       /* Передача конкретному человеку. Списком, а не поиском: операторов
          в смене единицы, и выпадающий список честнее показывает, что
          выбор невелик. */
@@ -2686,15 +2690,6 @@ function renderHead(){
   if (el('aMoreBtn')) el('aMoreBtn').onclick = function(e){
     e.stopPropagation();
     el('thead').classList.toggle('more-on');
-  };
-
-  /* Ссылку не перехватываем: пусть устройство само решает, чем
-     открыть набор номера. Наше дело — засечь время и поставить над
-     полем ответа вопрос, который иначе никто себе не задаст. */
-  if (el('aCall')) el('aCall').onclick = function(){
-    callAsk = { conv: current, at: Date.now() };
-    el('thead').classList.remove('more-on');
-    renderComposer(true);
   };
 
   if (el('aTake')) el('aTake').onclick = function(){
@@ -3227,18 +3222,10 @@ function renderComposer(force){
       esc(q.shortcut || q.title || '') + '</span></button>';
   }).join('');
 
-  /* Полоска стоит над полем ответа, а не окошком поверх страницы:
-     оператор возвращается в кабинет после разговора, и первое, что
-     он видит, — вопрос, на который ответить одним касанием. Окно он
-     закрыл бы не глядя. */
-  var callBar = callAsk && callAsk.conv === current
-    ? L('<div class="callbar"><div class="t">Дзвінок о ') + esc(clockTime(callAsk.at)) +
-      L(' — чим скінчився?</div>') +
-      L('<button class="mini" data-call="answered">Поговорили</button>') +
-      L('<button class="ghost mini" data-call="no_answer">Не взяв</button>') +
-      L('<button class="ghost mini" data-call="declined">Скинув</button>') +
-      '<div class="c" id="callCancel" title="' + L('Прибрати') + '">x</div></div>'
-    : '';
+  /* Полоски «чим скінчився дзвінок» здесь больше нет: начинать
+     звонок стало нечем, а спрашивать про то, чего не начинали, —
+     лишний вопрос. Вернётся вместе с VoIP. */
+  var callBar = '';
 
   box.innerHTML = '<div class="cbox' + (noteMode ? ' note-on' : '') + '">' +
     callBar +
@@ -3373,15 +3360,6 @@ function renderComposer(force){
   if (el('tpl')) el('tpl').onclick = toggleTemplates;
   if (el('ai')) el('ai').onclick = aiDraft;
   el('noteBtn').onclick = function(){ noteMode = !noteMode; renderComposer(true) };
-  if (el('callCancel')) el('callCancel').onclick = function(){
-    /* Отменить — значит «звонка не было»: промахнулись кнопкой или
-       передумали набирать. Писать в ленту тут нечего. */
-    callAsk = null;
-    renderComposer(true);
-  };
-  Array.prototype.forEach.call(box.querySelectorAll('[data-call]'), function(b){
-    b.onclick = function(){ saveCall(b.dataset.call) };
-  });
   Array.prototype.forEach.call(box.querySelectorAll('[data-qr]'), function(b){
     b.onclick = function(){
       var q = QR.filter(function(x){ return x.id === b.dataset.qr })[0];
