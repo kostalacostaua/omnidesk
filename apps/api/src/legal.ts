@@ -69,10 +69,10 @@ export function registerLegal(app: FastifyInstance, opts: LegalDeps): void {
 
   const privacy = page(
     'Privacy Policy',
-    `<h1>Privacy Policy</h1><div class="muted">Last updated: September 22, 2026</div>
+    `<h1>Privacy Policy</h1><div class="muted">Last updated: November 5, 2026</div>
 <p>Rozmovio (“we”) is a customer messaging inbox operated by ${who}. Businesses (“customers”) connect their
-Telegram, Facebook Messenger and Instagram accounts to Rozmovio so their staff can answer messages from one place,
-including inside Zoho CRM.</p>
+WhatsApp, Facebook Messenger, Instagram, Telegram, Viber and website chat accounts to Rozmovio so their staff can
+answer messages from one place, including inside Zoho CRM.</p>
 <h2>What data we process</h2>
 <ul>
 <li>Messages and attachments sent to or from the business accounts our customers connect.</li>
@@ -84,14 +84,21 @@ as provided by the messaging platform.</li>
 <h2>How we use it</h2>
 <p>Solely to display conversations to the business that owns the connected account and to deliver its replies.
 We do not sell data, do not use it for advertising and do not share it with third parties, except infrastructure
-providers that host the service (Railway, EU region) and deliver sign-in emails (Resend).</p>
+providers that host the service (Railway Corporation, which processes the data in the Netherlands and the United
+States) and deliver sign-in emails (Resend).</p>
 <h2>Meta Platform data</h2>
-<p>Data received through Facebook Login and the Messenger / Instagram APIs is used only to provide the inbox
-features the business has enabled, in line with the Meta Platform Terms. Each business can disconnect a page
-at any time in Rozmovio settings or in Facebook → Settings → Business Integrations.</p>
+<p>Data received through Facebook Login, the Messenger and Instagram APIs and the WhatsApp Business Platform is used
+only to provide the inbox features the business has enabled, in line with the Meta Platform Terms. Each business can
+disconnect a page, an Instagram account or a WhatsApp number at any time in Rozmovio settings, or in
+Facebook → Settings → Business Integrations.</p>
 <h2>Retention and deletion</h2>
 <p>Data is kept while the business uses Rozmovio. When a business disconnects a channel or closes its account,
 related data is deleted within 30 days. See <a href="/data-deletion">Data deletion</a>.</p>
+<h2>Government requests for data</h2>
+<p>We have never disclosed personal data to a government authority in response to a national security request, and we
+do not do so voluntarily. If such a request reaches us, we: check that it is lawful and binding on us before acting on
+it; refuse or challenge it where we consider it unlawful; disclose only the minimum data the request actually compels,
+never a whole account or mailbox; and record the request, our response and its legal basis.</p>
 <h2>Contact</h2>
 <p><a href="mailto:${email}">${email}</a></p>
 <hr>
@@ -99,6 +106,9 @@ related data is deleted within 30 days. See <a href="/data-deletion">Data deleti
 <p>Rozmovio — сервіс для роботи з повідомленнями клієнтів, який надає ${who}. Ми обробляємо повідомлення та
 базові дані профілю лише для того, щоб показати листування компанії, яка підключила свій акаунт, і доставити
 її відповіді. Ми не продаємо дані й не використовуємо їх для реклами. Токени доступу зберігаються зашифрованими.
+Сервіс розміщено в Railway Corporation (Нідерланди та США). Ми не передавали персональних даних на запити державних
+органів щодо національної безпеки і не робимо цього добровільно: такий запит ми спершу перевіряємо на законність,
+оскаржуємо, якщо вважаємо незаконним, розкриваємо лише той мінімум, якого він вимагає, і ведемо облік таких запитів.
 Питання та запити на видалення: <a href="mailto:${email}">${email}</a>.</p>`,
   );
 
