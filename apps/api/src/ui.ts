@@ -7803,9 +7803,50 @@ function openChannel(id){
       ? L('<div class="pg-sec"><h3>Шаблони</h3><div class="tile">') +
         L('<div class="sub" style="white-space:normal">Схвалені Meta шаблони цього номера. ') +
         L('Ними відповідають, коли минуло 24 години від останнього повідомлення клієнта. ') +
-        L('Створюють і погоджують їх у WhatsApp Manager — ми лише показуємо готові.</div>') +
-        L('<div class="acts"><button class="ghost mini" id="waTplList">Показати шаблони</button></div>') +
-        '<div id="waTplOut"></div></div></div>'
+        L('Новий шаблон створюється тут же і йде на перевірку в Meta.</div>') +
+        L('<div class="acts"><button class="ghost mini" id="waTplList">Показати шаблони</button>') +
+        L('<button class="ghost mini" id="waTplNew">Створити шаблон</button></div>') +
+        '<div id="waTplOut"></div>' +
+        /* Форма создания закрыта по умолчанию: на страницу канала
+           заходят посмотреть, а не завести шаблон, и развёрнутая форма
+           на семь полей мешает тем, кому она сейчас не нужна. */
+        '<div id="waTplForm" style="display:none">' +
+          L('<div class="sub" style="white-space:normal;margin-top:12px">Шаблон іде на перевірку в Meta. ') +
+          L('Зазвичай відповідь приходить за кілька годин; поки не схвалять — надіслати його не можна.</div>') +
+          '<div class="f" style="margin-top:10px">' +
+            L('<label>Назва</label>') +
+            '<input id="waTplName" placeholder="order_status_update" maxlength="512">' +
+            L('<div class="hint">Тільки малі латинські літери, цифри і підкреслення.</div>') +
+          '</div>' +
+          '<div class="f">' +
+            L('<label>Категорія</label>') +
+            '<select id="waTplCat">' +
+              L('<option value="UTILITY">Службовий — статус замовлення, нагадування, квитанція</option>') +
+              L('<option value="MARKETING">Маркетинговий — акції та новини</option>') +
+            '</select>' +
+          '</div>' +
+          '<div class="f">' +
+            L('<label>Мова</label>') +
+            '<select id="waTplLang">' +
+              '<option value="uk">Українська (uk)</option>' +
+              '<option value="en">English (en)</option>' +
+              '<option value="pl">Polski (pl)</option>' +
+              '<option value="ru">Русский (ru)</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="f">' +
+            L('<label>Текст</label>') +
+            '<textarea id="waTplBody" rows="4" maxlength="1024" ' +
+              L('placeholder="Вітаємо, {{1}}! Ваше замовлення {{2}} вже в дорозі."></textarea>') +
+            L('<div class="hint">Змінні пишуться як {{1}}, {{2}} підряд з одиниці. ') +
+            L('Текст не може починатися або закінчуватися змінною.</div>') +
+          '</div>' +
+          '<div id="waTplEx"></div>' +
+          L('<div class="acts"><button class="pri mini" id="waTplSend">Надіслати на перевірку</button>') +
+          L('<button class="ghost mini" id="waTplCancel">Скасувати</button></div>') +
+          '<div id="waTplErr" class="err"></div>' +
+        '</div>' +
+        '</div></div>'
       : '') +
 
     (c.type === 'whatsapp'
@@ -7833,6 +7874,7 @@ function openChannel(id){
 
   if (el('waTplList')) el('waTplList').onclick = function(){ waTplList(id) };
   if (el('waCheck')) el('waCheck').onclick = function(){ waCheck(id) };
+  if (el('waTplNew')) waTplForm(id);
 
   el('chBack').onclick = tabChannels;
   el('chFlows').onclick = function(){ setView('bots') };
@@ -9678,6 +9720,120 @@ function waTplList(id){
       esc(p.detail || p.error || '') + '</div>';
   });
 }
+
+/*
+ * Создание шаблона WhatsApp.
+ *
+ * Раньше здесь стояла фраза «створюють їх у WhatsApp Manager» — то есть
+ * указатель на чужой кабинет. А шаблон нужен ровно в ту минуту, когда
+ * окно закрылось и ответить нечем: человек упирается в это у нас и
+ * уходит решать задачу в другом месте, с другим языком и своей логикой.
+ *
+ * Поля примеров рисуются по тексту, а не стоят готовой тройкой: сколько
+ * переменных написал человек, столько и полей. Пустая клетка «значення
+ * для {{3}}» там, где третьей переменной нет, — это вопрос без ответа.
+ */
+function waTplVars(text){
+  var found = String(text || '').match(/\{\{\s*\d+\s*\}\}/g) || [];
+  var nums = [];
+  for (var i = 0; i < found.length; i++){
+    var n = Number(found[i].replace(/[^0-9]/g, ''));
+    if (nums.indexOf(n) < 0) nums.push(n);
+  }
+  return nums.sort(function(a, b){ return a - b });
+}
+
+function waTplForm(id){
+  var box = el('waTplForm');
+  var body = el('waTplBody');
+  if (!box || !body) return;
+
+  var show = function(on){
+    box.style.display = on ? '' : 'none';
+    if (on) body.focus();
+  };
+
+  el('waTplNew').onclick = function(){ show(box.style.display === 'none') };
+  el('waTplCancel').onclick = function(){ show(false); el('waTplErr').textContent = '' };
+
+  /* Примеры нужны не нам, а модератору Meta: без них она не берёт
+     шаблон на проверку вовсе — ей нечего показать человеку. */
+  var drawEx = function(){
+    var nums = waTplVars(body.value);
+    var keep = {};
+    Array.prototype.forEach.call(el('waTplEx').querySelectorAll('input'), function(inp){
+      keep[inp.dataset.n] = inp.value;
+    });
+    el('waTplEx').innerHTML = nums.length
+      ? L('<div class="sub" style="margin-top:4px">Приклади значень — їх побачить тільки перевіряючий</div>') +
+        nums.map(function(n){
+          return '<div class="f"><label>{{' + n + '}}</label>' +
+            '<input data-n="' + n + '" value="' + esc(keep[n] || '') + '" maxlength="120">' +
+            '</div>';
+        }).join('')
+      : '';
+  };
+  body.oninput = drawEx;
+  drawEx();
+
+  el('waTplSend').onclick = function(){
+    var err = el('waTplErr');
+    err.textContent = '';
+    var ex = [];
+    Array.prototype.forEach.call(el('waTplEx').querySelectorAll('input'), function(inp){
+      ex.push(inp.value.trim());
+    });
+
+    busy(el('waTplSend'), true);
+    api('/channels/' + id + '/whatsapp-templates', { method:'POST', body:{
+      name: el('waTplName').value.trim(),
+      category: el('waTplCat').value,
+      language: el('waTplLang').value,
+      body: body.value,
+      examples: ex
+    }}).then(function(d){
+      busy(el('waTplSend'), false);
+      show(false);
+      el('waTplName').value = '';
+      body.value = '';
+      drawEx();
+      /* Категорию говорим ту, что вернула Meta: утилитарный текст с
+         рекламным оттенком она переводит в маркетинговый сама, а от
+         категории зависит, уйдёт ли сообщение и за чей счёт. */
+      toast(L('Шаблон ') + d.name + L(' подано на перевірку') +
+        (d.category ? L(' як ') + waTplCatName(d.category) : ''));
+      waTplList(id);
+    }).catch(function(e){
+      busy(el('waTplSend'), false);
+      var p = (e && e.payload) || {};
+      err.textContent = L(WA_TPL_ERR[p.error] || '') || p.detail || p.error ||
+        L('Не вдалося створити шаблон');
+    });
+  };
+}
+
+function waTplCatName(c){
+  return c === 'MARKETING' ? L('маркетинговий')
+    : c === 'AUTHENTICATION' ? L('для кодів')
+    : L('службовий');
+}
+
+/* Отказы Meta на создание шаблона приходят одной фразой на все случаи.
+   Здесь — то, что мы проверяем сами и потому можем назвать точно. */
+var WA_TPL_ERR = {
+  template_name_required: 'Вкажіть назву шаблона',
+  template_name_bad: 'У назві лише малі латинські літери, цифри і підкреслення',
+  template_category_bad: 'Оберіть категорію',
+  template_language_required: 'Оберіть мову',
+  template_body_required: 'Напишіть текст шаблона',
+  template_body_long: 'Текст довший за 1024 символи',
+  template_vars_gap: 'Змінні мають іти підряд: {{1}}, {{2}}, {{3}}',
+  template_var_first: 'Текст не може починатися зі змінної',
+  template_var_last: 'Текст не може закінчуватися змінною',
+  template_examples_required: 'Заповніть приклади для всіх змінних',
+  waba_unknown: 'Не вдалося визначити акаунт WhatsApp Business',
+  template_rejected: 'Meta не прийняла шаблон'
+};
 
 function waCheck(id){
   var out = el('waCheckOut');

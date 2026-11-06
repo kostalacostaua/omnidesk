@@ -239,3 +239,89 @@ export function wabaFromDebug(reply: DebugTokenReply): string | null {
   }
   return null;
 }
+
+/** Заявка на новый шаблон — то, что человек заполнил в кабинете. */
+export interface WaTemplateDraft {
+  name: string;
+  language: string;
+  category: string;
+  body: string;
+  /** Примеры значений переменных, по порядку: {{1}}, {{2}}, ... */
+  examples: string[];
+}
+
+/** Что отправляем в Meta, если заявка прошла проверку. */
+export interface WaTemplatePayload {
+  name: string;
+  language: string;
+  category: string;
+  components: Array<Record<string, unknown>>;
+}
+
+/** Категории, которые WhatsApp принимает при создании. */
+export const WA_TEMPLATE_CATEGORIES = ['UTILITY', 'MARKETING', 'AUTHENTICATION'];
+
+/**
+ * Проверка заявки на шаблон — до похода в Meta, а не после.
+ *
+ * Причина простая: Meta отказывает кодом и фразой на английском, из
+ * которой нельзя понять, что именно поправить. «Invalid parameter» на
+ * имя с дефисом, на переменную в конце текста и на недостающий пример
+ * выглядит одинаково. Человек пробует наугад и бросает.
+ *
+ * Поэтому все правила, которые можно проверить у себя, проверяются
+ * здесь и называются своими словами.
+ *
+ * Правил четыре, и каждое — из отказов Meta, а не из осторожности:
+ *
+ * 1. Имя: только строчные латинские, цифры и подчёркивание. Пробел и
+ *    дефис — самая частая ошибка, потому что в WhatsApp Manager поле
+ *    выглядит как обычное название.
+ * 2. Переменные нумеруются подряд с единицы. Дырка ({{1}} и {{3}})
+ *    отклоняется, и это не придирка: подстановка идёт по порядку, и
+ *    пропущенный номер сдвинул бы все значения.
+ * 3. Текст не начинается и не кончается переменной. Правило WhatsApp:
+ *    шаблон, состоящий из одной подстановки, неотличим от спама.
+ * 4. У каждой переменной есть пример. Без них Meta не берёт шаблон на
+ *    проверку вовсе — ей нечего показать модератору.
+ */
+export function buildTemplate(draft: WaTemplateDraft): WaTemplatePayload {
+  const name = (draft.name ?? '').trim().toLowerCase();
+  if (!name) throw new Error('template_name_required');
+  if (!/^[a-z0-9_]{1,512}$/.test(name)) throw new Error('template_name_bad');
+
+  const category = (draft.category ?? '').trim().toUpperCase();
+  if (!WA_TEMPLATE_CATEGORIES.includes(category)) throw new Error('template_category_bad');
+
+  const language = (draft.language ?? '').trim();
+  if (!language) throw new Error('template_language_required');
+
+  const body = (draft.body ?? '').trim();
+  if (!body) throw new Error('template_body_required');
+  if (body.length > 1024) throw new Error('template_body_long');
+
+  const found = [...body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
+  const numbers = [...new Set(found)].sort((a, b) => a - b);
+  for (let i = 0; i < numbers.length; i += 1) {
+    if (numbers[i] !== i + 1) throw new Error('template_vars_gap');
+  }
+
+  if (numbers.length) {
+    if (/^\s*\{\{\s*\d+\s*\}\}/.test(body)) throw new Error('template_var_first');
+    if (/\{\{\s*\d+\s*\}\}\s*$/.test(body)) throw new Error('template_var_last');
+  }
+
+  const examples = (draft.examples ?? []).map((e) => String(e ?? '').trim());
+  if (examples.length < numbers.length || examples.slice(0, numbers.length).some((e) => !e)) {
+    throw new Error('template_examples_required');
+  }
+
+  const bodyComponent: Record<string, unknown> = { type: 'BODY', text: body };
+  // Примеры кладутся массивом в массиве: Meta ждёт список наборов
+  // значений, а не один набор. Набор у нас всегда один.
+  if (numbers.length) {
+    bodyComponent['example'] = { body_text: [examples.slice(0, numbers.length)] };
+  }
+
+  return { name, language, category, components: [bodyComponent] };
+}

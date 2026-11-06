@@ -23,6 +23,7 @@ import {
   mailLang,
   tenantBlock,
   parseTemplates,
+  buildTemplate,
   folderNames,
   groupByFolder,
   replyFolder,
@@ -951,51 +952,68 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
     },
   );
 
+  /**
+   * Канал WhatsApp вместе с аккаунтом, которому принадлежат шаблоны.
+   *
+   * Шаблоны живут не у номера, а у аккаунта WhatsApp Business, и его
+   * идентификатор спрашиваем у самого номера — один раз, дальше он
+   * лежит в канале. Вынесено в общее место, потому что нужно и списку,
+   * и созданию: разойдись эти два куска, и создавать шаблоны начали бы
+   * в чужом аккаунте.
+   */
+  async function waAccount(
+    tenantId: string,
+    channelId: string,
+  ): Promise<{ creds: { pageId: string; pageToken: string }; wabaId: string } | null> {
+    const channel = await withTenant(pool, tenantId, async (db) => {
+      const { rows } = await db.query<{ credentials_enc: Buffer; meta: Record<string, unknown> }>(
+        `SELECT credentials_enc, meta FROM channels
+          WHERE id = $1 AND type = 'whatsapp' LIMIT 1`,
+        [channelId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!channel) return null;
+
+    const creds = decryptJson<{ pageId: string; pageToken: string }>(
+      masterKey,
+      tenantId,
+      channel.credentials_enc,
+    );
+
+    let wabaId = String(channel.meta?.['wabaId'] ?? '');
+    if (!wabaId) {
+      try {
+        const info = await graphGet<{ whatsapp_business_account?: { id?: string } }>(
+          creds.pageId,
+          { access_token: creds.pageToken, fields: 'whatsapp_business_account' },
+        );
+        wabaId = info.whatsapp_business_account?.id ?? '';
+        if (wabaId) {
+          await withTenant(pool, tenantId, async (db) => {
+            await db.query(
+              `UPDATE channels SET meta = meta || jsonb_build_object('wabaId', $2::text)
+                WHERE id = $1`,
+              [channelId, wabaId],
+            );
+          });
+        }
+      } catch {
+        wabaId = '';
+      }
+    }
+    return { creds, wabaId };
+  }
+
   app.get<{ Params: { id: string } }>(
     '/channels/:id/whatsapp-templates',
     async (req, reply) => {
       const auth = requireAuth(req);
       if (!auth) return reply.code(401).send(auth401);
 
-      const channel = await withTenant(pool, auth.tenantId, async (db) => {
-        const { rows } = await db.query<{ credentials_enc: Buffer; meta: Record<string, unknown> }>(
-          `SELECT credentials_enc, meta FROM channels
-            WHERE id = $1 AND type = 'whatsapp' LIMIT 1`,
-          [req.params.id],
-        );
-        return rows[0] ?? null;
-      });
-      if (!channel) return reply.code(404).send({ error: 'not_found' });
-
-      const creds = decryptJson<{ pageId: string; pageToken: string }>(
-        masterKey,
-        auth.tenantId,
-        channel.credentials_enc,
-      );
-
-      // Шаблоны принадлежат не номеру, а аккаунту WhatsApp Business.
-      // Его идентификатор спрашиваем у самого номера.
-      let wabaId = String(channel.meta?.['wabaId'] ?? '');
-      if (!wabaId) {
-        try {
-          const info = await graphGet<{ whatsapp_business_account?: { id?: string } }>(
-            creds.pageId,
-            { access_token: creds.pageToken, fields: 'whatsapp_business_account' },
-          );
-          wabaId = info.whatsapp_business_account?.id ?? '';
-          if (wabaId) {
-            await withTenant(pool, auth.tenantId, async (db) => {
-              await db.query(
-                `UPDATE channels SET meta = meta || jsonb_build_object('wabaId', $2::text)
-                  WHERE id = $1`,
-                [req.params.id, wabaId],
-              );
-            });
-          }
-        } catch {
-          wabaId = '';
-        }
-      }
+      const found = await waAccount(auth.tenantId, req.params.id);
+      if (!found) return reply.code(404).send({ error: 'not_found' });
+      const { creds, wabaId } = found;
       if (!wabaId) return { templates: [], detail: 'Не вдалося визначити акаунт WhatsApp Business' };
 
       try {
@@ -1012,6 +1030,81 @@ export function registerSettings(app: FastifyInstance, deps: SettingsDeps): void
       }
     },
   );
+
+  /**
+   * Создать шаблон WhatsApp.
+   *
+   * До сих пор мы отправляли человека в WhatsApp Manager — чужой
+   * кабинет, другой язык, своя логика. А шаблон нужен ровно тогда, когда
+   * окно закрылось и ответить нечем: человек упирается в это в нашем
+   * интерфейсе и уходит решать задачу в другой.
+   *
+   * Проверки делаются до похода в Meta. Причина в том, как Meta
+   * отказывает: «Invalid parameter» приходит и на дефис в имени, и на
+   * переменную в конце текста, и на недостающий пример. Человек
+   * пробует наугад и бросает. Поэтому всё, что можно назвать своими
+   * словами, называется здесь.
+   *
+   * Шаблон уходит на модерацию, а не становится рабочим: решает Meta, и
+   * обещать одобрение мы не вправе. Возвращаем статус, как он пришёл.
+   */
+  app.post<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      category?: string;
+      language?: string;
+      body?: string;
+      examples?: string[];
+    };
+  }>('/channels/:id/whatsapp-templates', async (req, reply) => {
+    const auth = requireAuth(req);
+    if (!auth) return reply.code(401).send(auth401);
+
+    const found = await waAccount(auth.tenantId, req.params.id);
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    const { creds, wabaId } = found;
+    if (!wabaId) return reply.code(409).send({ error: 'waba_unknown' });
+
+    let payload;
+    try {
+      payload = buildTemplate({
+        name: String(req.body?.name ?? ''),
+        language: String(req.body?.language ?? ''),
+        category: String(req.body?.category ?? ''),
+        body: String(req.body?.body ?? ''),
+        examples: Array.isArray(req.body?.examples) ? req.body.examples.map(String) : [],
+      });
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'template_bad' });
+    }
+
+    try {
+      const created = await graphPost<{ id?: string; status?: string; category?: string }>(
+        `${wabaId}/message_templates`,
+        { access_token: creds.pageToken },
+        payload,
+      );
+      app.log.info(
+        { channelId: req.params.id, name: payload.name, status: created.status },
+        'Шаблон WhatsApp подан на проверку',
+      );
+      return {
+        id: created.id ?? null,
+        name: payload.name,
+        // Meta умеет менять категорию на свою: утилитарный текст с
+        // рекламным оттенком она переводит в MARKETING сама. Врать об
+        // этом нельзя — от категории зависит, уйдёт ли сообщение.
+        category: (created.category ?? payload.category).toUpperCase(),
+        status: (created.status ?? 'PENDING').toUpperCase(),
+      };
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'template_rejected',
+        detail: err instanceof Error ? err.message : 'Meta не прийняла шаблон',
+      });
+    }
+  });
 
   /**
    * Чат на сайте.
