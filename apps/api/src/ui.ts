@@ -994,6 +994,14 @@ export const INBOX_HTML = `<!DOCTYPE html>
     padding:20px 22px;display:flex;flex-direction:column;gap:6px}
   .numbox .l{order:1;margin:0;font-size:13px;font-weight:500;color:var(--t2)}
   .numbox .n{order:2;font-size:36px;font-weight:700;letter-spacing:-.03em;line-height:1.05}
+  /* Сравнение с прошлым периодом стоит под числом, а не рядом: рядом
+     оно читается как часть самого числа. Цвет говорит «лучше или
+     хуже», а не «больше или меньше»: у времени ожидания рост — это
+     плохо, и зелёная стрелка вверх здесь соврала бы. */
+  .numbox .dlt{order:3;font-size:12px;font-weight:600;line-height:1}
+  .numbox .dlt.up{color:var(--good)}
+  .numbox .dlt.down{color:var(--crit)}
+  .numbox .dlt.new{color:var(--t3);font-weight:500}
   /* Внутри раздела числа мельче: там они поясняют, а не объявляют. */
   /* Числа внутри раздела — одна рамка с чертами между, а не четыре
      карточки в карточке. Это одна мысль, разложенная на четыре
@@ -6830,6 +6838,39 @@ function num(value, label){
 }
 
 /**
+ * То же число, но со сравнением с прошлым периодом.
+ *
+ * «Сто двадцять звернень» — это много или мало? Вопрос всегда
+ * сравнительный, и пока сравнивать не с чем, человек сравнивает с тем,
+ * что помнит, а помнит он неправду.
+ *
+ * Деление на ноль не считаем вовсе. Рост с нуля до пяти — это не
+ * «+∞%», а «было пусто»; процент здесь не информация, а мусор, который
+ * выглядит поломкой отчёта.
+ *
+ * Хорошо и плохо — разное у разных величин: больше диалогов это обычно
+ * хорошо, больше времени ожидания — всегда плохо. Поэтому направление
+ * задаётся снаружи, а не угадывается по знаку.
+ */
+function numD(value, label, now, before, lowerIsBetter){
+  var badge = '';
+  var a = Number(now || 0), b = Number(before || 0);
+  if (b > 0 && a !== b){
+    var diff = Math.round(((a - b) / b) * 100);
+    if (diff !== 0){
+      var up = diff > 0;
+      var good = lowerIsBetter ? !up : up;
+      badge = '<div class="dlt ' + (good ? 'up' : 'down') + '">' +
+        (up ? '+' : '') + diff + '%</div>';
+    }
+  } else if (!b && a > 0){
+    badge = L('<div class="dlt new">було порожньо</div>');
+  }
+  return '<div class="numbox"><div class="n">' + esc(value == null ? '—' : value) + '</div>' +
+    '<div class="l">' + esc(label) + '</div>' + badge + '</div>';
+}
+
+/**
  * Правка на месте: строка превращается в поле с кнопками, Enter
  * сохраняет, Esc возвращает как было. Отдельная форма здесь была бы
  * длиннее самой правки.
@@ -10506,19 +10547,52 @@ function vizShare(rows, label, value, total){
 function rpOverview(d, t){
   var days = d.byDay || [];
   var msgs = (t.messagesIn || 0) + (t.messagesOut || 0);
+  var p = d.prev || {};
+  var f = d.faces || {};
+  var top = d.topContacts || [];
 
   return '<div class="nums">' +
-    num(t.conversations, L('нових діалогів')) +
-    num(t.messagesIn, L('вхідних')) +
-    num(t.messagesOut, L('вихідних')) +
+    numD(t.conversations, L('нових діалогів'), t.conversations, p.conversations) +
+    numD(t.messagesIn, L('вхідних'), t.messagesIn, p.messagesIn) +
+    numD(t.messagesOut, L('вихідних'), t.messagesOut, p.messagesOut) +
     num(t.conversations ? (msgs / t.conversations).toFixed(1) : '—', L('повідомлень на діалог')) +
     '</div>' +
+    L('<div class="hint">Відсоток — проти такого ж періоду перед цим: тиждень проти тижня, ') +
+    L('три дні проти трьох днів.</div>') +
+
+    L('<div class="pg-sec"><h3>Люди</h3><div class="card">') +
+    '<div class="nums">' +
+    num(f.total, L('писали за період')) +
+    num(f.fresh, L('нових')) +
+    num(f.known, L('уже зверталися')) +
+    num(pct(f.fresh, f.total), L('частка нових')) +
+    '</div>' +
+    L('<div class="hint">Новим вважається той, чию картку завели всередині періоду. ') +
+    L('Сто двадцять звернень — це можуть бути сто двадцять перших розмов, ') +
+    L('а можуть бути двадцять людей, які написали по шість разів: для рішень це різні тижні.</div>') +
+    '</div></div>' +
+
+    (top.length
+      ? L('<div class="pg-sec"><h3>Хто займає найбільше часу</h3><div class="card">') +
+        '<div class="mtxwrap"><table class="mtx"><thead><tr>' +
+        L('<th>Клієнт</th><th>Вхідних</th><th>Відповідей</th><th>Діалогів</th>') +
+        '</tr></thead><tbody>' +
+        top.map(function(c){
+          return '<tr><td>' + esc(c.name || L('Без імені')) + '</td>' +
+            '<td>' + c.messagesIn + '</td><td>' + c.replies + '</td>' +
+            '<td>' + c.conversations + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div>' +
+        L('<div class="hint">Питання «чому зміна не встигає» майже ніколи не про зміну. ') +
+        L('Частіше це троє клієнтів, кожен з яких пише по тридцять разів.</div>') +
+        '</div></div>'
+      : '') +
 
     L('<div class="pg-sec"><h3>Час першої відповіді</h3><div class="card">') +
     '<div class="nums">' +
-    num(dur(t.medianWait), L('медіана')) +
+    numD(dur(t.medianWait), L('медіана'), t.medianWait, p.medianWait, true) +
     num(dur(t.avgWait), L('середнє')) +
-    num(dur(t.p90Wait), L('9 з 10 швидше ніж')) +
+    numD(dur(t.p90Wait), L('9 з 10 швидше ніж'), t.p90Wait, p.p90Wait, true) +
     num(pct(t.repliedConversations, t.conversations), L('діалогів з відповіддю')) +
     '</div>' +
     L('<div class="hint">Медіана — про звичайний день: половина клієнтів дочекалась швидше. ') +
@@ -10527,7 +10601,7 @@ function rpOverview(d, t){
 
     L('<div class="pg-sec"><h3>Закриття</h3><div class="card">') +
     '<div class="nums">' +
-    num(t.resolved, L('закрито')) +
+    numD(t.resolved, L('закрито'), t.resolved, p.resolved) +
     num(dur((d.resolve || {}).median), L('медіана до закриття')) +
     num(dur((d.resolve || {}).avg), L('середнє до закриття')) +
     num(pct(t.resolved, t.conversations), L('від нових')) +

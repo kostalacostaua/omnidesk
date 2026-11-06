@@ -121,9 +121,24 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
      */
     const days = workingDays(from, to, tenant.wh);
 
-    const data = await withTenant(pool, auth.tenantId, async (db) => {
-      const { rows: totals } = await db.query(
-        `SELECT
+    /*
+     * Тот же период, сдвинутый назад на свою длину.
+     *
+     * Без него отчёт отвечает «сто двадцать обращений» и замолкает.
+     * Сто двадцать — это много или мало? Вопрос всегда сравнительный, и
+     * пока сравнивать не с чем, человек сравнивает с тем, что помнит, а
+     * помнит он неправду.
+     *
+     * Сдвиг ровно на длину периода, а не на календарный месяц: неделя
+     * сравнивается с неделей, а три дня — с тремя днями. Иначе падение
+     * вдвое означает только то, что в одном окне дней меньше.
+     */
+    const span = to.getTime() - from.getTime();
+    const prevParams = [...params];
+    prevParams[1] = new Date(from.getTime() - span).toISOString();
+    prevParams[2] = from.toISOString();
+
+    const totalsSql = `SELECT
            count(*) FILTER (WHERE e.type = 'conversation.new')          AS conversations,
            count(*) FILTER (WHERE e.type = 'message.in')                AS msg_in,
            count(*) FILTER (WHERE e.type = 'message.out')               AS msg_out,
@@ -144,9 +159,11 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
            count(*) FILTER (WHERE e.type = 'reply'
                               AND ${wait} > ${firstTarget})             AS reply_late
          FROM events e
-         WHERE ${sql}`,
-        params,
-      );
+         WHERE ${sql}`;
+
+    const data = await withTenant(pool, auth.tenantId, async (db) => {
+      const { rows: totals } = await db.query(totalsSql, params);
+      const { rows: prevTotals } = await db.query(totalsSql, prevParams);
 
       const { rows: byChannel } = await db.query(
         `SELECT c.id, c.display_name AS name, c.type,
@@ -281,8 +298,62 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         in_time_percent: number;
       }>(`SELECT user_id, replies_per_day, resolved_per_day, in_time_percent FROM kpi_goals`);
 
+      /*
+       * Новые и вернувшиеся.
+       *
+       * «Сто двадцать обращений» ничего не говорит о том, растёт ли
+       * база: это могут быть сто двадцать первых разговоров, а могут —
+       * двадцать человек, написавших по шесть раз. Для решений это
+       * разные недели.
+       *
+       * Новым считается тот, чья карточка заведена внутри периода.
+       * Не «первый разговор внутри периода»: контакт мог прийти из CRM
+       * задолго до того, как написал, и называть его новым — врать о
+       * происхождении.
+       */
+      const { rows: faces } = await db.query(
+        `WITH touched AS (
+           SELECT DISTINCT c.contact_id, ct.created_at
+             FROM events e
+             JOIN conversations c ON c.id = e.conversation_id
+             JOIN contacts ct     ON ct.id = c.contact_id
+            WHERE ${sql}
+         )
+         SELECT count(*) FILTER (WHERE created_at >= $2::timestamptz) AS fresh,
+                count(*) FILTER (WHERE created_at <  $2::timestamptz) AS known,
+                count(*)                                              AS total
+           FROM touched`,
+        params,
+      );
+
+      /*
+       * Кто занимает больше всего времени.
+       *
+       * Вопрос «почему смена не успевает» почти никогда не про смену.
+       * Чаще это три клиента, каждый из которых пишет по тридцать раз,
+       * и увидеть их можно только поимённо. Десяти хватает: список
+       * нужен, чтобы открыть и посмотреть, а не чтобы изучать.
+       */
+      const { rows: topContacts } = await db.query(
+        `SELECT ct.id,
+                coalesce(nullif(ct.display_name, ''), ct.phone_e164, ct.email::text) AS name,
+                count(*) FILTER (WHERE e.type = 'conversation.new') AS conversations,
+                count(*) FILTER (WHERE e.type = 'message.in')       AS msg_in,
+                count(*) FILTER (WHERE e.type = 'reply')            AS replies
+           FROM events e
+           JOIN conversations c ON c.id = e.conversation_id
+           JOIN contacts ct     ON ct.id = c.contact_id
+          WHERE ${sql}
+          GROUP BY ct.id, ct.display_name, ct.phone_e164, ct.email
+         HAVING count(*) FILTER (WHERE e.type = 'message.in') > 0
+          ORDER BY count(*) FILTER (WHERE e.type = 'message.in') DESC
+          LIMIT 10`,
+        params,
+      );
+
       return {
         totals: totals[0] ?? {},
+        prevTotals: prevTotals[0] ?? {},
         byChannel,
         byUser,
         byDay,
@@ -290,6 +361,8 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         heatRows,
         resolve: resolveRows[0] ?? {},
         goals,
+        faces: faces[0] ?? {},
+        topContacts,
       };
     });
 
@@ -317,6 +390,37 @@ export function registerAnalytics(app: FastifyInstance, deps: AnalyticsDeps): vo
         replyInTime: Number(data.totals['reply_in_time'] ?? 0),
         replyLate: Number(data.totals['reply_late'] ?? 0),
       },
+      /*
+       * Прошлый период отдаётся сырыми числами, без процентов.
+       *
+       * Процент считает интерфейс, и это не лень: доля от нуля не
+       * существует, а «рост на ∞%» в отчёте выглядит поломкой. Решать,
+       * что показать вместо неё, должен тот, кто рисует, — на сервере
+       * у этого решения нет места.
+       */
+      prev: {
+        conversations: Number(data.prevTotals['conversations'] ?? 0),
+        messagesIn: Number(data.prevTotals['msg_in'] ?? 0),
+        messagesOut: Number(data.prevTotals['msg_out'] ?? 0),
+        replies: Number(data.prevTotals['replies'] ?? 0),
+        resolved: Number(data.prevTotals['resolved'] ?? 0),
+        medianWait: num(data.prevTotals['median_wait']),
+        p90Wait: num(data.prevTotals['p90_wait']),
+        replyInTime: Number(data.prevTotals['reply_in_time'] ?? 0),
+        replyLate: Number(data.prevTotals['reply_late'] ?? 0),
+      },
+      faces: {
+        fresh: Number(data.faces['fresh'] ?? 0),
+        known: Number(data.faces['known'] ?? 0),
+        total: Number(data.faces['total'] ?? 0),
+      },
+      topContacts: data.topContacts.map((r) => ({
+        id: r['id'],
+        name: r['name'],
+        conversations: Number(r['conversations'] ?? 0),
+        messagesIn: Number(r['msg_in'] ?? 0),
+        replies: Number(r['replies'] ?? 0),
+      })),
       byChannel: data.byChannel.map((r) => ({
         id: r['id'],
         name: r['name'],
