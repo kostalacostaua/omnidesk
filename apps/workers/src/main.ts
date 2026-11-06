@@ -45,6 +45,7 @@ import {
   type CommentEntry,
   graphGet,
   graphPost,
+  fetchSocialPost,
   needsHumanAgentTag,
   MetaApiError,
   type MetaChannelCredentials,
@@ -1336,6 +1337,82 @@ async function handleCommentEntry(entry: CommentEntry): Promise<void> {
       await announceNew(m, conversationId);
     }
   }
+
+  // Пост забирается после сохранения и по разу на пост, а не на
+  // комментарий: под одной записью их приходит сотня, и сотня запросов
+  // в Graph — это отказ по лимитам ровно в тот момент, когда пост
+  // выстрелил.
+  if (creds?.pageToken) {
+    const posts = new Set(
+      messages.map((m) => m.content.comment?.postId).filter((p): p is string => !!p),
+    );
+    for (const postId of posts) {
+      await rememberPost(channel, creds.pageToken, entry.channelType, postId);
+    }
+  }
+}
+
+/**
+ * Запомнить пост, под которым идёт разговор.
+ *
+ * Идём в Graph только если текста ещё нет. Это и есть вся защита от
+ * лимитов: первый комментарий под постом стоит один запрос, следующие
+ * девяносто девять — ни одного.
+ *
+ * Отказ не роняет приём комментария и не повторяется: комментарий уже
+ * сохранён и важнее поста. Пост удалён, маркер потерял права на
+ * страницу, у записи закрыт доступ — во всех случаях оператор просто
+ * увидит ветку без шапки, как видел до сих пор.
+ */
+async function rememberPost(
+  channel: { id: string; tenant_id: string },
+  token: string,
+  channelType: string,
+  postId: string,
+): Promise<void> {
+  const known = await withTenant(pool, channel.tenant_id, async (db) => {
+    const { rowCount } = await db.query(
+      `SELECT 1 FROM social_posts
+        WHERE channel_id = $1 AND post_id = $2 LIMIT 1`,
+      [channel.id, postId],
+    );
+    return (rowCount ?? 0) > 0;
+  });
+  if (known) return;
+
+  let post;
+  try {
+    post = await fetchSocialPost(
+      channelType === 'instagram_comments' ? 'instagram' : 'facebook',
+      postId,
+      token,
+    );
+  } catch (err) {
+    log('debug', 'Пост не прочитан', {
+      channelId: channel.id,
+      postId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  await withTenant(pool, channel.tenant_id, async (db) => {
+    await db.query(
+      `INSERT INTO social_posts (tenant_id, channel_id, post_id, text, permalink, picture, posted_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (tenant_id, channel_id, post_id) DO NOTHING`,
+      [
+        channel.tenant_id,
+        channel.id,
+        postId,
+        post.text ?? null,
+        post.permalink ?? null,
+        post.picture ?? null,
+        post.postedAt ?? null,
+      ],
+    );
+  });
+  log('info', 'Пост запомнен', { channelId: channel.id, postId });
 }
 
 /**

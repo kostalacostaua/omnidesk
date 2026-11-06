@@ -1118,6 +1118,19 @@ export const INBOX_HTML = `<!DOCTYPE html>
   .dsep{align-self:center;font-size:12px;font-weight:500;color:var(--t3);
     margin:12px 0 4px;flex:none}
   .dsep:first-child{margin-top:0}
+  /* Пост над веткой комментариев. Прижат к ширине ленты и не похож на
+     реплику: без пузыря, без стороны — это не чья-то фраза, а то, на
+     что все отвечают. Текст подрезан: под длинным постом обсуждение
+     начиналось бы на втором экране. */
+  .postcard{align-self:stretch;display:flex;gap:10px;flex:none;margin:0 0 10px;
+    padding:10px;border:1px solid var(--b1);border-radius:12px;background:var(--s2)}
+  .postcard img{width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none}
+  .postcard .pc{min-width:0;display:flex;flex-direction:column;gap:3px}
+  .postcard .pch{font-size:11px;font-weight:600;color:var(--t3);
+    text-transform:uppercase;letter-spacing:.03em}
+  .postcard .pct{font-size:13px;color:var(--t1);white-space:pre-wrap;
+    overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+  .postcard a{font-size:12px;color:var(--a1)}
   .mwrap{max-width:min(460px,76%)}
   /* Серия сообщений подряд: угол к отправителю поджат не только снизу,
      но и сверху у всех, кроме первого. Так три реплики подряд читаются
@@ -3011,6 +3024,33 @@ function loadThread(){
         '</div>' +
       '</div>';
     }).join('');
+
+    /* Шапка ветки: пост, под которым идёт разговор.
+       Стоит над лентой, а не в каждом сообщении: пост один на весь
+       разговор, и повторять его у каждой реплики — значит читать одно
+       и то же десять раз. Картинка слева, текст справа, ссылка на
+       запись — для случая, когда надо посмотреть всё обсуждение
+       целиком. Текста может не быть вовсе: под картинкой без подписи
+       комментируют так же охотно, и тогда показываем, что это пост
+       без текста, а не пустое место. */
+    if (d.post){
+      var p = d.post;
+      var pTxt = (p.text || '').trim();
+      html =
+        '<div class="postcard">' +
+          (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : '') +
+          '<div class="pc">' +
+            '<div class="pch">' + L('Пост, під яким іде розмова') +
+              (p.postedAt ? ' · ' + esc(dayLabel(p.postedAt)) : '') + '</div>' +
+            '<div class="pct">' +
+              (pTxt ? esc(pTxt) : '<i>' + L('Пост без тексту') + '</i>') + '</div>' +
+            (p.permalink
+              ? '<a href="' + esc(p.permalink) +
+                L('" target="_blank" rel="noopener">Відкрити запис</a>')
+              : '') +
+          '</div>' +
+        '</div>' + html;
+    }
 
     if (html === lastThread){ renderComposer(); return }
     lastThread = html;

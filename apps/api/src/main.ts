@@ -1551,7 +1551,37 @@ app.get<{ Params: { id: string } }>('/conversations/:id/messages', async (req, r
     return rows;
   });
 
-  return { messages: rows };
+  /*
+   * Пост, под которым идёт разговор.
+   *
+   * Берётся из того, что уже прочитано, а не отдельным запросом в базу
+   * наугад: если в ленте нет ни одного комментария, то и поста быть не
+   * может, и лишнего обращения тоже.
+   *
+   * Диалог ведётся под одним постом, но берём последний упомянутый, а
+   * не первый: ветка живёт долго, и если пост всё-таки сменился, шапка
+   * должна говорить про то, на что отвечают сейчас.
+   */
+  const postId = [...rows]
+    .reverse()
+    .map((r) => (r as { content?: { comment?: { postId?: string } } }).content?.comment?.postId)
+    .find((p): p is string => !!p);
+
+  const post = postId
+    ? await withTenant(pool, auth.tenantId, async (db) => {
+        const { rows: found } = await db.query(
+          `SELECT p.post_id AS "postId", p.text, p.permalink, p.picture, p.posted_at AS "postedAt"
+             FROM social_posts p
+             JOIN conversations c ON c.id = $1 AND c.channel_id = p.channel_id
+            WHERE p.post_id = $2
+            LIMIT 1`,
+          [req.params.id, postId],
+        );
+        return found[0] ?? null;
+      })
+    : null;
+
+  return post ? { messages: rows, post } : { messages: rows };
 });
 
 /**

@@ -160,3 +160,74 @@ export const META_LOGIN_SCOPES = [
   'pages_manage_engagement',
   'instagram_manage_comments',
 ];
+
+/**
+ * Пост, под которым идёт разговор.
+ *
+ * Комментарий сам по себе не читается: «а дешевле бывает?» — это ответ
+ * на что-то, и без этого чего-то оператор идёт искать пост глазами.
+ * Ссылка у нас была и раньше, но ссылка уводит из кабинета, а вопрос
+ * стоит здесь.
+ */
+export interface SocialPost {
+  postId: string;
+  text?: string;
+  permalink?: string;
+  picture?: string;
+  postedAt?: Date;
+}
+
+/**
+ * Забрать текст поста у Meta.
+ *
+ * Поля у Facebook и Instagram называются по-разному и не пересекаются
+ * ни одним именем: message против caption, permalink_url против
+ * permalink, created_time против timestamp. Поэтому две ветки, а не
+ * один список полей: запрос с чужими полями Meta отклоняет целиком, и
+ * выглядит это как «поста нет».
+ *
+ * Пустой текст — не ошибка: под картинкой без подписи комментируют так
+ * же охотно. Поэтому возвращаем объект, а не null, даже когда текста
+ * нет: ссылка и картинка сами по себе уже говорят, о чём речь.
+ *
+ * Ошибки не глотаем. «Пост удалён» и «маркер потерял права на страницу»
+ * для вызывающего — разные беды, и различить их можно только по коду.
+ */
+export async function fetchSocialPost(
+  kind: 'facebook' | 'instagram',
+  postId: string,
+  token: string,
+  opts: GraphOptions = {},
+): Promise<SocialPost> {
+  const fields =
+    kind === 'instagram'
+      ? 'caption,permalink,media_url,thumbnail_url,timestamp'
+      : 'message,permalink_url,created_time,full_picture';
+
+  const raw = await graphGet<Record<string, unknown>>(
+    postId,
+    { access_token: token, fields },
+    opts,
+  );
+
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && v ? v : undefined;
+
+  const when = str(kind === 'instagram' ? raw['timestamp'] : raw['created_time']);
+  const at = when ? new Date(when) : null;
+
+  const post: SocialPost = { postId };
+  const text = str(kind === 'instagram' ? raw['caption'] : raw['message']);
+  if (text) post.text = text;
+  const link = str(kind === 'instagram' ? raw['permalink'] : raw['permalink_url']);
+  if (link) post.permalink = link;
+  // У видео в Instagram media_url пустой, а картинка лежит отдельно.
+  const pic =
+    kind === 'instagram'
+      ? str(raw['media_url']) ?? str(raw['thumbnail_url'])
+      : str(raw['full_picture']);
+  if (pic) post.picture = pic;
+  if (at && !Number.isNaN(at.getTime())) post.postedAt = at;
+
+  return post;
+}
